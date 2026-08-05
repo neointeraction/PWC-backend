@@ -1,0 +1,585 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  COUNSELLOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+model User {
+  id                 String   @id @default(cuid())
+  email              String   @unique
+  passwordHash       String
+  role               UserRole
+  firstName          String
+  lastName           String
+  isActive           Boolean  @default(true)
+  mustChangePassword Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  student       Student?
+  counsellor    Counsellor?
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+// Stores hashed refresh tokens so individual sessions can be revoked.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// Tenant (educational institution). Onboarded by Super Admin.
+model Institute {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  address       String
+  contactNumber String   @unique
+  primaryEmail  String   @unique
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  classes     InstituteClass[]
+  counsellors Counsellor[]
+  projects    Project[]
+
+  @@map("institutes")
+}
+
+model InstituteClass {
+  id          String    @id @default(cuid())
+  name        String
+  instituteId String
+  institute   Institute @relation(fields: [instituteId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  divisions InstituteDivision[]
+
+  @@unique([instituteId, name])
+  @@index([instituteId])
+  @@map("institute_classes")
+}
+
+model InstituteDivision {
+  id        String         @id @default(cuid())
+  name      String
+  classId   String
+  class     InstituteClass @relation(fields: [classId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  students Student[]
+
+  @@unique([classId, name])
+  @@index([classId])
+  @@map("institute_divisions")
+}
+
+enum ProjectStatus {
+  ACTIVE
+  CLOSED
+}
+
+// A counselling cycle/cohort run for an institute (e.g. "2026 Batch, Class 9-10").
+// Workflow status, forms, assessments, sessions and reports are all scoped to a Project;
+// closing a project is the data-purge boundary.
+model Project {
+  id          String        @id @default(cuid())
+  instituteId String
+  institute   Institute     @relation(fields: [instituteId], references: [id], onDelete: Cascade)
+  name        String
+  fromDate    DateTime
+  toDate      DateTime
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  students                 Student[]
+  counsellors              ProjectCounsellor[]
+  counsellorAvailabilities CounsellorAvailability[]
+
+  @@unique([instituteId, name])
+  @@index([instituteId])
+  @@map("projects")
+}
+
+// Counsellor belongs to one institute; assigned to specific projects via ProjectCounsellor.
+model Counsellor {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  counsellorCode String    @unique // admin-generated human-readable id, e.g. "CN1"
+  instituteId    String
+  institute      Institute @relation(fields: [instituteId], references: [id])
+  mobile         String    @unique
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  availability     CounsellorAvailability[]
+  projects         ProjectCounsellor[]
+  studentsAssigned Session[]
+
+  @@index([instituteId])
+  @@map("counsellors")
+}
+
+model ProjectCounsellor {
+  id           String     @id @default(cuid())
+  projectId    String
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  counsellorId String
+  counsellor   Counsellor @relation(fields: [counsellorId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([projectId, counsellorId])
+  @@index([counsellorId])
+  @@map("project_counsellors")
+}
+
+enum Weekday {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+  SAT
+  SUN
+}
+
+// Recurring weekly availability window. Scoped per-project: the same counsellor can have
+// different hours on different projects.
+model CounsellorAvailability {
+  id           String     @id @default(cuid())
+  counsellorId String
+  counsellor   Counsellor @relation(fields: [counsellorId], references: [id], onDelete: Cascade)
+  projectId    String
+  project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  daysOfWeek   Weekday[]
+  startTime    String // "HH:mm", 24h
+  endTime      String // "HH:mm", 24h
+  createdAt    DateTime   @default(now())
+
+  @@index([counsellorId])
+  @@index([projectId])
+  @@map("counsellor_availability")
+}
+
+enum WorkflowStatus {
+  DRAFT
+  PROFILE_COMPLETED
+  PRE_COUNSELLING_FORMS_SUBMITTED
+  ASSESSMENT_PENDING
+  ASSESSMENT_COMPLETED
+  SESSION_SCHEDULED
+  SESSION_1_COMPLETED
+  COUNSELLOR_FEEDBACK_REPORT
+  SESSION_2_COMPLETED
+  COUNSELLOR_FEEDBACK
+  STUDENT_PARENT_FEEDBACK
+  CLOSED
+}
+
+model Student {
+  id               String            @id @default(cuid())
+  userId           String            @unique
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentCode      String            @unique // admin-generated login id, e.g. "CB1"
+  projectId        String
+  project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  divisionId       String
+  division         InstituteDivision @relation(fields: [divisionId], references: [id])
+  mobile           String            @unique
+  whatsappNumber   String?
+  // Primary contact for parent communication (session links, pre-counselling/feedback
+  // links) — captured on the Student Profile Form, Section A.
+  parentMobile     String            @unique
+  parentEmail      String            @unique
+  // Student Profile Form, Section B/C — captured separately per parent.
+  fatherName       String
+  fatherOccupation String
+  fatherEmployer   String?
+  motherName       String
+  motherOccupation String
+  motherEmployer   String?
+  workflowStatus   WorkflowStatus    @default(DRAFT)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  sessions           Session[]
+  formSubmissions    FormSubmission[]
+  assessmentAttempts AssessmentAttempt[]
+  counsellorChart    CounsellorChart?
+  reports            Report[]
+
+  @@index([projectId])
+  @@index([divisionId])
+  @@map("students")
+}
+
+enum SessionNumber {
+  SESSION_1
+  SESSION_2
+}
+
+enum SessionStatus {
+  SCHEDULED
+  COMPLETED
+  RESCHEDULED
+  CANCELLED
+}
+
+enum CancellationReason {
+  STUDENT_UNAVAILABLE
+  COUNSELLOR_UNAVAILABLE
+  INSTITUTION_REQUEST
+  OTHER
+}
+
+// Session 1 is booked blind (student picks an open slot; counsellor is derived from the
+// slot owner). Session 2 must reuse the same counsellorId as Session 1 (enforced in service).
+model Session {
+  id                   String              @id @default(cuid())
+  studentId            String
+  student              Student             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  counsellorId         String
+  counsellor           Counsellor          @relation(fields: [counsellorId], references: [id])
+  sessionNumber        SessionNumber
+  scheduledDate        DateTime            @db.Date
+  startTime            String // "HH:mm"
+  endTime              String // "HH:mm"
+  status               SessionStatus       @default(SCHEDULED)
+  notes                String?
+  cancellationReason   CancellationReason?
+  cancellationNotes    String?
+  rescheduledFromDate  DateTime?           @db.Date
+  rescheduledFromStart String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@unique([studentId, sessionNumber])
+  @@unique([counsellorId, scheduledDate, startTime])
+  @@index([studentId])
+  @@index([counsellorId])
+  @@map("sessions")
+}
+
+enum AiResilienceGrade {
+  LOW
+  MEDIUM
+  HIGH
+  VERY_HIGH
+}
+
+enum CareerLibraryStatus {
+  DRAFT
+  ACTIVE
+}
+
+// Central, PWC-owned career library (default ~1,300 roles).
+model CareerLibraryEntry {
+  id                   String              @id @default(cuid())
+  cluster              String
+  industry             String
+  domain               String
+  jobRole              String
+  aiResilienceGrade    AiResilienceGrade
+  aiResilienceComment  String
+  oneLineDescription   String
+  topCompanies         String[]
+  salaryIndiaMin       Int
+  salaryIndiaMax       Int
+  salaryGlobalMin      Int
+  salaryGlobalMax      Int
+  minimumQualification String
+  entranceExams        String[]
+  certifications       String[]
+  topCourses           String[]
+  status               CareerLibraryStatus @default(ACTIVE)
+  createdBy            String // User id (admin/super admin)
+  updatedBy            String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  requests CareerLibraryRequest[]
+
+  @@index([cluster])
+  @@index([industry])
+  @@index([domain])
+  @@map("career_library_entries")
+}
+
+enum CareerRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Counsellor-submitted request to add an unlisted career; reviewed by Admin/Super Admin.
+model CareerLibraryRequest {
+  id                 String              @id @default(cuid())
+  requestedById      String // Counsellor id
+  jobTitle           String
+  suggestedCluster   String
+  suggestedIndustry  String
+  suggestedDomain    String?
+  oneLineDescription String
+  justification      String
+  referenceLinks     String[]
+  status             CareerRequestStatus @default(PENDING)
+  reviewedBy         String? // User id (admin/super admin)
+  reviewedAt         DateTime?
+  resultingEntryId   String?
+  resultingEntry     CareerLibraryEntry? @relation(fields: [resultingEntryId], references: [id])
+  createdAt          DateTime            @default(now())
+
+  @@index([requestedById])
+  @@index([status])
+  @@map("career_library_requests")
+}
+
+enum FormType {
+  STUDENT_PROFILE
+  PRE_COUNSELLING_STUDENT
+  PRE_COUNSELLING_PARENT
+  FEEDBACK_STUDENT
+  FEEDBACK_PARENT
+}
+
+enum SubmittedByRole {
+  STUDENT
+  PARENT
+}
+
+// Question bank content is not yet supplied by PWC; kept generic/JSON-driven so the
+// engine is shared across cohorts while content stays cohort-specific.
+model FormTemplate {
+  id        String   @id @default(cuid())
+  formType  FormType
+  cohort    String // e.g. "CLASS_9_10"
+  version   Int      @default(1)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  questions   FormQuestion[]
+  submissions FormSubmission[]
+
+  @@unique([formType, cohort, version])
+  @@map("form_templates")
+}
+
+enum QuestionType {
+  MCQ_SINGLE // radio group, single answer, optionally with an "Any Other" free-text option
+  MCQ_MULTI // checkbox group, multiple answers, optionally with an "Any Other" free-text option
+  SHORT_TEXT // single-line text input, e.g. "My favourite subject:"
+  OPEN_TEXT // multi-line textarea
+  NUMBER
+  SCALE // fixed 1-5 rating scale (effectiveness / clarity scales on feedback forms)
+  MATRIX // a table/grid question (e.g. per-subject marks, per-strength rating rows).
+  // `options` describes the grid shape; the submitted answer is a single Json object
+  // keyed by each sub-field's fieldKey rather than one row per cell.
+}
+
+// One row per "Q<n>" question as it appears on the source form (see docs/db-design.md
+// for the source HTML files). Matrix/table-style questions (e.g. the academic marks
+// table, the strengths rating grid) are kept as a single row with a structured
+// `options` shape rather than exploded per cell, so the form renders and reports as
+// the original numbered question.
+model FormQuestion {
+  id                String       @id @default(cuid())
+  formTemplateId    String
+  formTemplate      FormTemplate @relation(fields: [formTemplateId], references: [id], onDelete: Cascade)
+  order             Int
+  questionCode      String // e.g. "Q1", "sse_q1" — matches the source form's numbering
+  fieldKey          String // matches the source HTML's `name` attribute
+  sectionLabel      String? // e.g. "Section 1 — My Academic Record"
+  questionText      String
+  helpText          String?
+  questionType      QuestionType
+  options           Json? // MCQ: [{value,label}]; MATRIX: {fields:[{key,label,type}], rows:[{key,label}]}
+  allowOtherText    Boolean      @default(false)
+  otherTextFieldKey String?
+  isRequired        Boolean      @default(true)
+
+  answers FormAnswer[]
+
+  @@unique([formTemplateId, fieldKey])
+  @@unique([formTemplateId, order])
+  @@index([formTemplateId])
+  @@map("form_questions")
+}
+
+model FormSubmission {
+  id              String          @id @default(cuid())
+  studentId       String
+  student         Student         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  formTemplateId  String
+  formTemplate    FormTemplate    @relation(fields: [formTemplateId], references: [id])
+  submittedByRole SubmittedByRole
+  submittedAt     DateTime?
+  createdAt       DateTime        @default(now())
+
+  answers FormAnswer[]
+
+  @@unique([studentId, formTemplateId, submittedByRole])
+  @@index([studentId])
+  @@map("form_submissions")
+}
+
+model FormAnswer {
+  id           String         @id @default(cuid())
+  submissionId String
+  submission   FormSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     FormQuestion   @relation(fields: [questionId], references: [id])
+  answer       Json
+
+  @@unique([submissionId, questionId])
+  @@map("form_answers")
+}
+
+enum AssessmentSection {
+  RIASEC
+  BIG_FIVE
+  APTITUDE
+  COGNITIVE
+}
+
+enum AssessmentQuestionFormat {
+  LIKERT_5 // "Type A" agreement questions, 1 (Strongly Disagree) - 5 (Strongly Agree)
+  MCQ_SINGLE // "Type B" aptitude questions, single correct answer
+}
+
+enum AssessmentDifficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+// Single shared engine across cohorts; question bank content is cohort-specific.
+// Currently seeded for cohort "CLASS_9_10" from the supplied question bank
+// (RIASEC interest inventory, Big Five personality, Aptitude reasoning, Cognitive &
+// decision style) — PWC's full scoring/weighting logic for career-stream mapping is
+// still pending beyond the per-question weight/correctOption captured here.
+model AssessmentQuestion {
+  id            String                   @id @default(cuid())
+  cohort        String
+  section       AssessmentSection
+  order         Int
+  questionCode  String // e.g. "Q1"
+  fieldKey      String // matches the source HTML's `name` attribute
+  questionText  String
+  format        AssessmentQuestionFormat
+  options       Json? // MCQ_SINGLE only: [{value,label}]; null for LIKERT_5 (fixed 1-5 scale)
+  trait         String // e.g. "REALISTIC", "OPENNESS", "NUMERICAL"
+  traitCode     String? // e.g. "R1", "NR1"
+  difficulty    AssessmentDifficulty? // aptitude questions only
+  weight        Float                    @default(1)
+  correctOption String? // aptitude (MCQ_SINGLE) questions only
+  createdAt     DateTime                 @default(now())
+
+  answers AssessmentAnswer[]
+
+  @@unique([cohort, fieldKey])
+  @@unique([cohort, order])
+  @@index([cohort])
+  @@map("assessment_questions")
+}
+
+enum AssessmentAttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+}
+
+model AssessmentAttempt {
+  id          String                  @id @default(cuid())
+  studentId   String
+  student     Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  status      AssessmentAttemptStatus @default(IN_PROGRESS)
+  startedAt   DateTime                @default(now())
+  submittedAt DateTime?
+
+  answers AssessmentAnswer[]
+  result  AssessmentResult?
+
+  @@index([studentId])
+  @@map("assessment_attempts")
+}
+
+model AssessmentAnswer {
+  id             String             @id @default(cuid())
+  attemptId      String
+  attempt        AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId     String
+  question       AssessmentQuestion @relation(fields: [questionId], references: [id])
+  selectedOption Json
+
+  @@unique([attemptId, questionId])
+  @@map("assessment_answers")
+}
+
+model AssessmentResult {
+  id                 String            @id @default(cuid())
+  attemptId          String            @unique
+  attempt            AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  traitScores        Json // { traitName: score }
+  recommendedStreams String[]
+  summary            String?
+  createdAt          DateTime          @default(now())
+
+  @@map("assessment_results")
+}
+
+// Auto-generated on assessment completion; live-edited by the assigned counsellor
+// during sessions. Exact editable field shape to be refined once report templates arrive.
+model CounsellorChart {
+  id              String   @id @default(cuid())
+  studentId       String   @unique
+  student         Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  strengths       String[]
+  hobbies         String[]
+  careerShortlist String[] // narrowed from 6 to 2 across sessions
+  rawData         Json // snapshot of pre-counselling + parent + assessment data
+  lastEditedBy    String? // Counsellor id
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("counsellor_charts")
+}
+
+enum ReportType {
+  STUDENT_CAREER_PATH
+  PARENT_SUMMARY
+  INSTITUTION_SUMMARY
+}
+
+model Report {
+  id                      String     @id @default(cuid())
+  studentId               String
+  student                 Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  generatedByCounsellorId String
+  type                    ReportType
+  fileUrl                 String
+  generatedAt             DateTime   @default(now())
+
+  @@index([studentId])
+  @@map("reports")
+}
