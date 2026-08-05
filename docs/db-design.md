@@ -196,20 +196,31 @@ session number; `(counsellorId, scheduledDate, startTime)` — prevents double-b
 counsellor's slot.
 
 ### `CareerLibraryEntry`
-Central, PWC-owned career database (~1,300+ default roles).
+Central, PWC-owned career database. Populated from `Career Library_Updated_0508.xlsx`
+("CL" tab) — 1,317 rows imported via `scripts/export-career-library.py` +
+`prisma/seed-data/career-library/`. See "Career Library workbook import" below for
+the full import design and cross-table mapping.
 
 | Field | Type | Notes |
 |---|---|---|
 | cluster, industry, domain, jobRole | String | classification |
-| aiResilienceGrade | `AiResilienceGrade` enum | LOW / MEDIUM / HIGH / VERY_HIGH |
+| aiResilienceGrade | `AiResilienceGrade` enum | LOW / MEDIUM / HIGH / VERY_HIGH (source only uses the first three) |
 | aiResilienceComment | String | justifies the grade |
 | oneLineDescription | String | |
 | topCompanies | String[] | tag-style multi-value |
-| salaryIndiaMin/Max, salaryGlobalMin/Max | Int | separate India vs. global ranges |
-| minimumQualification | String | e.g. "10+2 (PCM)" |
-| entranceExams, certifications, topCourses | String[] | tag-style multi-value |
+| salaryIndiaRangeText | String? | raw source text, e.g. "₹6–25 LPA" (kept — source has non-numeric ranges like "0–Limitless") |
+| salaryIndiaMinLPA, salaryIndiaMaxLPA | Float? | best-effort parse of the above; null when unparseable |
+| salaryGlobalRangeText | String? | raw source text, e.g. "$70k–$160k" |
+| salaryGlobalMinUSD, salaryGlobalMaxUSD | Float? | best-effort parse (in USD, not $k); null when unparseable |
+| qualification10th12th | String | required |
+| qualificationGraduation, qualificationPG | String? | source has 3 distinct qualification levels, not 1 |
+| entranceExamsUGDescription | String? | full descriptive text from the source |
+| entranceExams | String[] | UG level, cleaned/short exam names — join key against `UgEntranceExam.examName` |
+| entranceExamsPG | String[] | PG level |
+| certificationsStudent, certificationsUG | String[] | source distinguishes pre-UG vs. during-UG certification recommendations |
+| topCourses | String[] | tag-style multi-value |
 | status | `CareerLibraryStatus` enum | DRAFT / ACTIVE |
-| createdBy, updatedBy | String | User id, audit trail |
+| createdBy, updatedBy | String | User id, or `"seed:career-library-import"` for bulk-imported rows |
 
 ### `CareerLibraryRequest`
 Counsellor-submitted request to add an unlisted career; reviewed by Admin/Super Admin
@@ -225,6 +236,53 @@ before becoming a permanent `CareerLibraryEntry`.
 | status | `CareerRequestStatus` enum | PENDING / APPROVED / REJECTED |
 | reviewedBy, reviewedAt | nullable | who approved/rejected, when |
 | resultingEntryId | String? | FK → CareerLibraryEntry, once approved |
+
+### Career Library workbook import — UG/PG reference tables
+
+`Career Library_Updated_0508.xlsx` has 8 tabs; the last (`Post-12_Entrance_Exams__India__`)
+is out of scope per instruction and was not imported. The other 7 tabs each map to
+exactly one table — no FK relations to `CareerLibraryEntry` or to each other; they're
+matched **by value** at query time, not by foreign key:
+
+| Workbook tab | Table | Rows | Join key → `CareerLibraryEntry` |
+|---|---|---|---|
+| CL | `CareerLibraryEntry` | 1,317 | (the hub table) |
+| UG Institutions_IND | `UgInstitution` | 702 | `industry` ↔ `CareerLibraryEntry.industry` |
+| UG Inst+Uty_IND | `UgInstitutionUniversity` | 34 | none (general directory, not industry-mapped) |
+| UG Entrance_IND | `UgEntranceExam` | 109 | `examName` ↔ `CareerLibraryEntry.entranceExams` (UG, extracted) |
+| UG Courses_IND | `UgCourse` | 67 | `careerCluster` ↔ `CareerLibraryEntry.cluster` |
+| PG Institutions_IND | `PgInstitution` | 1,368 | none (not requested; `industry` field kept but unmapped) |
+| PG Entrance_IND | `PgEntranceExam` | 29 | none (not requested) |
+
+Each new table mirrors its source tab's columns close to 1:1 (see `prisma/schema.prisma`
+for the full field list — mostly optional `String` columns, since this is reference
+data, not something the app writes to).
+
+**Import pipeline**: `scripts/export-career-library.py` (Python, one-off — not part of
+the app runtime) reads the workbook with `openpyxl`, cleans/splits list-like columns
+(`,`-separated for most, `;`-separated for the two certification columns), best-effort
+parses salary ranges, and writes one JSON file per tab to
+`prisma/seed-data/career-library/`. `prisma/seed-data/career-library/index.ts` loads
+those JSON files and is called from `prisma/seed.ts` — it **clears and reinserts**
+(`deleteMany` + `createMany`) rather than upserting, since these rows have no natural
+per-row unique key and the whole dataset is meant to be replaced on reimport. Rerun the
+Python script and `pnpm db:seed` if the source workbook changes.
+
+**Cross-table mapping — verified, not enforced.** These are plain string-equality
+matches (e.g. `WHERE industry = ?`), not database constraints, per instruction. Before
+seeding, two real spelling/naming mismatches in the source data were found and
+corrected in the export script (`INDUSTRY_ALIASES`, `EXAM_ALIASES` in
+`scripts/export-career-library.py`) so the joins resolve cleanly:
+- `UG Institutions_IND` uses `"Defense"` (American spelling, 12 rows) where CL uses
+  `"Defence"` — normalized to `"Defence"` on import.
+- CL's extracted UG exam list uses the token `"CUET"` (1,055 `CareerLibraryEntry` rows)
+  where `UG Entrance_IND` names the exam `"CUET UG"` — normalized to `"CUET UG"` on
+  import.
+
+After these fixes, mapping coverage is 100%: every `CareerLibraryEntry.industry` value
+has at least one matching `UgInstitution` row, every extracted UG exam token matches a
+`UgEntranceExam.examName`, and every `CareerLibraryEntry.cluster` value matches at
+least one `UgCourse.careerCluster`.
 
 ### Forms — `FormTemplate` / `FormQuestion` / `FormSubmission` / `FormAnswer`
 

@@ -78,7 +78,9 @@ test/
 - **API docs**: update `docs/api-list.md` in the same change as any route
   added, removed, or modified — it's the quick-reference companion to the
   Swagger UI (`GET /docs`). Also update `docs/db-design.md` when the Prisma
-  schema changes meaningfully.
+  schema changes meaningfully, and `docs/frontend-integration-guide.md` when
+  request/response shapes change (it has worked examples for the frontend
+  team, not just a route list).
 
 ## Commands
 
@@ -95,10 +97,15 @@ pnpm typecheck             # type-check without emitting
 
 ## What's not built yet
 
-This is intentionally staged — we're building module by module. Not yet
-implemented: auth (register/login/refresh/logout), user profile module,
-dynamic forms module, assessment module, video session module (2 sessions
-per case), counsellor/parent/student feedback module, case status
-lifecycle + transitions, role-based authorization middleware, OpenAPI docs.
-Don't assume any of these exist — check `src/modules/` before referencing
-an endpoint.
+This is intentionally staged — we're building module by module. Built so far:
+Institutes, Students, Forms (pre-counselling/feedback questionnaires, retrieval
++ submission), Assessment (question bank + attempt flow, no scoring yet),
+Career Library (retrieval/search + cross-referenced UG/PG data), OpenAPI/Swagger
+docs. **Not yet implemented**: auth (register/login/refresh/logout — every
+route is currently unprotected), Counsellor CRUD, Project CRUD, video session
+booking (design finalized in `docs/session-scheduling-use-cases.md`, no code
+yet), Career Library writes/ratification flow, assessment result/scoring
+computation, report generation, role-based authorization middleware. Don't
+assume any of these exist — check `src/modules/` before referencing an
+endpoint, and see `docs/frontend-integration-guide.md` §9 for the full list
+with more detail.

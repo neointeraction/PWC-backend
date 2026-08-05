@@ -296,28 +296,47 @@ enum CareerLibraryStatus {
 
 // Central, PWC-owned career library (default ~1,300 roles).
 model CareerLibraryEntry {
-  id                   String              @id @default(cuid())
-  cluster              String
-  industry             String
-  domain               String
-  jobRole              String
-  aiResilienceGrade    AiResilienceGrade
-  aiResilienceComment  String
-  oneLineDescription   String
-  topCompanies         String[]
-  salaryIndiaMin       Int
-  salaryIndiaMax       Int
-  salaryGlobalMin      Int
-  salaryGlobalMax      Int
-  minimumQualification String
-  entranceExams        String[]
-  certifications       String[]
-  topCourses           String[]
-  status               CareerLibraryStatus @default(ACTIVE)
-  createdBy            String // User id (admin/super admin)
-  updatedBy            String?
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
+  id                  String            @id @default(cuid())
+  cluster             String
+  industry            String
+  domain              String
+  jobRole             String
+  aiResilienceGrade   AiResilienceGrade
+  aiResilienceComment String
+  oneLineDescription  String
+  topCompanies        String[]
+
+  // Raw range text is always kept (source data includes non-numeric values like
+  // "0–Limitless" / "$0–Millions"); parsed min/max is best-effort and null when the
+  // range couldn't be parsed to a number.
+  salaryIndiaRangeText  String? // e.g. "₹6–25 LPA"
+  salaryIndiaMinLPA     Float?
+  salaryIndiaMaxLPA     Float?
+  salaryGlobalRangeText String? // e.g. "$70k–$160k"
+  salaryGlobalMinUSD    Float?
+  salaryGlobalMaxUSD    Float?
+
+  // Three distinct qualification levels, matching the source "Career Library" sheet.
+  qualification10th12th   String
+  qualificationGraduation String?
+  qualificationPG         String?
+
+  // UG-level: full descriptive text plus a cleaned/short list (the latter is the join
+  // key against UgEntranceExam.examName). PG-level exams are a separate list.
+  entranceExamsUGDescription String?
+  entranceExams              String[] // UG level, extracted/short names
+  entranceExamsPG            String[]
+
+  // Source sheet distinguishes certifications recommended before vs during UG.
+  certificationsStudent String[]
+  certificationsUG      String[]
+
+  topCourses String[]
+  status     CareerLibraryStatus @default(ACTIVE)
+  createdBy  String // User id (admin/super admin), or a seed/import label
+  updatedBy  String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
 
   requests CareerLibraryRequest[]
 
@@ -325,6 +344,137 @@ model CareerLibraryEntry {
   @@index([industry])
   @@index([domain])
   @@map("career_library_entries")
+}
+
+// --- UG/PG reference data, imported from the Career Library workbook. Each model
+// mirrors one workbook tab 1:1. No FK relations to CareerLibraryEntry — these are
+// matched by value at query time (see docs/db-design.md for the mapping):
+//   UgInstitution.industry        <-> CareerLibraryEntry.industry
+//   UgEntranceExam.examName       <-> CareerLibraryEntry.entranceExams (UG, extracted)
+//   UgCourse.careerCluster        <-> CareerLibraryEntry.cluster
+// ---
+
+// Source tab: "UG Institutions_IND" — institutions mapped per industry (one
+// institution can appear multiple times, once per industry it offers programmes in).
+model UgInstitution {
+  id                            String   @id @default(cuid())
+  industry                      String
+  shortName                     String?
+  name                          String
+  city                          String?
+  state                         String?
+  type                          String?
+  category                      String?
+  programmesOffered             String?
+  programmesOfferedAfterClass12 String?
+  keyProgrammesOffered          String?
+  primaryEntranceExams          String?
+  nirfRanking                   String?
+  otherRankings                 String?
+  approxAnnualFee               String?
+  approxPlacementCtc            String?
+  website                       String?
+  createdAt                     DateTime @default(now())
+
+  @@index([industry])
+  @@index([name])
+  @@map("ug_institutions")
+}
+
+// Source tab: "UG Inst+Uty_IND" — general institution/university directory, not
+// industry-mapped (deduplicated, one row per institution).
+model UgInstitutionUniversity {
+  id                   String   @id @default(cuid())
+  shortName            String?
+  name                 String
+  city                 String?
+  state                String?
+  type                 String?
+  category             String?
+  keyProgrammesOffered String?
+  primaryEntranceExams String?
+  nirfRanking          String?
+  otherRankings        String?
+  approxAnnualFee      String?
+  approxPlacementCtc   String?
+  website              String?
+  createdAt            DateTime @default(now())
+
+  @@index([name])
+  @@map("ug_institutions_universities")
+}
+
+// Source tab: "UG Entrance_IND".
+model UgEntranceExam {
+  id                      String   @id @default(cuid())
+  examName                String
+  fullForm                String?
+  conductingBody          String?
+  level                   String?
+  applicableFor           String?
+  subjectRequirements12th String?
+  applicationWindow       String?
+  examMonth               String?
+  resultMonth             String?
+  examMode                String?
+  frequency               String?
+  approxAttemptsAllowed   String?
+  officialWebsite         String?
+  createdAt               DateTime @default(now())
+
+  @@index([examName])
+  @@map("ug_entrance_exams")
+}
+
+// Source tab: "UG Courses_IND".
+model UgCourse {
+  id                     String   @id @default(cuid())
+  courseName             String
+  fullForm               String?
+  level                  String?
+  durationYears          String? // free text, e.g. "5.5 (incl 1yr internship)"
+  careerCluster          String
+  stream12thRequirements String?
+  minimumEligibility     String?
+  entranceExamsPrimary   String?
+  entranceExamsAlternate String?
+  topSpecialisations     String?
+  topGovtColleges        String?
+  topPrivateColleges     String?
+  approxAnnualFeeRange   String?
+  furtherStudyOptions    String?
+  createdAt              DateTime @default(now())
+
+  @@index([careerCluster])
+  @@map("ug_courses")
+}
+
+// Source tab: "PG Institutions_IND".
+model PgInstitution {
+  id           String   @id @default(cuid())
+  industry     String?
+  institution  String
+  state        String?
+  city         String?
+  programTypes String?
+  website      String?
+  createdAt    DateTime @default(now())
+
+  @@index([industry])
+  @@index([institution])
+  @@map("pg_institutions")
+}
+
+// Source tab: "PG Entrance_IND".
+model PgEntranceExam {
+  id              String   @id @default(cuid())
+  examName        String
+  coursesForExam  String?
+  officialWebsite String?
+  createdAt       DateTime @default(now())
+
+  @@index([examName])
+  @@map("pg_entrance_exams")
 }
 
 enum CareerRequestStatus {
@@ -513,6 +663,7 @@ model AssessmentAttempt {
   id          String                  @id @default(cuid())
   studentId   String
   student     Student                 @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  cohort      String // which AssessmentQuestion.cohort set this attempt is answering
   status      AssessmentAttemptStatus @default(IN_PROGRESS)
   startedAt   DateTime                @default(now())
   submittedAt DateTime?

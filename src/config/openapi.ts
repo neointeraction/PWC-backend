@@ -18,8 +18,22 @@ import {
   studentIdParamsSchema,
   updateStudentSchema,
 } from "../modules/students/students.schema.js";
-import { formTypeParamsSchema, getFormTemplateQuerySchema } from "../modules/forms/forms.schema.js";
-import { listAssessmentQuestionsQuerySchema } from "../modules/assessment/assessment.schema.js";
+import {
+  formStudentParamsSchema,
+  formTypeParamsSchema,
+  getFormTemplateQuerySchema,
+  saveFormAnswersBodySchema,
+} from "../modules/forms/forms.schema.js";
+import {
+  attemptIdParamsSchema,
+  listAssessmentQuestionsQuerySchema,
+  saveAssessmentAnswersBodySchema,
+  startAttemptBodySchema,
+} from "../modules/assessment/assessment.schema.js";
+import {
+  careerLibraryIdParamsSchema,
+  listCareerLibraryQuerySchema,
+} from "../modules/career-library/career-library.schema.js";
 
 extendZodWithOpenApi(z);
 
@@ -251,6 +265,48 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/forms/{formType}/students/{studentId}",
+  tags: ["Forms"],
+  summary: "Get a student's (or parent's) submission for a form, with answers",
+  request: { params: formStudentParamsSchema, query: getFormTemplateQuerySchema },
+  responses: {
+    200: { description: "Form submission with answers", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "put",
+  path: "/api/v1/forms/{formType}/students/{studentId}",
+  tags: ["Forms"],
+  summary: "Save/update in-progress answers (\"Save as Draft\"). Idempotent until submitted.",
+  request: {
+    params: formStudentParamsSchema,
+    body: { content: { "application/json": { schema: saveFormAnswersBodySchema } } },
+  },
+  responses: {
+    200: { description: "Updated draft submission", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/forms/{formType}/students/{studentId}/submit",
+  tags: ["Forms"],
+  summary: "Finalize a form submission. Validates required questions are answered, then locks it.",
+  request: {
+    params: formStudentParamsSchema,
+    body: { content: { "application/json": { schema: saveFormAnswersBodySchema } } },
+  },
+  responses: {
+    200: { description: "Submitted (locked) submission", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
 // --- Assessment ---
 
 registry.registerPath({
@@ -262,6 +318,95 @@ registry.registerPath({
   responses: {
     200: { description: "List of assessment questions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
     ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/assessment/attempts",
+  tags: ["Assessment"],
+  summary: "Start a new attempt, or resume the student's existing in-progress one for this cohort",
+  request: { body: { content: { "application/json": { schema: startAttemptBodySchema } } } },
+  responses: {
+    200: { description: "Attempt (new or resumed)", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/assessment/attempts/{attemptId}",
+  tags: ["Assessment"],
+  summary: "Get an attempt with its answers",
+  request: { params: attemptIdParamsSchema },
+  responses: {
+    200: { description: "Attempt with answers", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "put",
+  path: "/api/v1/assessment/attempts/{attemptId}/answers",
+  tags: ["Assessment"],
+  summary: "Save/update answers (\"Save Progress\"). Idempotent until submitted.",
+  request: {
+    params: attemptIdParamsSchema,
+    body: { content: { "application/json": { schema: saveAssessmentAnswersBodySchema } } },
+  },
+  responses: {
+    200: { description: "Updated attempt", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/assessment/attempts/{attemptId}/submit",
+  tags: ["Assessment"],
+  summary: "Finalize an attempt. Validates every question is answered, then locks it.",
+  request: { params: attemptIdParamsSchema },
+  responses: {
+    200: { description: "Submitted (locked) attempt", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+// --- Career Library ---
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library",
+  tags: ["Career Library"],
+  summary: "Search/list career library entries",
+  request: { query: listCareerLibraryQuerySchema },
+  responses: {
+    200: {
+      description: "Paginated list of career library entries",
+      content: { "application/json": { schema: genericObjectSchema } },
+    },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library/filters",
+  tags: ["Career Library"],
+  summary: "Distinct filter values (clusters, industries, domains, AI resilience grades) for building UI filter dropdowns",
+  responses: {
+    200: { description: "Filter option lists", content: { "application/json": { schema: genericObjectSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library/{id}",
+  tags: ["Career Library"],
+  summary: "Get a career library entry, with related UG institutions/courses/entrance exams (by industry/cluster/exam-name mapping)",
+  request: { params: careerLibraryIdParamsSchema },
+  responses: {
+    200: { description: "Career library entry with related data", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
   },
 });
 

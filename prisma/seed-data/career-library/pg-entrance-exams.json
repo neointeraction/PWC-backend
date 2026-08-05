@@ -1,0 +1,147 @@
+[
+  {
+    "examName": "CUET PG",
+    "coursesForExam": "MA, MSc, MCom, MSc Data Science, MSc AI, MA Psychology, MA Economics, MA International Relations, MA Geography, MA Languages",
+    "officialWebsite": "https://exams.nta.ac.in/CUET-PG/"
+  },
+  {
+    "examName": "CAT",
+    "coursesForExam": "MBA, PGDM, Executive MBA",
+    "officialWebsite": "https://iimcat.ac.in"
+  },
+  {
+    "examName": "CMAT",
+    "coursesForExam": "MBA, PGDM",
+    "officialWebsite": "https://exams.nta.ac.in/CMAT/"
+  },
+  {
+    "examName": "MAT",
+    "coursesForExam": "MBA, PGDM",
+    "officialWebsite": "https://mat.aima.in"
+  },
+  {
+    "examName": "XAT",
+    "coursesForExam": "MBA, PGDM",
+    "officialWebsite": "https://xatonline.in"
+  },
+  {
+    "examName": "GMAT",
+    "coursesForExam": "MBA, Executive MBA, Global PG Management",
+    "officialWebsite": "https://www.mba.com"
+  },
+  {
+    "examName": "GATE",
+    "coursesForExam": "MTech, ME, MS, PhD (Engineering, Technology, AI, Data Science)",
+    "officialWebsite": "https://gate.iisc.ac.in"
+  },
+  {
+    "examName": "IIT JAM",
+    "coursesForExam": "MSc Physics, Chemistry, Mathematics, Statistics, Biotechnology",
+    "officialWebsite": "https://jam.iitkgp.ac.in"
+  },
+  {
+    "examName": "CSIR NET",
+    "coursesForExam": "MSc leading to PhD, Research Fellowships (Science)",
+    "officialWebsite": "https://csirnet.nta.nic.in"
+  },
+  {
+    "examName": "UGC NET",
+    "coursesForExam": "MA/MSc leading to PhD, Lectureship (Humanities & Sciences)",
+    "officialWebsite": "https://ugcnet.nta.nic.in"
+  },
+  {
+    "examName": "NEET PG",
+    "coursesForExam": "MD, MS, PG Diploma (Medical)",
+    "officialWebsite": "https://nbe.edu.in/NEETPG/"
+  },
+  {
+    "examName": "INI-CET",
+    "coursesForExam": "MD, MS, Medical PG at AIIMS/JIPMER",
+    "officialWebsite": "https://www.aiimsexams.ac.in"
+  },
+  {
+    "examName": "CLAT PG",
+    "coursesForExam": "LLM",
+    "officialWebsite": "https://consortiumofnlus.ac.in"
+  },
+  {
+    "examName": "AILET PG",
+    "coursesForExam": "LLM (NLU Delhi)",
+    "officialWebsite": "https://nludelhi.ac.in"
+  },
+  {
+    "examName": "TISS NET",
+    "coursesForExam": "MA HRM, MA Social Work, MA Development Studies",
+    "officialWebsite": "https://www.tiss.edu/admissions"
+  },
+  {
+    "examName": "IIFT Entrance Test",
+    "coursesForExam": "MBA International Business, MA Trade Policy",
+    "officialWebsite": "https://www.iift.edu"
+  },
+  {
+    "examName": "JEST",
+    "coursesForExam": "MSc Physics, PhD Physics",
+    "officialWebsite": "https://www.jest.org.in"
+  },
+  {
+    "examName": "NEST",
+    "coursesForExam": "Integrated MSc Biology, Physics, Chemistry",
+    "officialWebsite": "https://www.nestexam.in"
+  },
+  {
+    "examName": "ICAR PG",
+    "coursesForExam": "MSc Agriculture, Food Science, Environmental Science",
+    "officialWebsite": "https://icar.org.in"
+  },
+  {
+    "examName": "NIFT PG",
+    "coursesForExam": "MDes, MFM, MFTech",
+    "officialWebsite": "https://www.nift.ac.in"
+  },
+  {
+    "examName": "NID DAT PG",
+    "coursesForExam": "MDes Design, Animation, Graphics",
+    "officialWebsite": "https://admissions.nid.edu"
+  },
+  {
+    "examName": "CEED",
+    "coursesForExam": "MDes, Design PG Programs",
+    "officialWebsite": "https://ceed.iitb.ac.in"
+  },
+  {
+    "examName": "SPA PG",
+    "coursesForExam": "MPlan, Architecture, Urban Planning",
+    "officialWebsite": "https://www.spa.ac.in"
+  },
+  {
+    "examName": "IISER Aptitude Test",
+    "coursesForExam": "Integrated MSc-PhD Physical & Life Sciences",
+    "officialWebsite": "https://www.iiseradmission.in"
+  },
+  {
+    "examName": "IGNOU OPENMAT",
+    "coursesForExam": "MBA",
+    "officialWebsite": "https://ignouadmissions.samarth.edu.in"
+  },
+  {
+    "examName": "IGNOU OPENNET",
+    "coursesForExam": "MA, MSc, MCom, Tourism, Sustainability",
+    "officialWebsite": "https://www.ignou.ac.in"
+  },
+  {
+    "examName": "UPSC CAPF / CDS",
+    "coursesForExam": "Defence, Strategic & Security Studies",
+    "officialWebsite": "https://upsc.gov.in"
+  },
+  {
+    "examName": "ISB PGP",
+    "coursesForExam": "PGP Management, Entrepreneurship",
+    "officialWebsite": "https://www.isb.edu"
+  },
+  {
+    "examName": "XLRI XGMT",
+    "coursesForExam": "MBA HR, Business Management",
+    "officialWebsite": "https://www.xlri.ac.in"
+  }
+]

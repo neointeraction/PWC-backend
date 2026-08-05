@@ -10,6 +10,7 @@ import { institutesRouter } from "./modules/institutes/institutes.routes.js";
 import { studentsRouter } from "./modules/students/students.routes.js";
 import { formsRouter } from "./modules/forms/forms.routes.js";
 import { assessmentRouter } from "./modules/assessment/assessment.routes.js";
+import { careerLibraryRouter } from "./modules/career-library/career-library.routes.js";
 import { docsRouter } from "./modules/docs/docs.routes.js";
 
 export function createApp(): Express {
@@ -31,6 +32,7 @@ export function createApp(): Express {
   app.use("/api/v1/students", studentsRouter);
   app.use("/api/v1/forms", formsRouter);
   app.use("/api/v1/assessment", assessmentRouter);
+  app.use("/api/v1/career-library", careerLibraryRouter);
   app.use("/docs", docsRouter);
 
   app.use(notFoundHandler);
