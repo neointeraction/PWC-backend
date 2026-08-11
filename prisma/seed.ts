@@ -1,4 +1,6 @@
+import argon2 from "argon2";
 import { PrismaClient } from "@prisma/client";
+import { env } from "../src/config/env.js";
 import { class9to10AssessmentQuestions } from "./seed-data/assessment/class9to10.js";
 import { seedCareerLibraryData } from "./seed-data/career-library/index.js";
 import { feedbackParentQuestions } from "./seed-data/forms/feedbackParent.js";
@@ -63,6 +65,7 @@ async function seedAssessmentQuestions(questions: AssessmentQuestionSeed[]): Pro
       update: {
         section: q.section,
         order: q.order,
+        displayOrder: q.displayOrder,
         questionCode: q.questionCode,
         questionText: q.questionText,
         format: q.format,
@@ -77,6 +80,7 @@ async function seedAssessmentQuestions(questions: AssessmentQuestionSeed[]): Pro
         cohort: COHORT,
         section: q.section,
         order: q.order,
+        displayOrder: q.displayOrder,
         questionCode: q.questionCode,
         fieldKey: q.fieldKey,
         questionText: q.questionText,
@@ -94,7 +98,32 @@ async function seedAssessmentQuestions(questions: AssessmentQuestionSeed[]): Pro
   console.log(`Seeded ${questions.length} assessment questions (cohort ${COHORT})`);
 }
 
+// The only way to get a first login — there's no self-register endpoint (see
+// src/modules/auth/auth.routes.ts). Idempotent: re-running the seed won't reset the
+// password on an existing account, so a password changed after first login sticks.
+async function seedSuperAdmin(): Promise<void> {
+  const existing = await prisma.user.findUnique({ where: { email: env.SEED_SUPER_ADMIN_EMAIL } });
+  if (existing) {
+    console.log(`Super Admin already exists (${env.SEED_SUPER_ADMIN_EMAIL}) — leaving as-is`);
+    return;
+  }
+
+  const passwordHash = await argon2.hash(env.SEED_SUPER_ADMIN_PASSWORD);
+  await prisma.user.create({
+    data: {
+      email: env.SEED_SUPER_ADMIN_EMAIL,
+      passwordHash,
+      role: "SUPER_ADMIN",
+      firstName: "Super",
+      lastName: "Admin",
+      mustChangePassword: true,
+    },
+  });
+  console.log(`Seeded Super Admin login: ${env.SEED_SUPER_ADMIN_EMAIL} / (password from SEED_SUPER_ADMIN_PASSWORD)`);
+}
+
 async function main(): Promise<void> {
+  await seedSuperAdmin();
   await seedFormTemplate("PRE_COUNSELLING_STUDENT", preCounsellingStudentQuestions);
   await seedFormTemplate("PRE_COUNSELLING_PARENT", preCounsellingParentQuestions);
   await seedFormTemplate("FEEDBACK_STUDENT", feedbackStudentQuestions);

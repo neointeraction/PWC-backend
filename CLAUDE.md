@@ -68,10 +68,18 @@ test/
   truth (`STUDENT`, `COUNSELLOR`, `ADMIN`, `SUPER_ADMIN`). Role-based
   authorization middleware will live in `src/common/middlewares/` once the
   auth module is built.
-- **Status lifecycle**: the counselling case status lifecycle (Draft →
-  Profile Completed → ... → Closed) is not yet modeled in Prisma — it will
-  be added as its own module once the case/form data model is confirmed.
-  Don't hardcode status strings elsewhere in the meantime.
+- **Status lifecycle**: `WorkflowStatus` (`prisma/schema.prisma`) and
+  `Student.workflowStatus` model the 12-stage counselling case lifecycle
+  (Draft → Profile Completed → ... → Closed). The shared transition helper
+  is `advanceWorkflowStatus()` in `src/common/workflow/workflowStatus.ts` —
+  forward-only and idempotent; call it from a module's service layer at the
+  point a real action completes a stage (see `students.service.ts`,
+  `forms.service.ts`, `assessment.service.ts`, `sessions.service.ts` for
+  existing call sites), don't hardcode status strings elsewhere. Stages
+  beyond `SESSION_2_COMPLETED` depend on modules that don't exist yet
+  (Counsellor Chart/Feedback, Reports) and are only reachable via the admin
+  override at `PATCH /api/v1/students/:id/workflow-status` until those are
+  built.
 - **Imports**: this project uses ESM with `NodeNext` module resolution —
   relative imports must include the `.js` extension (even though the
   source file is `.ts`), e.g. `import { env } from "./config/env.js"`.
@@ -97,15 +105,26 @@ pnpm typecheck             # type-check without emitting
 
 ## What's not built yet
 
-This is intentionally staged — we're building module by module. Built so far:
-Institutes, Students, Forms (pre-counselling/feedback questionnaires, retrieval
-+ submission), Assessment (question bank + attempt flow, no scoring yet),
-Career Library (retrieval/search + cross-referenced UG/PG data), OpenAPI/Swagger
-docs. **Not yet implemented**: auth (register/login/refresh/logout — every
-route is currently unprotected), Counsellor CRUD, Project CRUD, video session
-booking (design finalized in `docs/session-scheduling-use-cases.md`, no code
-yet), Career Library writes/ratification flow, assessment result/scoring
-computation, report generation, role-based authorization middleware. Don't
-assume any of these exist — check `src/modules/` before referencing an
-endpoint, and see `docs/frontend-integration-guide.md` §9 for the full list
-with more detail.
+This is intentionally staged — we're building module by module. Built so far: Auth
+(login/refresh/logout — JWT access token + rotating httpOnly-cookie refresh token; no
+self-register, every `User` including the one Super Admin is created by an admin/seed
+with a temp password; see `src/modules/auth/`), Institutes, Students (including the
+`workflowStatus` lifecycle — live/auto-advancing through `SESSION_2_COMPLETED`,
+admin-override-only beyond that), Forms (pre-counselling/feedback questionnaires,
+retrieval + submission), Assessment (question bank + attempt flow, no scoring yet),
+Career Library (retrieval/search + cross-referenced UG/PG data), Sessions (blind
+slot-based booking, join/no-show tracking, reschedule/cancel — design in
+`docs/session-scheduling-use-cases.md`, fully resolved and implemented; see
+`src/modules/sessions/`), Email (configurable provider — `console` for local dev,
+Mailgun for real sends — with the 9 kREATE lifecycle templates plus 31
+reminder/session-status templates; most sends are still a manual
+`POST /api/v1/email/send` call, though booking/reschedule/cancel in Sessions trigger
+the relevant template automatically), OpenAPI/Swagger docs. **Not yet implemented**:
+route-level auth enforcement (the `authenticate`/`requireRole` middleware in
+`src/common/middlewares/auth.ts` exists but isn't applied to any route — every
+endpoint is still open with no credentials), password reset/change, Counsellor CRUD,
+Project CRUD, Career Library writes/ratification flow, assessment result/scoring
+computation, Counsellor Chart editing, report generation, a scheduler/cron for
+automatic same-day/nudge reminders. Don't assume any of these exist — check
+`src/modules/` before referencing an endpoint, and see
+`docs/frontend-integration-guide.md` §12 for the full list with more detail.

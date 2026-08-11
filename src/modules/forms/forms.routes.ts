@@ -7,9 +7,19 @@ import {
   formTypeParamsSchema,
   getFormTemplateQuerySchema,
   saveFormAnswersBodySchema,
+  studentFormStatusParamsSchema,
 } from "./forms.schema.js";
 
 export const formsRouter = Router();
+
+// Per-form submission flags for a student (pre-counselling + feedback, student + parent)
+// — for reminder/link logic. Declared before the `/:formType` routes so "students" isn't
+// treated as a formType.
+formsRouter.get(
+  "/students/:studentId/status",
+  validate({ params: studentFormStatusParamsSchema }),
+  asyncHandler(formsController.getFormStatus)
+);
 
 formsRouter.get(
   "/:formType",

@@ -21,7 +21,8 @@ export interface FormQuestionSeed {
 
 export interface AssessmentQuestionSeed {
   section: AssessmentSection;
-  order: number;
+  order: number; // logical/grouped order (RIASEC 1-24, Big Five 25-44, ...)
+  displayOrder: number; // presentation position shown to the student (interleaved)
   questionCode: string;
   fieldKey: string;
   questionText: string;

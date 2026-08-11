@@ -5,10 +5,9 @@ import type { AssessmentQuestionSeed } from "../types.js";
 // career-stream mapping is not yet supplied — only the per-question weight and (for
 // aptitude) difficulty tags present in the source form are captured here.
 //
-// IMPORTANT: aptitude (APTITUDE section) questions have no `correctOption` seeded.
-// The source form does not mark correct answers, and guessing them would silently
-// bake a wrong answer key into real student scoring — PWC must supply/confirm the
-// official answer key before these can be auto-graded.
+// Aptitude answer key sourced from "4.Class 910_Assessment Tool_Questionnaire.pdf"
+// (each question lists its correct option). Applied to the aptitude items below via
+// APTITUDE_ANSWER_KEY so the 20 question literals stay focused on presentation.
 
 interface LikertItem {
   code: string;
@@ -18,11 +17,15 @@ interface LikertItem {
   text: string;
 }
 
+// Builders emit everything except displayOrder; it's attached in one place at the end
+// (see DISPLAY_ORDER) from the questionnaire's presentation positions.
+type SeedDraft = Omit<AssessmentQuestionSeed, "displayOrder">;
+
 function likertQuestions(
   section: AssessmentQuestionSeed["section"],
   items: LikertItem[],
   startOrder: number
-): AssessmentQuestionSeed[] {
+): SeedDraft[] {
   return items.map((item, i) => ({
     section,
     order: startOrder + i,
@@ -417,7 +420,7 @@ const cognitiveItems: LikertItem[] = [
 
 const APTITUDE_OPTION_SUFFIX = { value: "E", label: "E. Not sure" };
 
-const aptitudeItems: AssessmentQuestionSeed[] = [
+const aptitudeItems: SeedDraft[] = [
   {
     section: "APTITUDE",
     order: 45,
@@ -811,9 +814,64 @@ const aptitudeItems: AssessmentQuestionSeed[] = [
   },
 ];
 
-export const class9to10AssessmentQuestions: AssessmentQuestionSeed[] = [
+// Correct option per aptitude question code (see questionnaire PDF answer key).
+const APTITUDE_ANSWER_KEY: Record<string, string> = {
+  Q45: "B", // NR1  ₹25
+  Q46: "A", // NR2  x = 5
+  Q47: "B", // NR3  84 km/h
+  Q48: "B", // NR4  ₹540
+  Q49: "B", // NR5  ₹120
+  Q50: "C", // VR1  Extravagant
+  Q51: "B", // VR2  Teacher
+  Q52: "B", // VR3  Rain beneficial despite being heavy
+  Q53: "A", // VR4  Invalid (affirming the consequent)
+  Q54: "A", // VR5  River B dominant
+  Q55: "B", // LR1  48
+  Q56: "B", // LR2  All Apples are Fruits
+  Q57: "C", // LR3  Esha
+  Q58: "A", // LR4  Filled Square
+  Q59: "B", // LR5  42
+  Q60: "B", // SR1  4 holes
+  Q61: "B", // SR2  9:00
+  Q62: "B", // SR3  12
+  Q63: "B", // SR4  Square above the base
+  Q64: "C", // SR5  Top face
+};
+
+const aptitudeItemsWithKey: SeedDraft[] = aptitudeItems.map((q) => {
+  const correctOption = APTITUDE_ANSWER_KEY[q.questionCode];
+  if (!correctOption) {
+    throw new Error(`Missing aptitude answer key for ${q.questionCode}`);
+  }
+  return { ...q, correctOption };
+});
+
+// Presentation position per question code — the parenthetical number at the start of
+// each question in "4.Class 910_Assessment Tool_Questionnaire.pdf". Deliberately
+// interleaves traits/sections (e.g. the Social item Q13 is shown first, its mirror
+// partner Q16 at position 41) so students can't spot mirror-pair/reverse-keyed items.
+const DISPLAY_ORDER: Record<string, number> = {
+  Q1: 6, Q2: 16, Q3: 26, Q4: 48, Q5: 2, Q6: 12, Q7: 22, Q8: 46, Q9: 8, Q10: 18,
+  Q11: 28, Q12: 62, Q13: 1, Q14: 11, Q15: 21, Q16: 41, Q17: 4, Q18: 14, Q19: 24, Q20: 63,
+  Q21: 9, Q22: 29, Q23: 44, Q24: 19, Q25: 3, Q26: 13, Q27: 23, Q28: 42, Q29: 5, Q30: 15,
+  Q31: 25, Q32: 45, Q33: 30, Q34: 43, Q35: 49, Q36: 64, Q37: 7, Q38: 17, Q39: 27, Q40: 50,
+  Q41: 10, Q42: 20, Q43: 47, Q44: 61, Q45: 31, Q46: 35, Q47: 39, Q48: 53, Q49: 57, Q50: 32,
+  Q51: 36, Q52: 40, Q53: 54, Q54: 58, Q55: 33, Q56: 37, Q57: 51, Q58: 55, Q59: 59, Q60: 34,
+  Q61: 38, Q62: 52, Q63: 56, Q64: 60, Q65: 65, Q66: 68, Q67: 71, Q68: 66, Q69: 69, Q70: 72,
+  Q71: 67, Q72: 70, Q73: 73,
+};
+
+const seedDrafts: SeedDraft[] = [
   ...likertQuestions("RIASEC", riasecItems, 1),
   ...likertQuestions("BIG_FIVE", bigFiveItems, 25),
-  ...aptitudeItems,
+  ...aptitudeItemsWithKey,
   ...likertQuestions("COGNITIVE", cognitiveItems, 65),
 ];
+
+export const class9to10AssessmentQuestions: AssessmentQuestionSeed[] = seedDrafts.map((q) => {
+  const displayOrder = DISPLAY_ORDER[q.questionCode];
+  if (displayOrder === undefined) {
+    throw new Error(`Missing display order for ${q.questionCode}`);
+  }
+  return { ...q, displayOrder };
+});

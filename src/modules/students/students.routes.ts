@@ -7,6 +7,7 @@ import {
   listStudentsQuerySchema,
   studentIdParamsSchema,
   updateStudentSchema,
+  updateWorkflowStatusBodySchema,
 } from "./students.schema.js";
 
 export const studentsRouter = Router();
@@ -39,4 +40,16 @@ studentsRouter.delete(
   "/:id",
   validate({ params: studentIdParamsSchema }),
   asyncHandler(studentsController.deleteStudent)
+);
+
+studentsRouter.post(
+  "/:id/confirm-profile",
+  validate({ params: studentIdParamsSchema }),
+  asyncHandler(studentsController.confirmProfile)
+);
+
+studentsRouter.patch(
+  "/:id/workflow-status",
+  validate({ params: studentIdParamsSchema, body: updateWorkflowStatusBodySchema }),
+  asyncHandler(studentsController.updateWorkflowStatus)
 );

@@ -38,3 +38,9 @@ export async function getAttempt(req: Request, res: Response): Promise<void> {
   const attempt = await assessmentService.getAttempt(attemptId);
   res.status(200).json(attempt);
 }
+
+export async function getAssessmentResult(req: Request, res: Response): Promise<void> {
+  const { attemptId } = req.params as unknown as AttemptIdParams;
+  const result = await assessmentService.getAssessmentResult(attemptId);
+  res.status(200).json(result);
+}

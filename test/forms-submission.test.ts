@@ -7,6 +7,8 @@ const app = createApp();
 const COHORT = "CLASS_9_10";
 
 let studentId: string;
+let instituteId: string;
+let divisionId: string;
 
 interface TemplateQuestion {
   fieldKey: string;
@@ -42,7 +44,7 @@ describe("Forms submission API", () => {
       contactNumber: "+919876550001",
       primaryEmail: "forms-submission@test-institute.example",
     });
-    const instituteId = institute.body.id;
+    instituteId = institute.body.id;
 
     const project = await prisma.project.create({
       data: {
@@ -59,6 +61,7 @@ describe("Forms submission API", () => {
     const division = await request(app)
       .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
       .send({ name: "A" });
+    divisionId = division.body.id;
 
     const student = await request(app).post("/api/v1/students").send({
       firstName: "Priya",
@@ -146,5 +149,99 @@ describe("Forms submission API", () => {
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "changed" }] });
 
     expect(lockedRes.status).toBe(409);
+  });
+
+  it("reports per-form submission flags (only finalized forms count)", async () => {
+    // At this point only PRE_COUNSELLING_STUDENT has been submitted (previous test).
+    const res = await request(app).get(`/api/v1/forms/students/${studentId}/status`);
+    expect(res.status).toBe(200);
+    expect(res.body.forms.preCounsellingStudent.submitted).toBe(true);
+    expect(res.body.forms.preCounsellingStudent.submittedAt).not.toBeNull();
+    expect(res.body.forms.preCounsellingParent.submitted).toBe(false);
+    expect(res.body.forms.preCounsellingParent.submittedAt).toBeNull();
+    expect(res.body.forms.feedbackParent.submitted).toBe(false);
+    expect(res.body.preCounsellingComplete).toBe(false); // parent side missing
+    expect(res.body.feedbackComplete).toBe(false);
+  });
+
+  it("404s the status for an unknown student", async () => {
+    const res = await request(app).get("/api/v1/forms/students/clzzzzzzzzzzzzzzzzzzzzzzzz/status");
+    expect(res.status).toBe(404);
+  });
+
+  it("rejects saving/submitting once the student's project has ended (403)", async () => {
+    // A student whose project ended yesterday — the no-login link must be closed.
+    const expiredProject = await prisma.project.create({
+      data: {
+        instituteId,
+        name: "Test Project Forms Submission Expired",
+        fromDate: new Date("2025-01-01"),
+        toDate: new Date("2025-12-31"),
+      },
+    });
+    const expiredStudent = await request(app).post("/api/v1/students").send({
+      firstName: "Old",
+      lastName: "Cohort",
+      email: "old@test-form-submission.example",
+      mobile: "+919876550009",
+      studentCode: "FSUBEXP",
+      projectId: expiredProject.id,
+      divisionId,
+      parentMobile: "+919876550010",
+      parentEmail: "parent-old@test-form-submission.example",
+      fatherName: "Cohort Sr",
+      fatherOccupation: "Engineer",
+      motherName: "Cohort Jr",
+      motherOccupation: "Doctor",
+    });
+    const expiredStudentId = expiredStudent.body.student.id;
+
+    const draftRes = await request(app)
+      .put(`/api/v1/forms/PRE_COUNSELLING_PARENT/students/${expiredStudentId}`)
+      .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "x" }] });
+    expect(draftRes.status).toBe(403);
+    expect(draftRes.body.error.details.reason).toBe("PROJECT_EXPIRED");
+
+    const submitRes = await request(app)
+      .post(`/api/v1/forms/PRE_COUNSELLING_PARENT/students/${expiredStudentId}/submit`)
+      .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "x" }] });
+    expect(submitRes.status).toBe(403);
+
+    await prisma.project.delete({ where: { id: expiredProject.id } });
+  });
+
+  it("still allows writes on the project's end date itself (end date inclusive)", async () => {
+    // toDate == today (UTC midnight) -> the whole of today is still open.
+    const now = new Date();
+    const endsToday = await prisma.project.create({
+      data: {
+        instituteId,
+        name: "Test Project Forms Submission EndsToday",
+        fromDate: new Date("2025-01-01"),
+        toDate: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),
+      },
+    });
+    const student = await request(app).post("/api/v1/students").send({
+      firstName: "Today",
+      lastName: "Cohort",
+      email: "today@test-form-submission.example",
+      mobile: "+919876550011",
+      studentCode: "FSUBTODAY",
+      projectId: endsToday.id,
+      divisionId,
+      parentMobile: "+919876550012",
+      parentEmail: "parent-today@test-form-submission.example",
+      fatherName: "Today Sr",
+      fatherOccupation: "Engineer",
+      motherName: "Today Jr",
+      motherOccupation: "Doctor",
+    });
+
+    const res = await request(app)
+      .put(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${student.body.student.id}`)
+      .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "Exploring" }] });
+    expect(res.status).toBe(200); // not 403 — end date is inclusive
+
+    await prisma.project.delete({ where: { id: endsToday.id } });
   });
 });

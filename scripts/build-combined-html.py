@@ -1,22 +1,18 @@
 #!/usr/bin/env python3
 """
-One-off: builds a single combined .html from
-  1. docs/session-scheduling-use-cases.md (markdown -> HTML)
-  2. docs/PWC-Backend-DB-Design-and-API-List.docx (docx -> HTML, via python-docx)
+One-off: builds a single combined .html from three maintained markdown docs —
+docs/session-scheduling-use-cases.md, docs/db-design.md, docs/api-list.md.
 Google Drive natively converts uploaded text/html into a fully-formatted Google Doc
-(headings, bold, tables) on import, which is more reliable than round-tripping
-through a binary .docx for this kind of upload.
+(headings, bold, tables) on import.
 """
 import html
 import re
 from pathlib import Path
 
-from docx import Document
-from docx.oxml.ns import qn
-
 ROOT = Path(__file__).resolve().parent.parent
 MD_SRC = ROOT / "docs" / "session-scheduling-use-cases.md"
-DOCX_SRC = ROOT / "docs" / "PWC-Backend-DB-Design-and-API-List.docx"
+DB_DESIGN_SRC = ROOT / "docs" / "db-design.md"
+API_LIST_SRC = ROOT / "docs" / "api-list.md"
 OUT = ROOT / "docs" / "_combined-for-gdoc.html"
 
 
@@ -118,62 +114,11 @@ def md_to_html(md_text: str) -> str:
     return "\n".join(out)
 
 
-HEADING_STYLE_TO_TAG = {
-    "Title": "h1",
-    "Heading 1": "h1",
-    "Heading 2": "h2",
-    "Heading 3": "h3",
-    "Heading 4": "h4",
-}
-
-
-def docx_to_html(path: Path) -> str:
-    doc = Document(str(path))
-    out = []
-
-    def iter_block_items(parent):
-        # Walk the document body in order, yielding paragraphs and tables interleaved.
-        parent_elm = parent.element.body
-        for child in parent_elm.iterchildren():
-            if child.tag == qn("w:p"):
-                from docx.text.paragraph import Paragraph
-                yield Paragraph(child, parent)
-            elif child.tag == qn("w:tbl"):
-                from docx.table import Table
-                yield Table(child, parent)
-
-    for block in iter_block_items(doc):
-        if block.__class__.__name__ == "Paragraph":
-            text = block.text.strip()
-            if not text:
-                continue
-            style_name = block.style.name if block.style is not None else None
-            tag = HEADING_STYLE_TO_TAG.get(style_name)
-            if tag:
-                out.append(f"<{tag}>{esc(text)}</{tag}>")
-            elif style_name == "List Bullet":
-                out.append(f"<ul><li>{esc(text)}</li></ul>")
-            elif style_name == "List Number":
-                out.append(f"<ol><li>{esc(text)}</li></ol>")
-            else:
-                # Preserve bold runs.
-                run_html = ""
-                for run in block.runs:
-                    t = esc(run.text)
-                    run_html += f"<b>{t}</b>" if run.bold else t
-                out.append(f"<p>{run_html or esc(text)}</p>")
-        else:  # Table
-            out.append("<table border='1' cellpadding='6' cellspacing='0'>")
-            for r, row in enumerate(block.rows):
-                tag = "th" if r == 0 else "td"
-                out.append(
-                    "<tr>"
-                    + "".join(f"<{tag}>{esc(cell.text)}</{tag}>" for cell in row.cells)
-                    + "</tr>"
-                )
-            out.append("</table>")
-
-    return "\n".join(out)
+def add_md_part(parts, title, path):
+    parts.append(f"<h1>{esc(title)}</h1>")
+    md_text = path.read_text()
+    md_text = re.sub(r"^#\s+.*\n", "", md_text, count=1)  # drop source's own H1
+    parts.append(md_to_html(md_text))
 
 
 def main():
@@ -181,16 +126,12 @@ def main():
         "<html><body>",
         "<h1>Phoenix Water Club Counselling Platform — Session Scheduling &amp; DB/API Reference</h1>",
         "<p>Combined export for sharing. Source files (kept up to date in the repo): "
-        "docs/session-scheduling-use-cases.md and docs/PWC-Backend-DB-Design-and-API-List.docx.</p>",
-        "<h1>Part 1: Session Scheduling — Use Cases &amp; Flow</h1>",
+        "docs/session-scheduling-use-cases.md, docs/db-design.md, docs/api-list.md.</p>",
     ]
 
-    md_text = MD_SRC.read_text()
-    md_text = re.sub(r"^#\s+.*\n", "", md_text, count=1)  # drop source's own H1
-    parts.append(md_to_html(md_text))
-
-    parts.append("<h1>Part 2: Database Design &amp; API Reference</h1>")
-    parts.append(docx_to_html(DOCX_SRC))
+    add_md_part(parts, "Part 1: Session Scheduling — Use Cases & Flow", MD_SRC)
+    add_md_part(parts, "Part 2: Database Design", DB_DESIGN_SRC)
+    add_md_part(parts, "Part 3: API Reference", API_LIST_SRC)
 
     parts.append("</body></html>")
 

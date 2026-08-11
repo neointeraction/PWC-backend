@@ -113,9 +113,9 @@ model Project {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  students                 Student[]
-  counsellors              ProjectCounsellor[]
-  counsellorAvailabilities CounsellorAvailability[]
+  students        Student[]
+  counsellors     ProjectCounsellor[]
+  counsellorSlots CounsellorSlot[]
 
   @@unique([instituteId, name])
   @@index([instituteId])
@@ -134,7 +134,7 @@ model Counsellor {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  availability     CounsellorAvailability[]
+  slots            CounsellorSlot[]
   projects         ProjectCounsellor[]
   studentsAssigned Session[]
 
@@ -155,32 +155,34 @@ model ProjectCounsellor {
   @@map("project_counsellors")
 }
 
-enum Weekday {
-  MON
-  TUE
-  WED
-  THU
-  FRI
-  SAT
-  SUN
+enum SlotStatus {
+  OPEN
+  BOOKED
 }
 
-// Recurring weekly availability window. Scoped per-project: the same counsellor can have
-// different hours on different projects.
-model CounsellorAvailability {
+// Discrete, individually-bookable slot. Fed into the system once, at project creation,
+// from the institute's counsellor-availability sheet (Counsellor, Date, Time Slot) — see
+// docs/session-scheduling-use-cases.md, resolved decisions #1 and B. Never added to
+// afterward; a slot moves OPEN -> BOOKED when a Session is created against it, and back
+// to OPEN if that Session is cancelled.
+model CounsellorSlot {
   id           String     @id @default(cuid())
   counsellorId String
   counsellor   Counsellor @relation(fields: [counsellorId], references: [id], onDelete: Cascade)
   projectId    String
   project      Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  daysOfWeek   Weekday[]
+  slotDate     DateTime   @db.Date
   startTime    String // "HH:mm", 24h
   endTime      String // "HH:mm", 24h
+  status       SlotStatus @default(OPEN)
+  sessionId    String?    @unique
+  session      Session?   @relation(fields: [sessionId], references: [id])
   createdAt    DateTime   @default(now())
 
-  @@index([counsellorId])
-  @@index([projectId])
-  @@map("counsellor_availability")
+  @@unique([counsellorId, slotDate, startTime])
+  @@index([projectId, slotDate, startTime])
+  @@index([counsellorId, status])
+  @@map("counsellor_slots")
 }
 
 enum WorkflowStatus {
@@ -220,6 +222,7 @@ model Student {
   motherName       String
   motherOccupation String
   motherEmployer   String?
+  academicYear     String? // e.g. "2025-26"; shown on the Counsellor Chart "Our Champion" panel
   workflowStatus   WorkflowStatus    @default(DRAFT)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -267,6 +270,14 @@ model Session {
   startTime            String // "HH:mm"
   endTime              String // "HH:mm"
   status               SessionStatus       @default(SCHEDULED)
+  // Plain, opaque string — manually populated (e.g. Admin pastes a link). No
+  // Calendly/Google Meet integration yet, see docs/session-scheduling-use-cases.md
+  // resolved decision D. Also shared as-is with the parent (decision I).
+  meetingLink          String?
+  studentJoinedAt      DateTime?
+  counsellorJoinedAt   DateTime?
+  studentNoShow        Boolean             @default(false)
+  counsellorNoShow     Boolean             @default(false)
   notes                String?
   cancellationReason   CancellationReason?
   cancellationNotes    String?
@@ -274,6 +285,8 @@ model Session {
   rescheduledFromStart String?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
+
+  slot CounsellorSlot?
 
   @@unique([studentId, sessionNumber])
   @@unique([counsellorId, scheduledDate, startTime])
@@ -633,7 +646,8 @@ model AssessmentQuestion {
   id            String                   @id @default(cuid())
   cohort        String
   section       AssessmentSection
-  order         Int
+  order         Int // logical/grouped order (RIASEC 1-24, Big Five 25-44, Aptitude 45-64, Cognitive 65-73)
+  displayOrder  Int // presentation position shown to the student — interleaves traits/sections so mirror-pair and reverse-keyed items are spread apart (anti-gaming). Source: questionnaire PDF parenthetical numbers.
   questionCode  String // e.g. "Q1"
   fieldKey      String // matches the source HTML's `name` attribute
   questionText  String
@@ -650,6 +664,7 @@ model AssessmentQuestion {
 
   @@unique([cohort, fieldKey])
   @@unique([cohort, order])
+  @@unique([cohort, displayOrder])
   @@index([cohort])
   @@map("assessment_questions")
 }
@@ -682,25 +697,47 @@ model AssessmentAnswer {
   questionId     String
   question       AssessmentQuestion @relation(fields: [questionId], references: [id])
   selectedOption Json
+  // Per-question elapsed time (ms). Used by the aptitude Time Consistency component of
+  // ARI; optional because the current frontend doesn't send it yet — TC/ARI activate
+  // automatically once every aptitude answer carries it.
+  timeTakenMs    Int?
+  // Counsellor override (Counsellor Chart mirror-pair amendment). When set, scoring uses
+  // this instead of selectedOption; the student's original selectedOption is preserved.
+  counsellorOverrideOption Json?
+  overriddenByCounsellorId String?
+  overriddenAt             DateTime?
 
   @@unique([attemptId, questionId])
   @@map("assessment_answers")
 }
 
 model AssessmentResult {
-  id                 String            @id @default(cuid())
-  attemptId          String            @unique
-  attempt            AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  traitScores        Json // { traitName: score }
-  recommendedStreams String[]
-  summary            String?
-  createdAt          DateTime          @default(now())
+  id        String            @id @default(cuid())
+  attemptId String            @unique
+  attempt   AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  // Flat 18-trait score map { TRAIT_KEY: 0-100 } — handy for querying/aggregation.
+  traitScores Json
+  // Full computed report (see src/modules/assessment/scoring AssessmentReport): layer
+  // scores + grades, DCS/DPS, Stream Fit, reliability dashboard. Career Fit, RVS and
+  // Time-Consistency/ARI are populated once their pending decisions land.
+  report      Json
+  // Denormalized headline outputs for quick lookups without parsing `report`.
+  recommendedStreams       String[] // Stream Fit top-3 sub-stream names
+  dominantCareerStyle      String? // RIASEC-120 style label
+  dominantPersonalityStyle String? // Big Five-20 style label
+  engineVersion            String   @default("v1")
+
+  summary   String?
+  createdAt DateTime @default(now())
 
   @@map("assessment_results")
 }
 
-// Auto-generated on assessment completion; live-edited by the assigned counsellor
-// during sessions. Exact editable field shape to be refined once report templates arrive.
+// Lazily created when the counsellor first opens a student's chart. The chart is
+// assembled live (student profile + both pre-counselling questionnaires + assessment
+// result + career library); only the counsellor-authored fields below are persisted.
+// See src/modules/counsellor-chart/ and docs/6.Class 910_Counsellor Form Chart.pdf.
 model CounsellorChart {
   id              String   @id @default(cuid())
   studentId       String   @unique
@@ -708,12 +745,59 @@ model CounsellorChart {
   strengths       String[]
   hobbies         String[]
   careerShortlist String[] // narrowed from 6 to 2 across sessions
-  rawData         Json // snapshot of pre-counselling + parent + assessment data
-  lastEditedBy    String? // Counsellor id
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  rawData         Json? // optional snapshot; the chart is assembled live on GET
+
+  // SCRI — Student Career Readiness Index (counsellor-rated after Session 2). Each
+  // indicator 1-4; total/band/label are derived on save and stored for convenience.
+  scriConfidence        Int?
+  scriReasonedThinking  Int?
+  scriReducedAnxiety    Int?
+  scriSelfAwareness     Int?
+  scriCareerCuriosity   Int?
+  scriDecisionOwnership Int?
+  scriTotal             Int? // 6-24
+  scriBand              Int? // 1-4
+  scriBandLabel         String? // "PreExploration" .. "Career Ready"
+
+  academicTrend   AcademicTrend? // A5
+  alignmentRating AlignmentRating? // Academic × Career Alignment
+
+  lastEditedBy String? // Counsellor id (audit stamp; not an FK, matching other modules)
+  finalizedAt  DateTime? // set on /finalize, which advances workflow to COUNSELLOR_FEEDBACK
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  notes CounsellorChartNote[]
 
   @@map("counsellor_charts")
+}
+
+// One counsellor "Synthesis Note" per chart section code (A1..H4). Child table (not a
+// JSON blob) so notes update independently and carry their own updatedAt.
+model CounsellorChartNote {
+  id        String          @id @default(cuid())
+  chartId   String
+  chart     CounsellorChart @relation(fields: [chartId], references: [id], onDelete: Cascade)
+  code      String // "A1".."H4"
+  body      String
+  updatedAt DateTime        @updatedAt
+
+  @@unique([chartId, code])
+  @@map("counsellor_chart_notes")
+}
+
+enum AcademicTrend {
+  IMPROVING
+  STABLE
+  DECLINING
+  NOT_ASSESSED
+}
+
+enum AlignmentRating {
+  STRONGLY_ALIGNED
+  PARTIALLY_ALIGNED
+  MISALIGNED
+  NOT_YET_ASSESSED
 }
 
 enum ReportType {

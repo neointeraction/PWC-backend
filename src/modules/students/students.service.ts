@@ -1,8 +1,10 @@
 import crypto from "node:crypto";
 import argon2 from "argon2";
+import type { WorkflowStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
-import { BadRequestError, NotFoundError } from "../../common/errors/AppError.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
+import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import type {
   CreateStudentInput,
   ListStudentsQuery,
@@ -89,6 +91,7 @@ export async function listStudents(query: ListStudentsQuery) {
     where: {
       projectId: query.projectId,
       divisionId: query.divisionId,
+      workflowStatus: query.workflowStatus,
     },
     include: studentInclude,
     orderBy: { createdAt: "desc" },
@@ -136,6 +139,44 @@ export async function updateStudent(id: string, input: UpdateStudentInput) {
 
 export async function deleteStudent(id: string) {
   const existing = await getStudentById(id);
-  // Cascades to the Student row via the userId FK's onDelete: Cascade.
-  await prisma.user.delete({ where: { id: existing.user.id } });
+
+  await prisma.$transaction(async (tx) => {
+    // Release any CounsellorSlot this student's sessions currently hold before the
+    // cascade delete (User -> Student -> Session) removes those Session rows.
+    // CounsellorSlot.sessionId is ON DELETE SET NULL at the DB level, not a release —
+    // without this, the slot is left stranded at status "BOOKED" with a null
+    // sessionId, permanently unbookable by anyone else.
+    await tx.counsellorSlot.updateMany({
+      where: { session: { studentId: id } },
+      data: { status: "OPEN", sessionId: null },
+    });
+    // Cascades to the Student row via the userId FK's onDelete: Cascade.
+    await tx.user.delete({ where: { id: existing.user.id } });
+  });
+}
+
+// Student-facing action: confirms the profile data (father/mother details, parent
+// contact) captured on the Student record is correct. Only legal from DRAFT — the
+// underlying advanceWorkflowStatus() is idempotent/silent, but this action should
+// tell a caller clearly when there's nothing to confirm.
+export async function confirmProfile(id: string) {
+  const existing = await getStudentById(id);
+  if (existing.workflowStatus !== "DRAFT") {
+    throw new ConflictError("Profile has already been confirmed");
+  }
+  await advanceWorkflowStatus(prisma, id, "PROFILE_COMPLETED");
+  return getStudentById(id);
+}
+
+// Admin/ops override for the workflow stages that aren't wired to an automatic
+// trigger yet (Sessions, Counsellor Chart/Feedback, Reports don't exist as modules).
+// Unlike advanceWorkflowStatus, this is not forward-only — it's a trusted correction
+// path.
+export async function setWorkflowStatus(id: string, workflowStatus: WorkflowStatus) {
+  await getStudentById(id);
+  return prisma.student.update({
+    where: { id },
+    data: { workflowStatus },
+    include: studentInclude,
+  });
 }

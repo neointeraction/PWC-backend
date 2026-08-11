@@ -17,6 +17,7 @@ import {
   listStudentsQuerySchema,
   studentIdParamsSchema,
   updateStudentSchema,
+  updateWorkflowStatusBodySchema,
 } from "../modules/students/students.schema.js";
 import {
   formStudentParamsSchema,
@@ -34,6 +35,27 @@ import {
   careerLibraryIdParamsSchema,
   listCareerLibraryQuerySchema,
 } from "../modules/career-library/career-library.schema.js";
+import { sendTemplateEmailBodySchema } from "../modules/email/email.schema.js";
+import { loginBodySchema } from "../modules/auth/auth.schema.js";
+import {
+  bookSessionsBodySchema,
+  bookingOptionsQuerySchema,
+  cancelSessionBodySchema,
+  counsellorIdParamsSchema,
+  counsellorMyStudentsQuerySchema,
+  counsellorSessionsQuerySchema,
+  createSessionBodySchema,
+  importSlotsBodySchema,
+  joinSessionBodySchema,
+  listSessionsQuerySchema,
+  listSlotsQuerySchema,
+  rescheduleSessionBodySchema,
+  sendDayReminderBodySchema,
+  sessionIdParamsSchema,
+  setMeetingLinkBodySchema,
+  setNotesBodySchema,
+  studentIdParamsSchema as sessionStudentIdParamsSchema,
+} from "../modules/sessions/sessions.schema.js";
 
 extendZodWithOpenApi(z);
 
@@ -64,6 +86,42 @@ registry.registerPath({
       description: "Service is up",
       content: { "application/json": { schema: z.object({ status: z.literal("ok"), timestamp: z.string() }) } },
     },
+  },
+});
+
+// --- Auth ---
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/auth/login",
+  tags: ["Auth"],
+  summary: "Log in. Sets an httpOnly refreshToken cookie and returns a short-lived access token + the user profile.",
+  request: { body: { content: { "application/json": { schema: loginBodySchema } } } },
+  responses: {
+    200: { description: "Access token + user", content: { "application/json": { schema: genericObjectSchema } } },
+    401: { description: "Invalid credentials or inactive account", content: { "application/json": { schema: errorResponseSchema } } },
+    400: errorResponses[400],
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/auth/refresh",
+  tags: ["Auth"],
+  summary: "Exchange the refreshToken cookie for a new access token. Rotates the refresh token (single-use).",
+  responses: {
+    200: { description: "New access token + user", content: { "application/json": { schema: genericObjectSchema } } },
+    401: { description: "Missing, invalid, expired, or already-used refresh token", content: { "application/json": { schema: errorResponseSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/auth/logout",
+  tags: ["Auth"],
+  summary: "Revoke the current refresh token and clear the cookie. Idempotent — 204 even with no/invalid cookie.",
+  responses: {
+    204: { description: "Logged out" },
   },
 });
 
@@ -251,6 +309,33 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/students/{id}/confirm-profile",
+  tags: ["Students"],
+  summary: "Student confirms their profile data is correct. Advances workflowStatus DRAFT -> PROFILE_COMPLETED. 409 if not currently DRAFT.",
+  request: { params: studentIdParamsSchema },
+  responses: {
+    200: { description: "Updated student", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/students/{id}/workflow-status",
+  tags: ["Students"],
+  summary: "Admin override to set a student's workflowStatus directly (not forward-only) — covers stages not yet wired to an automatic trigger (Sessions, Counsellor Chart/Feedback, Reports)",
+  request: {
+    params: studentIdParamsSchema,
+    body: { content: { "application/json": { schema: updateWorkflowStatusBodySchema } } },
+  },
+  responses: {
+    200: { description: "Updated student", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
 // --- Forms ---
 
 registry.registerPath({
@@ -407,6 +492,234 @@ registry.registerPath({
   responses: {
     200: { description: "Career library entry with related data", content: { "application/json": { schema: genericObjectSchema } } },
     404: errorResponses[404],
+  },
+});
+
+// --- Sessions ---
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/slots/import",
+  tags: ["Sessions"],
+  summary: "One-time bulk import of the institute's counsellor-availability sheet for a project (single upload only, ever)",
+  request: { body: { content: { "application/json": { schema: importSlotsBodySchema } } } },
+  responses: {
+    201: { description: "Slots imported", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/sessions/slots",
+  tags: ["Sessions"],
+  summary: "List counsellor slots (oversight)",
+  request: { query: listSlotsQuerySchema },
+  responses: {
+    200: { description: "List of slots", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/sessions/students/{studentId}/booking-options",
+  tags: ["Sessions"],
+  summary: "Blind Session 1 slot options, or (with session1Date/session1StartTime) Session 2 options locked to Session 1's would-be counsellor",
+  request: { params: sessionStudentIdParamsSchema, query: bookingOptionsQuerySchema },
+  responses: {
+    200: { description: "List of open (date, startTime, endTime) options", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/students/{studentId}/book",
+  tags: ["Sessions"],
+  summary: "Book Session 1 & 2 together (blind assignment, same counsellor locked, >=2 calendar day gap). Requires workflowStatus >= ASSESSMENT_COMPLETED.",
+  request: { params: sessionStudentIdParamsSchema, body: { content: { "application/json": { schema: bookSessionsBodySchema } } } },
+  responses: {
+    201: { description: "Both sessions created", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/sessions/students/{studentId}",
+  tags: ["Sessions"],
+  summary: "List a student's sessions (dashboard cards)",
+  request: { params: sessionStudentIdParamsSchema },
+  responses: {
+    200: { description: "List of sessions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/sessions/counsellors/{counsellorId}",
+  tags: ["Sessions"],
+  summary: "List a counsellor's sessions (dashboard), optionally filtered by status",
+  request: { params: counsellorIdParamsSchema, query: counsellorSessionsQuerySchema },
+  responses: {
+    200: { description: "List of sessions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/sessions/counsellors/{counsellorId}/my-students",
+  tags: ["Sessions"],
+  summary: "\"My Students\" — a counsellor's roster across every project they're assigned to, with form/assessment/session status",
+  request: { params: counsellorIdParamsSchema, query: counsellorMyStudentsQuerySchema },
+  responses: {
+    200: { description: "List of students with status summary", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions",
+  tags: ["Sessions"],
+  summary: "Admin manual session creation, for edge cases outside self-service booking (bypasses the slot inventory)",
+  request: { body: { content: { "application/json": { schema: createSessionBodySchema } } } },
+  responses: {
+    201: { description: "Session created", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/sessions",
+  tags: ["Sessions"],
+  summary: "Admin oversight: list/filter all sessions (institute/project/student/counsellor/status/date range)",
+  request: { query: listSessionsQuerySchema },
+  responses: {
+    200: { description: "List of sessions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/sessions/{id}",
+  tags: ["Sessions"],
+  summary: "Get a session by id",
+  request: { params: sessionIdParamsSchema },
+  responses: {
+    200: { description: "Session", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/sessions/{id}/meeting-link",
+  tags: ["Sessions"],
+  summary: "Manually set/replace the meeting link (no Calendly/Google Meet integration yet — plain opaque string, also shared with the parent)",
+  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: setMeetingLinkBodySchema } } } },
+  responses: {
+    200: { description: "Updated session", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/join",
+  tags: ["Sessions"],
+  summary: "Record a Join Now click and reveal the meeting link. Window: T-minus-10-minutes through the session's endTime.",
+  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: joinSessionBodySchema } } } },
+  responses: {
+    200: { description: "Session + meetingLink", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/complete",
+  tags: ["Sessions"],
+  summary: "Mark a session COMPLETED (the \"Session Completed\" button). Advances workflowStatus to SESSION_1_COMPLETED / SESSION_2_COMPLETED.",
+  request: { params: sessionIdParamsSchema },
+  responses: {
+    200: { description: "Updated session", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/sessions/{id}/notes",
+  tags: ["Sessions"],
+  summary: "Counsellor adds/updates session notes (independent of the scheduling flow)",
+  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: setNotesBodySchema } } } },
+  responses: {
+    200: { description: "Updated session", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/reschedule",
+  tags: ["Sessions"],
+  summary: "Reschedule to a new date/time for the same (already-locked) counsellor. Student-initiated reschedules are blocked within 24h of the session.",
+  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: rescheduleSessionBodySchema } } } },
+  responses: {
+    200: { description: "Updated session", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/cancel",
+  tags: ["Sessions"],
+  summary: "Cancel a session and release its slot back to OPEN",
+  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: cancelSessionBodySchema } } } },
+  responses: {
+    200: { description: "Cancelled session", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/send-day-reminder",
+  tags: ["Sessions"],
+  summary: "Manually trigger the same-day reminder email to student + parent (no scheduler/cron exists yet — same gap as the Email module)",
+  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: sendDayReminderBodySchema } } } },
+  responses: {
+    202: { description: "Reminder sent", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+// --- Email ---
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/email/templates",
+  tags: ["Email"],
+  summary: "List available email template keys",
+  responses: {
+    200: { description: "Template keys", content: { "application/json": { schema: genericObjectSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/email/send",
+  tags: ["Email"],
+  summary: "Render a template with merge data and send it via the configured email provider",
+  request: { body: { content: { "application/json": { schema: sendTemplateEmailBodySchema } } } },
+  responses: {
+    202: { description: "Email accepted by the provider", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
   },
 });
 

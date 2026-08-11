@@ -38,9 +38,18 @@ assessmentRouter.put(
   asyncHandler(assessmentController.saveAssessmentAnswers)
 );
 
-// Finalize: validates every question in the cohort has an answer, then locks the attempt.
+// Finalize: validates every question in the cohort has an answer, locks the attempt,
+// then computes and stores the AssessmentResult (scoring engine).
 assessmentRouter.post(
   "/attempts/:attemptId/submit",
   validate({ params: attemptIdParamsSchema }),
   asyncHandler(assessmentController.submitAttempt)
+);
+
+// Computed scoring report for a submitted attempt (trait scores + grades, DCS/DPS,
+// Stream Fit, reliability dashboard). 404 until the attempt is submitted.
+assessmentRouter.get(
+  "/attempts/:attemptId/result",
+  validate({ params: attemptIdParamsSchema }),
+  asyncHandler(assessmentController.getAssessmentResult)
 );

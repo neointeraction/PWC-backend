@@ -1,5 +1,11 @@
+import type { WorkflowStatus } from "@prisma/client";
 import { z } from "zod";
 import { emailSchema, phoneSchema } from "../../common/validators/shared.js";
+import { WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
+
+export const workflowStatusSchema = z.enum(
+  WORKFLOW_STATUS_ORDER as [WorkflowStatus, ...WorkflowStatus[]]
+);
 
 export const createStudentSchema = z.object({
   firstName: z.string().trim().min(1),
@@ -45,5 +51,11 @@ export const studentIdParamsSchema = z.object({
 export const listStudentsQuerySchema = z.object({
   projectId: z.string().cuid().optional(),
   divisionId: z.string().cuid().optional(),
+  workflowStatus: workflowStatusSchema.optional(),
 });
 export type ListStudentsQuery = z.infer<typeof listStudentsQuerySchema>;
+
+export const updateWorkflowStatusBodySchema = z.object({
+  workflowStatus: workflowStatusSchema,
+});
+export type UpdateWorkflowStatusBody = z.infer<typeof updateWorkflowStatusBodySchema>;

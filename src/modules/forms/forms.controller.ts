@@ -5,7 +5,14 @@ import type {
   FormTypeParams,
   GetFormTemplateQuery,
   SaveFormAnswersBody,
+  StudentFormStatusParams,
 } from "./forms.schema.js";
+
+export async function getFormStatus(req: Request, res: Response): Promise<void> {
+  const { studentId } = req.params as unknown as StudentFormStatusParams;
+  const status = await formsService.getFormStatus(studentId);
+  res.status(200).json(status);
+}
 
 export async function getFormTemplate(req: Request, res: Response): Promise<void> {
   const { formType } = req.params as unknown as FormTypeParams;

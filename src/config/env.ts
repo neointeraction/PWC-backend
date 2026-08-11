@@ -10,12 +10,33 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRES_IN: z.string().default("15m"),
   JWT_REFRESH_EXPIRES_IN: z.string().default("7d"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
+
+  // Bootstraps the one SUPER_ADMIN account (prisma/seed.ts) — there's no self-register
+  // endpoint, so this is the only way to get a first login. Change the password after
+  // first login in any non-local environment.
+  SEED_SUPER_ADMIN_EMAIL: z.string().email().default("superadmin@kreate.local"),
+  SEED_SUPER_ADMIN_PASSWORD: z.string().min(8).default("ChangeMe123!"),
+
+  // Email — EMAIL_PROVIDER selects the active provider so it can be swapped without
+  // touching call sites. "console" just logs the email (safe default for local dev).
+  EMAIL_PROVIDER: z.enum(["console", "mailgun"]).default("console"),
+  EMAIL_FROM_NAME: z.string().default("Team kREATE"),
+  EMAIL_FROM_ADDRESS: z.string().email().default("noreply@example.com"),
+  MAILGUN_API_KEY: z.string().optional(),
+  MAILGUN_DOMAIN: z.string().optional(),
+  // "us" (Mailgun's American endpoint, api.mailgun.net) or "eu" (api.eu.mailgun.net).
+  MAILGUN_REGION: z.enum(["us", "eu"]).default("us"),
 });
 
 const parsed = envSchema.safeParse(process.env);
 
 if (!parsed.success) {
   console.error("Invalid environment variables:", parsed.error.flatten().fieldErrors);
+  throw new Error("Invalid environment variables");
+}
+
+if (parsed.data.EMAIL_PROVIDER === "mailgun" && (!parsed.data.MAILGUN_API_KEY || !parsed.data.MAILGUN_DOMAIN)) {
+  console.error("MAILGUN_API_KEY and MAILGUN_DOMAIN are required when EMAIL_PROVIDER=mailgun");
   throw new Error("Invalid environment variables");
 }
 

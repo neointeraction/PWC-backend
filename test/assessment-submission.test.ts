@@ -18,7 +18,8 @@ function buildAnswer(question: AssessmentQuestion): unknown {
   if (question.format === "MCQ_SINGLE") {
     return question.options?.[0]?.value ?? "A";
   }
-  return "3"; // LIKERT_5
+  return "5"; // LIKERT_5 — "Strongly Agree" so interest/personality traits score high
+              // enough to clear the Fit qualifying floor and surface recommendations.
 }
 
 describe("Assessment submission API", () => {
@@ -72,6 +73,20 @@ describe("Assessment submission API", () => {
     await prisma.project.deleteMany({ where: { name: "Test Project Assessment Submission" } });
     await prisma.institute.deleteMany({ where: { name: "Test Institute Assessment Submission" } });
     await prisma.$disconnect();
+  });
+
+  it("lists questions in the interleaved presentation order, not grouped by trait", async () => {
+    const res = await request(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
+    expect(res.status).toBe(200);
+    const displayOrders = res.body.map((q: { displayOrder: number }) => q.displayOrder);
+    // Returned sorted by displayOrder 1..73.
+    expect(displayOrders).toEqual([...displayOrders].sort((a, b) => a - b));
+    expect(displayOrders[0]).toBe(1);
+    // The first delivered question is Q13 (Social) — traits are interleaved, so the
+    // opening run is NOT all-RIASEC-then-all-BigFive.
+    expect(res.body[0].questionCode).toBe("Q13");
+    const firstSixSections = res.body.slice(0, 6).map((q: { section: string }) => q.section);
+    expect(new Set(firstSixSections).size).toBeGreaterThan(1);
   });
 
   it("starts a new attempt", async () => {
@@ -139,6 +154,37 @@ describe("Assessment submission API", () => {
     expect(submitRes.status).toBe(200);
     expect(submitRes.body.status).toBe("SUBMITTED");
     expect(submitRes.body.submittedAt).not.toBeNull();
+
+    // The scoring engine ran on submit — the computed report is now retrievable.
+    const resultRes = await request(app).get(`/api/v1/assessment/attempts/${attempt.body.id}/result`);
+    expect(resultRes.status).toBe(200);
+    expect(Object.keys(resultRes.body.traitScores)).toHaveLength(18);
+    expect(resultRes.body.dominantCareerStyle).toBeTruthy();
+    expect(resultRes.body.report.reliability.aci).toBeTruthy();
+    // All "Strongly Agree" (5) Likert responses -> every interest/personality trait at 100%.
+    expect(resultRes.body.report.riasec.scores[0].score).toBe(100);
+
+    // Recommendations are the top qualifying options (Fit Score >= 60): at most 3, and
+    // every one surfaced must clear the floor. recommendedStreams mirrors streamFit.top3.
+    const streamTop3 = resultRes.body.report.streamFit.top3;
+    expect(streamTop3.length).toBeGreaterThan(0);
+    expect(streamTop3.length).toBeLessThanOrEqual(3);
+    expect(streamTop3.every((s: { fitScore: number }) => s.fitScore >= 60)).toBe(true);
+    expect(resultRes.body.recommendedStreams).toHaveLength(streamTop3.length);
+
+    // Graduation Pathways always computes; Career Fit resolves against the seeded
+    // career library, with a representative career per top qualifying domain.
+    const gradTop3 = resultRes.body.report.graduationPathways.top3;
+    expect(gradTop3.length).toBeGreaterThan(0);
+    expect(gradTop3.length).toBeLessThanOrEqual(3);
+    expect(gradTop3.every((g: { fitScore: number }) => g.fitScore >= 60)).toBe(true);
+
+    const careerFit = resultRes.body.report.careerFit;
+    expect(careerFit).not.toBeNull();
+    expect(careerFit.top3Industries.length).toBeGreaterThan(0);
+    expect(careerFit.top6Domains.length).toBeGreaterThan(0);
+    expect(careerFit.top6Domains.every((d: { fitScore: number }) => d.fitScore >= 60)).toBe(true);
+    expect(careerFit.top6Domains[0].representativeCareer.jobRole).toBeTruthy();
 
     const resaveRes = await request(app)
       .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)

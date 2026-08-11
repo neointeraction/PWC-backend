@@ -12,12 +12,12 @@ Institute (tenant)
  ├─ Counsellor ── ProjectCounsellor ─┐  │
  └─ Project (counselling cycle)     │  │
        ├─ Student ─────────────────┴──┘
-       ├─ CounsellorAvailability
+       ├─ CounsellorSlot
        └─ ProjectCounsellor
 
 Student
  ├─ User (1:1, role=STUDENT)
- ├─ Session (x2: SESSION_1, SESSION_2)
+ ├─ Session (x2: SESSION_1, SESSION_2) ── CounsellorSlot (1:1, the slot it consumed)
  ├─ FormSubmission (profile / pre-counselling / feedback)
  ├─ AssessmentAttempt → AssessmentResult
  ├─ CounsellorChart (1:1)
@@ -25,7 +25,7 @@ Student
 
 Counsellor
  ├─ User (1:1, role=COUNSELLOR)
- ├─ CounsellorAvailability (per project)
+ ├─ CounsellorSlot (per project — discrete bookable slots)
  ├─ ProjectCounsellor (assigned projects)
  ├─ Session (as the assigned counsellor)
  └─ CareerLibraryRequest (submitted by)
@@ -67,15 +67,20 @@ the base user yet).
 | createdAt, updatedAt | DateTime | |
 
 ### `RefreshToken`
-Hashed refresh tokens, one row per active session, revocable individually.
+Hashed refresh tokens, one row per active session, revocable individually. Written by
+`src/modules/auth/auth.service.ts` — `tokenHash` is a SHA-256 digest of the opaque
+random token handed to the client in an httpOnly cookie (the raw token itself is never
+persisted). `POST /auth/refresh` rotates: the presented token's row gets `revokedAt`
+set and a new row is created, so a stolen-then-reused refresh token fails on its second
+use. `POST /auth/logout` just sets `revokedAt` on the current row.
 
 | Field | Type | Notes |
 |---|---|---|
 | id | String (cuid) | PK |
-| tokenHash | String | unique |
+| tokenHash | String | unique, SHA-256 of the raw token |
 | userId | String | FK → User, cascade delete |
-| expiresAt | DateTime | |
-| revokedAt | DateTime? | null while active |
+| expiresAt | DateTime | `now() + JWT_REFRESH_EXPIRES_IN` at issue time |
+| revokedAt | DateTime? | null while active; set on refresh (rotation) or logout |
 
 ### `Institute`
 The tenant. Onboarded by Super Admin.
@@ -121,16 +126,27 @@ specific projects via `ProjectCounsellor`.
 Join table: which counsellors are assigned to which project. Unique on
 `(projectId, counsellorId)`.
 
-### `CounsellorAvailability`
-Recurring weekly availability window, **scoped per project** — the same counsellor can
-have different hours on different projects.
+### `CounsellorSlot`
+Discrete, individually-bookable slot — **not** a recurring weekly pattern. Fed into the
+system **once**, at project creation, from the institute's counsellor-availability
+Excel sheet (`Counsellor ID, Counsellor Name, Date, Day, Time Slot, Start Time, End
+Time`), one row per bookable instance. Never added to afterward (single upload, ever —
+see `docs/session-scheduling-use-cases.md` resolved decisions #1 and B). A slot moves
+`OPEN → BOOKED` when a `Session` is created against it (`sessionId` set), and back to
+`OPEN` if that session is later cancelled or rescheduled off of it.
 
 | Field | Type | Notes |
 |---|---|---|
 | counsellorId | String | FK → Counsellor |
 | projectId | String | FK → Project |
-| daysOfWeek | `Weekday[]` | native Postgres array (MON..SUN) |
+| slotDate | Date | |
 | startTime, endTime | String | "HH:mm", 24h |
+| status | `SlotStatus` enum | OPEN / BOOKED |
+| sessionId | String? | FK → Session, unique — the session currently holding this slot |
+
+Unique on `(counsellorId, slotDate, startTime)`. This model replaced the earlier
+`CounsellorAvailability` (a recurring `daysOfWeek[] + startTime/endTime` rule), which
+didn't match the real flow.
 
 ### `Student`
 Extends `User` (role=STUDENT).
@@ -175,8 +191,12 @@ SESSION_2_COMPLETED → COUNSELLOR_FEEDBACK → STUDENT_PARENT_FEEDBACK → CLOS
 ### `Session`
 One row per counselling session (max 2 per student: `SESSION_1`, `SESSION_2`).
 Session 1 is booked **blind** — the student picks an open slot without seeing whose it
-is, and `counsellorId` is derived from the slot owner at booking time. Session 2 must
-reuse the same `counsellorId` as Session 1 (enforced in the service layer, not the DB).
+is, and `counsellorId` is derived from the slot owner at booking time (first-available
+`CounsellorSlot` matching the picked date/time, in upload/creation order — see
+`docs/session-scheduling-use-cases.md` resolved decision A). Session 2 must reuse the
+same `counsellorId` as Session 1, and every future reschedule of either session keeps
+that same counsellor (enforced in the service layer via `CounsellorSlot`, not a DB
+constraint).
 
 | Field | Type | Notes |
 |---|---|---|
@@ -186,6 +206,9 @@ reuse the same `counsellorId` as Session 1 (enforced in the service layer, not t
 | scheduledDate | Date | |
 | startTime, endTime | String | "HH:mm" |
 | status | `SessionStatus` enum | SCHEDULED / COMPLETED / RESCHEDULED / CANCELLED |
+| meetingLink | String? | plain opaque string — pasted manually (Admin/Counsellor); no Calendly/Google Meet integration yet. Also what's emailed to the parent (same link, no separate access control). |
+| studentJoinedAt, counsellorJoinedAt | DateTime? | set on the "Join Now" click, not just on window entry |
+| studentNoShow, counsellorNoShow | Boolean | lazily reconciled on read once `endTime` has passed with no matching join timestamp — see "Deliberate scope gaps" |
 | notes | String? | counsellor's session notes/agenda |
 | cancellationReason | `CancellationReason`? | STUDENT_UNAVAILABLE / COUNSELLOR_UNAVAILABLE / INSTITUTION_REQUEST / OTHER |
 | cancellationNotes | String? | free text |
@@ -193,7 +216,11 @@ reuse the same `counsellorId` as Session 1 (enforced in the service layer, not t
 
 Unique constraints: `(studentId, sessionNumber)` — a student can't double-book the same
 session number; `(counsellorId, scheduledDate, startTime)` — prevents double-booking a
-counsellor's slot.
+counsellor's slot. Also has a 1:1 back-reference from `CounsellorSlot.sessionId`, the
+slot this session currently holds (released back to `OPEN` on cancel/reschedule).
+
+"Join Now" stays active from 10 minutes before `startTime` through `endTime` — a party
+can join late, any time up to the scheduled end (resolved decision E).
 
 ### `CareerLibraryEntry`
 Central, PWC-owned career database. Populated from `Career Library_Updated_0508.xlsx`
@@ -324,35 +351,67 @@ date, parent name) are **not** stored as `FormQuestion`/`FormAnswer` rows — th
 derivable from `FormSubmission.studentId` / `submittedAt` and the student's assigned
 counsellor, so storing them again would be redundant.
 
+**Feedback scoring** (Counsellor Satisfaction Score) adds **no tables** — it's derived
+on demand from the submitted `FEEDBACK_STUDENT` / `FEEDBACK_PARENT` submissions by
+`src/modules/feedback/` (methodology: `docs/10…Feedback Form_Rating Methodology.pdf`).
+Each form's sections are identified by their question `fieldKey` prefix (`sse_`→S-SE,
+`scd_`→S-CD, …, `prc_`→P-RC); section % = (avg ÷ 5) × 100, weighted per section, then
+student 80% / parent 20%. A student's Final Score % requires **both** forms submitted;
+the counsellor's Overall Score % averages the Final Score % of their complete-pair
+students (linked via `Session`). Nothing is persisted — recomputed each request.
+
 ### Assessment — `AssessmentQuestion` / `AssessmentAttempt` / `AssessmentAnswer` / `AssessmentResult`
 
 Real content is seeded for cohort `CLASS_9_10` (`prisma/seed-data/assessment/class9to10.ts`):
 73 questions across four sections — RIASEC interest inventory (24, Likert), Big Five
 personality (20, Likert), Aptitude reasoning (20, single-correct MCQ with
-difficulty/weight), and Cognitive & Decision Style (9, Likert). PWC's proprietary
-scoring/weighting logic for trait aggregation and career-stream mapping is still
-pending — only the per-question `weight` and `difficulty` tags present in the source
-form are captured.
+difficulty/weight), and Cognitive & Decision Style (9, Likert). The aptitude
+`correctOption` answer key is seeded from the official questionnaire PDF, so attempts
+are auto-scored on submit.
 
-**`correctOption` is intentionally left unset for every aptitude question.** The source
-form doesn't mark correct answers, and guessing them would silently bake a possibly-wrong
-answer key into real student scoring — PWC needs to supply/confirm the official key
-before these can be auto-graded.
+**Scoring engine** (`src/modules/assessment/scoring/`): a set of pure functions run on
+submit. Trait % scoring, grading bands, tie-breaks and profile flags per the Assessment
+Tool Construct; Dominant Career Style (top-3 RIASEC → 1 of 120 codes) and Dominant
+Personality Style (top-2 Big Five → 1 of 20 codes); Stream Fit (weighted match against
+Class 11&12 sub-streams); and the reliability measures (Difficulty Consistency, ACI,
+ORI, RVS); Stream Fit; Graduation Pathways; and Career Fit. The lookup/weight tables and
+code-style descriptions are generated from the Traits & Weightages workbook by
+`scripts/export-assessment-scoring.py` into `scoring/data/*.ts` (bundled as TS so they
+compile into `dist` for runtime — they are scoring config, not queryable reference
+data). RVS uses the confirmed "sum" aggregation (`100 − Σ per-pair penalties`) so the
+grade bands are reachable.
+
+Career Fit ranks at the **domain** level: the workbook's "Domain Wtg" sheet is keyed by
+`(industry, domain)` — 40 industries carry a single "All Domains" row, while Defence /
+Merchant Navy / Entrepreneurship enumerate specific domains (a few of those rows sum to
+85-95, so the engine normalizes by weight total). Each career-library domain resolves its
+weights as exact `(industry, domain)` → industry "All Domains" → industry average. The
+top 6 industries' best domains become the career cards, one representative career each
+(highest AI-resilience). Graduation Pathways applies the same weighted method to the
+`Graduate_Streams` sheet (72 options, all summing to 100). **Deferred pending PWC
+sign-off**: only Time-Consistency + composite ARI (need per-question timing). See the
+"unresolved" list below.
 
 - `AssessmentQuestion`: `cohort, section` (`AssessmentSection`: RIASEC / BIG_FIVE /
   APTITUDE / COGNITIVE), `questionCode, fieldKey, questionText, format`
   (`AssessmentQuestionFormat`: LIKERT_5 / MCQ_SINGLE), `options` (Json, MCQ_SINGLE only),
   `trait, traitCode` (e.g. "REALISTIC"/"R1", "NUMERICAL"/"NR1"), `difficulty`
-  (aptitude only), `weight`, `correctOption` (aptitude only, currently unset). Unique on
+  (aptitude only), `weight`, `correctOption` (aptitude only). Unique on
   `(cohort, fieldKey)` and on `(cohort, order)` — same reasoning as `FormQuestion`: a
   future cohort (e.g. Class 11-12, with its own question count per the FSD) gets its
-  own `cohort` value and its own independent order sequence.
+  own `cohort` value and its own independent order sequence. Reverse-keyed items and
+  RVS mirror pairs are held in the scoring config, not on the row (a question can be in
+  more than one mirror pair).
 - `AssessmentAttempt`: one per student attempt, `status` (IN_PROGRESS / SUBMITTED),
   `startedAt, submittedAt`.
 - `AssessmentAnswer`: one per `(attemptId, questionId)`, `selectedOption` as Json (a
-  Likert value 1-5, or an MCQ option letter).
-- `AssessmentResult`: 1:1 with an attempt, `traitScores` (Json map of trait → score),
-  `recommendedStreams` (String[]), `summary`.
+  Likert value 1-5, or an MCQ option letter), plus optional `timeTakenMs` (per-question
+  elapsed time; feeds the aptitude Time-Consistency measure once the frontend sends it).
+- `AssessmentResult`: 1:1 with an attempt. `traitScores` (Json flat map trait → 0-100),
+  `report` (Json — the full computed report: layer scores + grades, DCS/DPS, Stream Fit,
+  reliability dashboard), `recommendedStreams` (String[], Stream Fit top-3),
+  `dominantCareerStyle` / `dominantPersonalityStyle` (denormalized style labels),
+  `engineVersion`, `summary`.
 
 ### `CounsellorChart`
 Auto-generated on assessment completion (aggregating pre-counselling + parent
@@ -363,11 +422,23 @@ sessions. 1:1 with `Student`.
 |---|---|---|
 | strengths, hobbies | String[] | counsellor-edited during sessions |
 | careerShortlist | String[] | narrowed from 6 → 2 across Session 1 → Session 2 |
-| rawData | Json | snapshot of pre-counselling + parent + assessment data |
-| lastEditedBy | String? | Counsellor id |
+| rawData | Json? | optional snapshot; the chart is assembled live on GET, not from here |
+| scri* (6 indicators) + scriTotal/scriBand/scriBandLabel | Int?/String? | Student Career Readiness Index — each indicator 1–4; total/band/label derived on save |
+| academicTrend | `AcademicTrend`? | IMPROVING / STABLE / DECLINING / NOT_ASSESSED |
+| alignmentRating | `AlignmentRating`? | Academic × Career alignment |
+| finalizedAt | DateTime? | set on finalize (advances workflow to `COUNSELLOR_FEEDBACK`) |
+| lastEditedBy | String? | Counsellor id (audit stamp, not an FK) |
 
-Exact editable field shape is provisional — pending the actual Counsellor Chart
-template from PWC.
+`CounsellorChartNote` (child, `@@unique([chartId, code])`) holds one synthesis note per
+section code (`A1`..`H4`). The chart is **assembled live** by `src/modules/counsellor-chart/`
+(profile + both pre-counselling forms side-by-side + assessment result + flagged mirror
+pairs); only the counsellor-authored fields above are persisted.
+
+**Mirror-pair amendments** write to `AssessmentAnswer.counsellorOverrideOption`
+(`+ overriddenByCounsellorId/overriddenAt`), preserving the student's original
+`selectedOption`. Scoring uses `override ?? selectedOption`, so an amendment re-runs the
+whole engine and updates the `AssessmentResult` — the counsellor's change affects the
+actual results, not just RVS.
 
 ### `Report`
 Generated PDF outputs. One student can have multiple report rows (different
@@ -383,32 +454,44 @@ audiences).
 
 ## Deliberate scope gaps (not modeled yet)
 
-- **Assessment scoring/weighting logic** — PWC's proprietary rules for turning trait
-  scores into recommended career streams aren't supplied; `AssessmentResult.traitScores`
-  /`recommendedStreams` exist as storage but nothing computes them yet. Aptitude
-  `correctOption` is also unset for the same reason (see Assessment section above).
+- **Assessment scoring — deferred components.** The core engine ships (see Assessment
+  section above), but four report pieces await PWC confirmation and are `null`/omitted
+  until then: **Time-Consistency + composite ARI** — needs per-question `timeTakenMs`
+  from the frontend; the field and engine hook exist and activate automatically once
+  timing arrives. Everything else in the report is live. Two interpretation calls,
+  confirmed with PWC and documented in code: (a) RVS uses "sum" aggregation (the
+  Construct's "average" wording would make the lower grade bands unreachable); (b) a
+  Difficulty-Consistency clean sweep is treated as non-penalized (a perfect aptitude
+  pattern isn't one of the 6 "unusual" signatures). Career Fit ranks at domain level and
+  normalizes the few non-100 weight rows.
 - **Institution subscription fields** (renewal date, seats, career-library-sync status)
   — mentioned in the functional spec but no concrete field list supplied yet.
 - **Notification log** — email/reminder delivery isn't persisted; sending is treated as
   a side effect, not a DB record, for now.
 - **Audit log** (chart edits, report access, admin approvals) — a cross-cutting
   security requirement from the spec, not yet modeled as a table.
-- **Slot materialization** — `Session` booking is blind (counsellor derived from the
-  chosen slot), but available slots are computed on the fly from
-  `CounsellorAvailability` minus existing `Session` rows, rather than a persisted slot
-  inventory table.
+- **No-show reconciliation timing** — `studentNoShow`/`counsellorNoShow` are set
+  lazily, on the next read of a session after its `endTime` has passed with no
+  matching join timestamp, rather than by a background job. Functionally equivalent
+  for a UI that reads sessions on every dashboard load, but the flag won't flip until
+  something reads that session again.
+- **Real meeting-link generation** — `Session.meetingLink` is a plain opaque string,
+  populated manually. No Calendly/Google Meet integration exists.
+- **Session-scheduling role checks** — the Sessions API has no auth/role enforcement
+  yet (matches the rest of the app); `role`/`initiatedBy` are trusted request body
+  fields, not derived from an authenticated caller.
 
-## Known conflicts between source documents (unresolved)
+## Known conflicts between source documents (resolved)
 
 These came from comparing the original Functional Specification Document against the
-later Prompt Engineering Doc — flagged for confirmation, not yet reflected as a schema
-decision either way:
+later Prompt Engineering Doc — resolved via a direct walkthrough with the user on
+2026-08-06 (see `docs/session-scheduling-use-cases.md` for the full resolution log) and
+now reflected in the `CounsellorSlot`/`Session` schema and the Sessions module:
 
-1. **Session booking flow**: earlier doc describes truly blind booking with the
-   counsellor assigned from the slot; a later wireframe shows the counsellor already
-   named before slot selection, with Session 1 and Session 2 picked together in one
-   step. Current schema/service assumes blind booking (see above) — confirmed via a
-   direct question, but the wireframe still visually contradicts it.
+1. **Session booking flow**: confirmed **blind** — the student never sees the
+   counsellor; `counsellorId` is derived from the first-available slot matching their
+   date/time pick. Session 1 and Session 2 are booked together in one atomic flow, and
+   Session 2 is locked to Session 1's counsellor with a minimum 2-calendar-day gap.
 2. **Report/download gating**: one doc gates report *generation* on both student and
    parent feedback; another gates only the *download* action on parent feedback
    specifically, with no mention of student feedback gating anything.

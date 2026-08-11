@@ -5,13 +5,15 @@ import { createApp } from "../src/app.js";
 const app = createApp();
 
 describe("Assessment API", () => {
-  it("returns all 73 seeded questions for the cohort, ordered", async () => {
+  it("returns all 73 seeded questions in the interleaved presentation order", async () => {
     const res = await request(app).get("/api/v1/assessment/questions").query({ cohort: "CLASS_9_10" });
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(73);
-    expect(res.body[0].order).toBe(1);
-    expect(res.body.at(-1).order).toBe(73);
+    // Delivered sorted by displayOrder 1..73 (not by the logical/grouped `order`).
+    expect(res.body[0].displayOrder).toBe(1);
+    expect(res.body.at(-1).displayOrder).toBe(73);
+    expect(res.body[0].order).toBe(13); // Q13 (Social) is shown first
   });
 
   it("filters by section", async () => {

@@ -1,0 +1,44 @@
+import { Router } from "express";
+import { asyncHandler } from "../../common/utils/asyncHandler.js";
+import { validate } from "../../common/middlewares/validate.js";
+import * as controller from "./counsellor-chart.controller.js";
+import {
+  amendmentBodySchema,
+  amendmentParamsSchema,
+  putCounsellorChartBodySchema,
+  studentIdParamsSchema,
+} from "./counsellor-chart.schema.js";
+
+export const counsellorChartRouter = Router();
+
+// Assemble the full chart for a student (profile + both pre-counselling questionnaires
+// side-by-side + assessment result + flagged mirror pairs + saved counsellor content).
+// Lazily creates an empty chart row if none exists.
+counsellorChartRouter.get(
+  "/students/:studentId",
+  validate({ params: studentIdParamsSchema }),
+  asyncHandler(controller.getCounsellorChart)
+);
+
+// Partial save of counsellor-authored content: synthesis notes, SCRI ratings, academic
+// trend, alignment rating, strengths/hobbies/career shortlist. Recomputes the SCRI band.
+counsellorChartRouter.put(
+  "/students/:studentId",
+  validate({ params: studentIdParamsSchema, body: putCounsellorChartBodySchema }),
+  asyncHandler(controller.updateCounsellorChart)
+);
+
+// Amend a flagged mirror-pair answer — overrides the student's response (original kept)
+// and re-scores the whole assessment. Returns the recomputed AssessmentResult.
+counsellorChartRouter.post(
+  "/students/:studentId/mirror-pair-amendments",
+  validate({ params: studentIdParamsSchema, body: amendmentBodySchema }),
+  asyncHandler(controller.applyMirrorPairAmendment)
+);
+
+// Revert an amendment back to the student's original answer, then re-score.
+counsellorChartRouter.delete(
+  "/students/:studentId/mirror-pair-amendments/:questionCode",
+  validate({ params: amendmentParamsSchema }),
+  asyncHandler(controller.revertMirrorPairAmendment)
+);

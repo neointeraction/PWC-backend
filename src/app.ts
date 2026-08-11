@@ -11,6 +11,10 @@ import { studentsRouter } from "./modules/students/students.routes.js";
 import { formsRouter } from "./modules/forms/forms.routes.js";
 import { assessmentRouter } from "./modules/assessment/assessment.routes.js";
 import { careerLibraryRouter } from "./modules/career-library/career-library.routes.js";
+import { counsellorChartRouter } from "./modules/counsellor-chart/counsellor-chart.routes.js";
+import { feedbackRouter } from "./modules/feedback/feedback.routes.js";
+import { sessionsRouter } from "./modules/sessions/sessions.routes.js";
+import { emailRouter } from "./modules/email/email.routes.js";
 import { docsRouter } from "./modules/docs/docs.routes.js";
 
 export function createApp(): Express {
@@ -33,6 +37,10 @@ export function createApp(): Express {
   app.use("/api/v1/forms", formsRouter);
   app.use("/api/v1/assessment", assessmentRouter);
   app.use("/api/v1/career-library", careerLibraryRouter);
+  app.use("/api/v1/counsellor-chart", counsellorChartRouter);
+  app.use("/api/v1/feedback", feedbackRouter);
+  app.use("/api/v1/sessions", sessionsRouter);
+  app.use("/api/v1/email", emailRouter);
   app.use("/docs", docsRouter);
 
   app.use(notFoundHandler);
