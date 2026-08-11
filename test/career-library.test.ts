@@ -1,4 +1,5 @@
 import request from "supertest";
+import { authRequest } from "./helpers/http.js";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 
@@ -6,7 +7,7 @@ const app = createApp();
 
 describe("Career Library API", () => {
   it("lists entries with pagination metadata", async () => {
-    const res = await request(app).get("/api/v1/career-library");
+    const res = await authRequest(app).get("/api/v1/career-library");
 
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data)).toBe(true);
@@ -16,7 +17,7 @@ describe("Career Library API", () => {
   });
 
   it("searches by free text across jobRole/cluster/industry/domain/description", async () => {
-    const res = await request(app).get("/api/v1/career-library").query({ search: "Data Scientist" });
+    const res = await authRequest(app).get("/api/v1/career-library").query({ search: "Data Scientist" });
 
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThanOrEqual(1);
@@ -24,7 +25,7 @@ describe("Career Library API", () => {
   });
 
   it("filters by cluster/industry/domain/aiResilienceGrade", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .get("/api/v1/career-library")
       .query({ cluster: "Information Technology & Digital" });
 
@@ -38,7 +39,7 @@ describe("Career Library API", () => {
   });
 
   it("respects pagination params", async () => {
-    const res = await request(app).get("/api/v1/career-library").query({ page: 2, pageSize: 5 });
+    const res = await authRequest(app).get("/api/v1/career-library").query({ page: 2, pageSize: 5 });
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(5);
@@ -46,13 +47,13 @@ describe("Career Library API", () => {
   });
 
   it("rejects an out-of-range pageSize with 400", async () => {
-    const res = await request(app).get("/api/v1/career-library").query({ pageSize: 1000 });
+    const res = await authRequest(app).get("/api/v1/career-library").query({ pageSize: 1000 });
 
     expect(res.status).toBe(400);
   });
 
   it("returns distinct filter option lists", async () => {
-    const res = await request(app).get("/api/v1/career-library/filters");
+    const res = await authRequest(app).get("/api/v1/career-library/filters");
 
     expect(res.status).toBe(200);
     expect(res.body.clusters).toContain("Information Technology & Digital");
@@ -61,10 +62,10 @@ describe("Career Library API", () => {
   });
 
   it("gets a single entry by id with related UG institutions/courses/entrance exams", async () => {
-    const list = await request(app).get("/api/v1/career-library").query({ search: "Data Scientist" });
+    const list = await authRequest(app).get("/api/v1/career-library").query({ search: "Data Scientist" });
     const id = list.body.data.find((e: { jobRole: string }) => e.jobRole === "Data Scientist").id;
 
-    const res = await request(app).get(`/api/v1/career-library/${id}`);
+    const res = await authRequest(app).get(`/api/v1/career-library/${id}`);
 
     expect(res.status).toBe(200);
     expect(res.body.jobRole).toBe("Data Scientist");
@@ -82,7 +83,7 @@ describe("Career Library API", () => {
   });
 
   it("returns 404 for an unknown id", async () => {
-    const res = await request(app).get("/api/v1/career-library/cknownid0000000000000000");
+    const res = await authRequest(app).get("/api/v1/career-library/cknownid0000000000000000");
 
     expect(res.status).toBe(404);
   });

@@ -13,6 +13,7 @@ import type { AnsweredQuestion, Difficulty, Layer, TraitKey } from "./scoring/ty
 const MIRROR_PAIR_QUESTION_CODES = new Set(MIRROR_PAIRS.flatMap((p) => [p.a, p.b]));
 import type {
   ListAssessmentQuestionsQuery,
+  PreviewScoreBody,
   SaveAssessmentAnswersBody,
   StartAttemptBody,
 } from "./assessment.schema.js";
@@ -47,6 +48,42 @@ export async function listAssessmentQuestions(query: ListAssessmentQuestionsQuer
     orderBy: { displayOrder: "asc" },
     select: assessmentQuestionSelect,
   });
+}
+
+// Dev/QA-only: score a set of ad-hoc answers with no student, attempt, or persistence —
+// purely to inspect what the scoring engine produces for a given answer pattern. Answers
+// are keyed by `fieldKey`; anything unanswered is scored as neutral/incorrect.
+export async function previewAssessmentScore(input: PreviewScoreBody) {
+  const questions = await prisma.assessmentQuestion.findMany({ where: { cohort: input.cohort } });
+  if (questions.length === 0) {
+    throw new NotFoundError(`No assessment question bank found for cohort "${input.cohort}"`);
+  }
+
+  const responseByFieldKey = new Map(input.answers.map((a) => [a.fieldKey, a.response ?? null]));
+  const normalized: AnsweredQuestion[] = questions.map((q) => {
+    // Forgiving for a preview tool: an unanswered Likert item defaults to the neutral
+    // middle value (the engine rejects a null Likert), and an unanswered aptitude item
+    // stays null (scored as incorrect).
+    const provided = responseByFieldKey.get(q.fieldKey);
+    const raw = provided == null ? (q.format === "MCQ_SINGLE" ? null : "3") : provided;
+    return {
+      questionCode: q.questionCode,
+      section: q.section as Layer,
+      trait: q.trait as TraitKey,
+      traitCode: q.traitCode,
+      difficulty: (q.difficulty as Difficulty | null) ?? null,
+      weight: q.weight,
+      correctOption: q.correctOption,
+      format: q.format,
+      order: q.order,
+      response: normalizeResponse(raw),
+      timeTakenMs: null,
+    };
+  });
+
+  const startedAt = new Date();
+  const submittedAt = new Date(startedAt.getTime() + (input.durationMinutes ?? 30) * 60_000);
+  return buildReport(normalized, startedAt, submittedAt);
 }
 
 // Starts a new attempt, or returns the existing in-progress one for this
@@ -181,6 +218,38 @@ type AttemptAnswer = {
   timeTakenMs: number | null;
 };
 
+// Runs the scoring engine over normalized answers and fills in each top-6 domain's
+// representative career from the library (highest AI-resilience role, tie-broken by
+// job-role name). Shared by the real submit flow and the dev score-preview endpoint.
+async function buildReport(normalized: AnsweredQuestion[], startedAt: Date, submittedAt: Date) {
+  // Career Fit needs the career library: distinct (cluster, industry, domain) tuples
+  // plus, per (industry, domain), the roles available and their AI-resilience.
+  const { domainUnits, careersByKey } = await loadCareerLibraryForFit();
+
+  const report = scoreAssessment({
+    answers: normalized,
+    startedAt,
+    submittedAt,
+    domainUnits: domainUnits.length > 0 ? domainUnits : undefined,
+  });
+
+  if (report.careerFit) {
+    for (const domainFit of report.careerFit.top6Domains) {
+      const roles = careersByKey.get(`${domainFit.industry}||${domainFit.domain}`) ?? [];
+      const best = roles
+        .slice()
+        .sort(
+          (a, b) =>
+            aiResilienceRank(b.aiResilienceGrade) - aiResilienceRank(a.aiResilienceGrade) ||
+            a.jobRole.localeCompare(b.jobRole)
+        )[0];
+      domainFit.representativeCareer = best ?? null;
+    }
+  }
+
+  return report;
+}
+
 async function computeAndStoreResult(
   attemptId: string,
   questions: AttemptQuestion[],
@@ -209,33 +278,7 @@ async function computeAndStoreResult(
     };
   });
 
-  // Career Fit needs the career library: distinct (cluster, industry, domain) tuples
-  // plus, per (industry, domain), the roles available and their AI-resilience (the
-  // representative-career tiebreak). Fetched once here — submit is infrequent.
-  const { domainUnits, careersByKey } = await loadCareerLibraryForFit();
-
-  const report = scoreAssessment({
-    answers: normalized,
-    startedAt,
-    submittedAt,
-    domainUnits: domainUnits.length > 0 ? domainUnits : undefined,
-  });
-
-  // Resolve the representative career for each of the top-6 domains: highest
-  // AI-resilience role in that (industry, domain), tie-broken by job-role name.
-  if (report.careerFit) {
-    for (const domainFit of report.careerFit.top6Domains) {
-      const roles = careersByKey.get(`${domainFit.industry}||${domainFit.domain}`) ?? [];
-      const best = roles
-        .slice()
-        .sort(
-          (a, b) =>
-            aiResilienceRank(b.aiResilienceGrade) - aiResilienceRank(a.aiResilienceGrade) ||
-            a.jobRole.localeCompare(b.jobRole)
-        )[0];
-      domainFit.representativeCareer = best ?? null;
-    }
-  }
+  const report = await buildReport(normalized, startedAt, submittedAt);
 
   await prisma.assessmentResult.upsert({
     where: { attemptId },

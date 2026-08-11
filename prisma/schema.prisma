@@ -26,9 +26,10 @@ model User {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  student       Student?
-  counsellor    Counsellor?
-  refreshTokens RefreshToken[]
+  student             Student?
+  counsellor          Counsellor?
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
 
   @@map("users")
 }
@@ -45,6 +46,21 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// Stores hashed, single-use password-reset tokens (forgot-password flow). Only the hash
+// is persisted — the raw token lives only in the emailed reset link.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 // Tenant (educational institution). Onboarded by Super Admin.

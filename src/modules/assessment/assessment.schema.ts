@@ -26,3 +26,21 @@ export const saveAssessmentAnswersBodySchema = z.object({
   answers: z.array(assessmentAnswerInputSchema).min(1),
 });
 export type SaveAssessmentAnswersBody = z.infer<typeof saveAssessmentAnswersBodySchema>;
+
+// Dev/QA score-preview: run the scoring engine over ad-hoc answers with no student,
+// attempt, or persistence. Answers may be partial (unanswered questions score as
+// neutral/incorrect). `response` is the raw Likert value ("1".."5") or MCQ letter
+// ("A".."E"); `durationMinutes` feeds the completion-time (ORI) band (default 30).
+export const previewScoreBodySchema = z.object({
+  cohort: z.string().trim().min(1),
+  durationMinutes: z.coerce.number().positive().max(600).optional(),
+  answers: z
+    .array(
+      z.object({
+        fieldKey: z.string().trim().min(1),
+        response: z.union([z.string(), z.number()]).nullable().optional(),
+      })
+    )
+    .default([]),
+});
+export type PreviewScoreBody = z.infer<typeof previewScoreBodySchema>;

@@ -32,11 +32,38 @@ import {
   startAttemptBodySchema,
 } from "../modules/assessment/assessment.schema.js";
 import {
+  approveCareerRequestSchema,
   careerLibraryIdParamsSchema,
+  careerRequestIdParamsSchema,
+  createCareerEntrySchema,
+  createCareerRequestSchema,
   listCareerLibraryQuerySchema,
+  listCareerRequestsQuerySchema,
+  updateCareerEntrySchema,
 } from "../modules/career-library/career-library.schema.js";
 import { sendTemplateEmailBodySchema } from "../modules/email/email.schema.js";
-import { loginBodySchema } from "../modules/auth/auth.schema.js";
+import {
+  changePasswordBodySchema,
+  forgotPasswordBodySchema,
+  loginBodySchema,
+  resetPasswordBodySchema,
+} from "../modules/auth/auth.schema.js";
+import {
+  assignProjectBodySchema,
+  counsellorIdParamsSchema as counsellorCrudIdParamsSchema,
+  counsellorProjectParamsSchema,
+  createCounsellorSchema,
+  listCounsellorsQuerySchema,
+  updateCounsellorSchema,
+} from "../modules/counsellors/counsellors.schema.js";
+import {
+  createProjectSchema,
+  listProjectsQuerySchema,
+  projectIdParamsSchema,
+  updateProjectSchema,
+} from "../modules/projects/projects.schema.js";
+import { previewScoreBodySchema } from "../modules/assessment/assessment.schema.js";
+import { reportStudentParamsSchema } from "../modules/reports/reports.schema.js";
 import {
   bookSessionsBodySchema,
   bookingOptionsQuerySchema,
@@ -61,6 +88,16 @@ extendZodWithOpenApi(z);
 
 const registry = new OpenAPIRegistry();
 
+// Bearer JWT — applied as the document-level default below, so every path requires it in
+// Swagger's "Authorize" flow except the ones that override with `security: []` (the public
+// auth/health routes).
+registry.registerComponent("securitySchemes", "bearerAuth", {
+  type: "http",
+  scheme: "bearer",
+  bearerFormat: "JWT",
+});
+const PUBLIC = { security: [] as const };
+
 const errorResponseSchema = z.object({
   error: z.object({
     message: z.string(),
@@ -81,6 +118,7 @@ registry.registerPath({
   path: "/health",
   tags: ["Health"],
   summary: "Liveness check",
+  ...PUBLIC,
   responses: {
     200: {
       description: "Service is up",
@@ -96,6 +134,7 @@ registry.registerPath({
   path: "/api/v1/auth/login",
   tags: ["Auth"],
   summary: "Log in. Sets an httpOnly refreshToken cookie and returns a short-lived access token + the user profile.",
+  ...PUBLIC,
   request: { body: { content: { "application/json": { schema: loginBodySchema } } } },
   responses: {
     200: { description: "Access token + user", content: { "application/json": { schema: genericObjectSchema } } },
@@ -109,6 +148,7 @@ registry.registerPath({
   path: "/api/v1/auth/refresh",
   tags: ["Auth"],
   summary: "Exchange the refreshToken cookie for a new access token. Rotates the refresh token (single-use).",
+  ...PUBLIC,
   responses: {
     200: { description: "New access token + user", content: { "application/json": { schema: genericObjectSchema } } },
     401: { description: "Missing, invalid, expired, or already-used refresh token", content: { "application/json": { schema: errorResponseSchema } } },
@@ -120,8 +160,47 @@ registry.registerPath({
   path: "/api/v1/auth/logout",
   tags: ["Auth"],
   summary: "Revoke the current refresh token and clear the cookie. Idempotent — 204 even with no/invalid cookie.",
+  ...PUBLIC,
   responses: {
     204: { description: "Logged out" },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/auth/change-password",
+  tags: ["Auth"],
+  summary: "Change the current user's password (requires auth). Clears mustChangePassword and revokes all sessions.",
+  request: { body: { content: { "application/json": { schema: changePasswordBodySchema } } } },
+  responses: {
+    204: { description: "Password changed" },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/auth/forgot-password",
+  tags: ["Auth"],
+  summary: "Request a password reset link (public). Always 202 — never reveals whether the email exists.",
+  ...PUBLIC,
+  request: { body: { content: { "application/json": { schema: forgotPasswordBodySchema } } } },
+  responses: {
+    202: { description: "If an account exists, a reset link was emailed", content: { "application/json": { schema: genericObjectSchema } } },
+    400: errorResponses[400],
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/auth/reset-password",
+  tags: ["Auth"],
+  summary: "Consume a reset token and set a new password (public). Single-use token; revokes all sessions.",
+  ...PUBLIC,
+  request: { body: { content: { "application/json": { schema: resetPasswordBodySchema } } } },
+  responses: {
+    204: { description: "Password reset" },
+    400: errorResponses[400],
   },
 });
 

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
+import { requireStaff } from "../../common/middlewares/auth.js";
 import * as controller from "./counsellor-chart.controller.js";
 import {
   amendmentBodySchema,
@@ -16,6 +17,7 @@ export const counsellorChartRouter = Router();
 // Lazily creates an empty chart row if none exists.
 counsellorChartRouter.get(
   "/students/:studentId",
+  ...requireStaff,
   validate({ params: studentIdParamsSchema }),
   asyncHandler(controller.getCounsellorChart)
 );
@@ -24,6 +26,7 @@ counsellorChartRouter.get(
 // trend, alignment rating, strengths/hobbies/career shortlist. Recomputes the SCRI band.
 counsellorChartRouter.put(
   "/students/:studentId",
+  ...requireStaff,
   validate({ params: studentIdParamsSchema, body: putCounsellorChartBodySchema }),
   asyncHandler(controller.updateCounsellorChart)
 );
@@ -32,6 +35,7 @@ counsellorChartRouter.put(
 // and re-scores the whole assessment. Returns the recomputed AssessmentResult.
 counsellorChartRouter.post(
   "/students/:studentId/mirror-pair-amendments",
+  ...requireStaff,
   validate({ params: studentIdParamsSchema, body: amendmentBodySchema }),
   asyncHandler(controller.applyMirrorPairAmendment)
 );
@@ -39,6 +43,7 @@ counsellorChartRouter.post(
 // Revert an amendment back to the student's original answer, then re-score.
 counsellorChartRouter.delete(
   "/students/:studentId/mirror-pair-amendments/:questionCode",
+  ...requireStaff,
   validate({ params: amendmentParamsSchema }),
   asyncHandler(controller.revertMirrorPairAmendment)
 );

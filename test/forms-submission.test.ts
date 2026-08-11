@@ -1,4 +1,5 @@
 import request from "supertest";
+import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
@@ -38,7 +39,7 @@ function buildAnswer(question: TemplateQuestion): unknown {
 
 describe("Forms submission API", () => {
   beforeAll(async () => {
-    const institute = await request(app).post("/api/v1/institutes").send({
+    const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Forms Submission",
       address: "1 Form St",
       contactNumber: "+919876550001",
@@ -55,15 +56,15 @@ describe("Forms submission API", () => {
       },
     });
 
-    const klass = await request(app)
+    const klass = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes`)
       .send({ name: "Grade 9" });
-    const division = await request(app)
+    const division = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
       .send({ name: "A" });
     divisionId = division.body.id;
 
-    const student = await request(app).post("/api/v1/students").send({
+    const student = await authRequest(app).post("/api/v1/students").send({
       firstName: "Priya",
       lastName: "Menon",
       email: "priya@test-form-submission.example",
@@ -89,7 +90,7 @@ describe("Forms submission API", () => {
   });
 
   it("saves a draft with partial answers", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${studentId}`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "Still Exploring" }] });
 
@@ -99,7 +100,7 @@ describe("Forms submission API", () => {
   });
 
   it("rejects an unknown fieldKey with 400", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${studentId}`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "not_a_real_field", answer: "x" }] });
 
@@ -107,7 +108,7 @@ describe("Forms submission API", () => {
   });
 
   it("fetches the draft submission with its answers", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .get(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${studentId}`)
       .query({ cohort: COHORT });
 
@@ -117,7 +118,7 @@ describe("Forms submission API", () => {
   });
 
   it("rejects submit with 400 and lists missing required fieldKeys", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .post(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${studentId}/submit`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "Still Exploring" }] });
 
@@ -127,7 +128,7 @@ describe("Forms submission API", () => {
   });
 
   it("submits successfully once every required question is answered, and locks it", async () => {
-    const template = await request(app)
+    const template = await authRequest(app)
       .get("/api/v1/forms/PRE_COUNSELLING_STUDENT")
       .query({ cohort: COHORT });
 
@@ -137,14 +138,14 @@ describe("Forms submission API", () => {
       answer: buildAnswer(q),
     }));
 
-    const submitRes = await request(app)
+    const submitRes = await authRequest(app)
       .post(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${studentId}/submit`)
       .send({ cohort: COHORT, answers });
 
     expect(submitRes.status).toBe(200);
     expect(submitRes.body.submittedAt).not.toBeNull();
 
-    const lockedRes = await request(app)
+    const lockedRes = await authRequest(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${studentId}`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "changed" }] });
 
@@ -153,7 +154,7 @@ describe("Forms submission API", () => {
 
   it("reports per-form submission flags (only finalized forms count)", async () => {
     // At this point only PRE_COUNSELLING_STUDENT has been submitted (previous test).
-    const res = await request(app).get(`/api/v1/forms/students/${studentId}/status`);
+    const res = await authRequest(app).get(`/api/v1/forms/students/${studentId}/status`);
     expect(res.status).toBe(200);
     expect(res.body.forms.preCounsellingStudent.submitted).toBe(true);
     expect(res.body.forms.preCounsellingStudent.submittedAt).not.toBeNull();
@@ -165,7 +166,7 @@ describe("Forms submission API", () => {
   });
 
   it("404s the status for an unknown student", async () => {
-    const res = await request(app).get("/api/v1/forms/students/clzzzzzzzzzzzzzzzzzzzzzzzz/status");
+    const res = await authRequest(app).get("/api/v1/forms/students/clzzzzzzzzzzzzzzzzzzzzzzzz/status");
     expect(res.status).toBe(404);
   });
 
@@ -179,7 +180,7 @@ describe("Forms submission API", () => {
         toDate: new Date("2025-12-31"),
       },
     });
-    const expiredStudent = await request(app).post("/api/v1/students").send({
+    const expiredStudent = await authRequest(app).post("/api/v1/students").send({
       firstName: "Old",
       lastName: "Cohort",
       email: "old@test-form-submission.example",
@@ -196,13 +197,13 @@ describe("Forms submission API", () => {
     });
     const expiredStudentId = expiredStudent.body.student.id;
 
-    const draftRes = await request(app)
+    const draftRes = await authRequest(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_PARENT/students/${expiredStudentId}`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "x" }] });
     expect(draftRes.status).toBe(403);
     expect(draftRes.body.error.details.reason).toBe("PROJECT_EXPIRED");
 
-    const submitRes = await request(app)
+    const submitRes = await authRequest(app)
       .post(`/api/v1/forms/PRE_COUNSELLING_PARENT/students/${expiredStudentId}/submit`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "x" }] });
     expect(submitRes.status).toBe(403);
@@ -221,7 +222,7 @@ describe("Forms submission API", () => {
         toDate: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),
       },
     });
-    const student = await request(app).post("/api/v1/students").send({
+    const student = await authRequest(app).post("/api/v1/students").send({
       firstName: "Today",
       lastName: "Cohort",
       email: "today@test-form-submission.example",
@@ -237,7 +238,7 @@ describe("Forms submission API", () => {
       motherOccupation: "Doctor",
     });
 
-    const res = await request(app)
+    const res = await authRequest(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${student.body.student.id}`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "Exploring" }] });
     expect(res.status).toBe(200); // not 403 — end date is inclusive

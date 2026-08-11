@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Assessment Scoring Tester</title>
+  <style>
+    :root { --bg:#f6f7f9; --card:#fff; --ink:#1c2431; --muted:#6b7688; --line:#e3e7ee; --accent:#2b6cb0; --good:#2f855a; --warn:#c05621; --bad:#c53030; }
+    * { box-sizing:border-box; }
+    body { margin:0; font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+    header { background:var(--card); border-bottom:1px solid var(--line); padding:14px 20px; position:sticky; top:0; z-index:10; }
+    h1 { font-size:16px; margin:0 0 2px; }
+    .sub { color:var(--muted); font-size:12px; }
+    main { max-width:1100px; margin:0 auto; padding:20px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+    .row { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+    label { display:block; font-size:12px; color:var(--muted); margin-bottom:3px; }
+    input, select { font:inherit; padding:7px 9px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); }
+    input[type=text], input[type=password], input[type=number] { min-width:200px; }
+    button { font:inherit; font-weight:600; padding:8px 14px; border:1px solid var(--accent); background:var(--accent); color:#fff; border-radius:7px; cursor:pointer; }
+    button.secondary { background:#fff; color:var(--accent); }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+    .status { font-size:12px; margin-left:6px; }
+    .status.ok { color:var(--good); } .status.err { color:var(--bad); }
+    .q-section { margin-top:14px; }
+    .q-section h3 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--accent); margin:0 0 8px; border-bottom:1px solid var(--line); padding-bottom:4px; }
+    .q { padding:8px 0; border-bottom:1px dashed var(--line); }
+    .q-text { margin-bottom:5px; }
+    .q-meta { color:var(--muted); font-size:11px; }
+    .opts { display:flex; flex-wrap:wrap; gap:4px 14px; }
+    .opts label { display:inline-flex; align-items:center; gap:5px; margin:0; color:var(--ink); font-size:13px; cursor:pointer; }
+    table { border-collapse:collapse; width:100%; font-size:13px; }
+    th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-weight:600; font-size:12px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:12px; }
+    .pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:11px; font-weight:600; }
+    .pill.g { background:#e6fffa; color:var(--good); } .pill.m { background:#fffaf0; color:var(--warn); } .pill.b { background:#fff5f5; color:var(--bad); }
+    .kv { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
+    .kv b { font-weight:600; }
+    h2 { font-size:15px; margin:18px 0 8px; }
+    .muted { color:var(--muted); }
+    details summary { cursor:pointer; color:var(--accent); font-size:12px; }
+    pre { background:#0f1420; color:#d5e0f0; padding:12px; border-radius:8px; overflow:auto; font-size:12px; max-height:400px; }
+    .hide { display:none; }
+    .bar { position:sticky; bottom:0; background:linear-gradient(#f6f7f9cc,#f6f7f9); padding:10px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Assessment Scoring Tester <span class="muted">— dev only</span></h1>
+    <div class="sub">Answer the question bank and preview the full computed report. No student / attempt / persistence — pure scoring engine.</div>
+  </header>
+  <main>
+    <div class="card">
+      <div class="row">
+        <div><label>API base</label><input id="base" type="text" value="" placeholder="(same origin)" /></div>
+        <div><label>Cohort</label><input id="cohort" type="text" value="CLASS_9_10" /></div>
+        <div><label>Email</label><input id="email" type="text" value="superadmin@kreate.local" /></div>
+        <div><label>Password</label><input id="password" type="password" value="ChangeMe123!" /></div>
+        <div><button id="loginBtn">Log in</button><span id="loginStatus" class="status"></span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <button id="loadBtn" class="secondary" disabled>Load questions</button>
+        <div><label>Fill Likert with</label>
+          <select id="likertVal"><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select>
+        </div>
+        <button id="fillLikert" class="secondary" disabled>Fill Likert</button>
+        <button id="randomAll" class="secondary" disabled>Randomise all</button>
+        <button id="clearAll" class="secondary" disabled>Clear</button>
+        <div><label>Duration (min)</label><input id="duration" type="number" value="30" min="1" max="600" style="min-width:90px" /></div>
+        <span id="loadStatus" class="status"></span>
+      </div>
+    </div>
+
+    <div id="questions" class="card hide"></div>
+
+    <div class="bar hide" id="scoreBar">
+      <button id="scoreBtn">Score it →</button>
+      <span id="scoreStatus" class="status"></span>
+    </div>
+
+    <div id="report"></div>
+  </main>
+
+  <script>
+  (function () {
+    let token = null;
+    let questions = [];
+    const $ = (id) => document.getElementById(id);
+    const base = () => $("base").value.replace(/\/$/, "");
+
+    async function api(path, opts = {}) {
+      const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+      if (token) headers.Authorization = "Bearer " + token;
+      const res = await fetch(base() + path, Object.assign({}, opts, { headers }));
+      const text = await res.text();
+      let body; try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+      if (!res.ok) {
+        const msg = body && body.error ? body.error.message : (typeof body === "string" ? body : res.statusText);
+        throw new Error(msg + " (" + res.status + ")");
+      }
+      return body;
+    }
+
+    function setStatus(el, msg, ok) {
+      el.textContent = msg;
+      el.className = "status " + (ok === true ? "ok" : ok === false ? "err" : "");
+    }
+
+    $("loginBtn").onclick = async () => {
+      setStatus($("loginStatus"), "…");
+      try {
+        const r = await api("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email: $("email").value, password: $("password").value }) });
+        token = r.accessToken;
+        setStatus($("loginStatus"), "logged in as " + r.user.email + " (" + r.user.role + ")", true);
+        ["loadBtn"].forEach((id) => ($(id).disabled = false));
+      } catch (e) { setStatus($("loginStatus"), e.message, false); }
+    };
+
+    $("loadBtn").onclick = async () => {
+      setStatus($("loadStatus"), "…");
+      try {
+        questions = await api("/api/v1/assessment/questions?cohort=" + encodeURIComponent($("cohort").value));
+        questions.sort((a, b) => (a.displayOrder ?? a.order) - (b.displayOrder ?? b.order));
+        renderQuestions();
+        setStatus($("loadStatus"), questions.length + " questions loaded", true);
+        ["fillLikert", "randomAll", "clearAll"].forEach((id) => ($(id).disabled = false));
+        $("questions").classList.remove("hide");
+        $("scoreBar").classList.remove("hide");
+      } catch (e) { setStatus($("loadStatus"), e.message, false); }
+    };
+
+    const LIKERT_SCALE = [
+      { value: "1", label: "1 Strongly disagree" },
+      { value: "2", label: "2 Disagree" },
+      { value: "3", label: "3 Neutral" },
+      { value: "4", label: "4 Agree" },
+      { value: "5", label: "5 Strongly agree" },
+    ];
+    function optsOf(q) {
+      const raw = q.options;
+      if (Array.isArray(raw) && raw.length) {
+        return raw.map((o) => (typeof o === "object" && o ? { value: String(o.value ?? o.key ?? o), label: String(o.label ?? o.text ?? o.value ?? o) } : { value: String(o), label: String(o) }));
+      }
+      // Likert/scale questions carry no explicit options — the 1-5 scale is implicit.
+      return q.format === "MCQ_SINGLE" ? [] : LIKERT_SCALE;
+    }
+
+    function renderQuestions() {
+      const bySection = {};
+      for (const q of questions) (bySection[q.section] = bySection[q.section] || []).push(q);
+      const order = ["RIASEC", "BIG_FIVE", "APTITUDE", "COGNITIVE"];
+      const sections = Object.keys(bySection).sort((a, b) => order.indexOf(a) - order.indexOf(b));
+      let html = "";
+      for (const sec of sections) {
+        html += '<div class="q-section"><h3>' + sec + " (" + bySection[sec].length + ")</h3>";
+        for (const q of bySection[sec]) {
+          const opts = optsOf(q);
+          html += '<div class="q" data-field="' + q.fieldKey + '" data-format="' + q.format + '">';
+          html += '<div class="q-text"><b>#' + (q.displayOrder ?? q.order) + "</b> " + escapeHtml(q.questionText) + "</div>";
+          html += '<div class="q-meta">' + q.questionCode + " · " + q.trait + " · " + q.format + "</div>";
+          html += '<div class="opts">';
+          for (const o of opts) {
+            html += '<label><input type="radio" name="' + q.fieldKey + '" value="' + escapeHtml(o.value) + '"> ' + escapeHtml(o.label) + "</label>";
+          }
+          html += "</div></div>";
+        }
+        html += "</div>";
+      }
+      $("questions").innerHTML = html;
+    }
+
+    function setAnswer(field, value) {
+      const el = document.querySelector('input[name="' + CSS.escape(field) + '"][value="' + CSS.escape(String(value)) + '"]');
+      if (el) el.checked = true;
+    }
+
+    $("fillLikert").onclick = () => {
+      const v = $("likertVal").value;
+      for (const q of questions) if (q.format !== "MCQ_SINGLE") setAnswer(q.fieldKey, v);
+    };
+    $("randomAll").onclick = () => {
+      for (const q of questions) {
+        const opts = optsOf(q);
+        if (!opts.length) continue;
+        setAnswer(q.fieldKey, opts[Math.floor(Math.random() * opts.length)].value);
+      }
+    };
+    $("clearAll").onclick = () => { document.querySelectorAll('#questions input[type=radio]').forEach((r) => (r.checked = false)); };
+
+    function collectAnswers() {
+      const out = [];
+      for (const q of questions) {
+        const sel = document.querySelector('input[name="' + CSS.escape(q.fieldKey) + '"]:checked');
+        if (sel) out.push({ fieldKey: q.fieldKey, response: sel.value });
+      }
+      return out;
+    }
+
+    $("scoreBtn").onclick = async () => {
+      setStatus($("scoreStatus"), "scoring…");
+      try {
+        const answers = collectAnswers();
+        const report = await api("/api/v1/assessment/score-preview", {
+          method: "POST",
+          body: JSON.stringify({ cohort: $("cohort").value, durationMinutes: Number($("duration").value) || 30, answers }),
+        });
+        setStatus($("scoreStatus"), answers.length + "/" + questions.length + " answered · scored", true);
+        renderReport(report);
+      } catch (e) { setStatus($("scoreStatus"), e.message, false); }
+    };
+
+    // ---- report rendering ----
+    function bandClass(level) {
+      const s = String(level || "").toLowerCase();
+      if (/(highly|advanced|strong|high reliab|good fit|strongly|demonstrated|evident|consistent)/.test(s) && !/less|low|weak|inconsistent|limited|needs/.test(s)) return "g";
+      if (/(weak|low|inconsistent|limited|needs|less)/.test(s)) return "b";
+      return "m";
+    }
+    function pill(level) { return level ? '<span class="pill ' + bandClass(level) + '">' + escapeHtml(level) + "</span>" : ""; }
+
+    function layerTable(title, layer) {
+      if (!layer) return "";
+      let h = "<h2>" + title + "</h2>";
+      if (layer.flags && layer.flags.length) h += '<div class="muted">⚑ ' + layer.flags.map(escapeHtml).join(" · ") + "</div>";
+      h += "<table><tr><th>Trait</th><th>Name</th><th>Score</th><th>Grade</th></tr>";
+      for (const s of layer.scores) h += "<tr><td>" + s.trait + "</td><td>" + escapeHtml(s.traitName || "") + "</td><td>" + s.score + "</td><td>" + pill(s.level) + "</td></tr>";
+      h += "</table>";
+      return h;
+    }
+
+    function fitList(title, items, extra) {
+      if (!items || !items.length) return "<h2>" + title + '</h2><div class="muted">— none met the qualifying Fit Score —</div>';
+      let h = "<h2>" + title + "</h2><table><tr><th>#</th><th>Option</th><th>Fit</th><th>Grade</th>" + (extra ? "<th>" + extra.head + "</th>" : "") + "</tr>";
+      items.forEach((it, i) => {
+        h += "<tr><td>" + (i + 1) + "</td><td>" + escapeHtml(it.subStream || it.industry || it.domain || "") + (it.mainStream ? ' <span class="muted">(' + escapeHtml(it.mainStream) + ")</span>" : "") + "</td><td>" + it.fitScore + "</td><td>" + pill(it.level) + "</td>" + (extra ? "<td>" + escapeHtml(extra.get(it) || "") + "</td>" : "") + "</tr>";
+      });
+      h += "</table>";
+      return h;
+    }
+
+    function careerCards(cf) {
+      if (!cf) return "<h2>Career Fit</h2><div class='muted'>— not computed (career library empty) —</div>";
+      let h = "<h2>Career Fit — top domains</h2>";
+      if (!cf.top6Domains.length) h += "<div class='muted'>— none met the qualifying Fit Score —</div>";
+      h += '<div class="grid">';
+      for (const d of cf.top6Domains) {
+        const c = d.representativeCareer;
+        h += '<div class="card">';
+        h += "<div class='kv'><b>" + escapeHtml(d.industry) + " · " + escapeHtml(d.domain) + "</b>" + pill(d.level) + "</div>";
+        h += "<div class='muted'>" + escapeHtml(d.cluster) + " · Fit " + d.fitScore + "</div>";
+        if (c) {
+          h += "<div class='kv'><span>Representative</span><b>" + escapeHtml(c.jobRole) + "</b></div>";
+          h += "<div class='kv'><span>AI-resilience</span>" + pill(c.aiResilienceGrade) + "</div>";
+          if (c.salaryIndiaRangeText) h += "<div class='kv'><span>Salary (India)</span><span>" + escapeHtml(c.salaryIndiaRangeText) + "</span></div>";
+          if (c.topCompanies && c.topCompanies.length) h += "<div class='muted'>" + c.topCompanies.slice(0, 4).map(escapeHtml).join(", ") + "</div>";
+        } else h += "<div class='muted'>no representative career resolved</div>";
+        h += "</div>";
+      }
+      h += "</div>";
+      h += fitList("Career Fit — top industries", cf.top3Industries);
+      return h;
+    }
+
+    function reliabilityTable(r) {
+      if (!r) return "";
+      let h = "<h2>Reliability</h2><table><tr><th>Index</th><th>Value</th><th>Band</th></tr>";
+      h += "<tr><td>Difficulty-Consistency (DC)</td><td>" + fmt(r.ari && r.ari.dc) + "</td><td></td></tr>";
+      h += "<tr><td>Time-Consistency (TC)</td><td>" + fmt(r.ari && r.ari.tc) + (r.ari && !r.ari.timingAvailable ? ' <span class="muted">(no timing)</span>' : "") + "</td><td></td></tr>";
+      h += "<tr><td>Aptitude Reliability (ARI)</td><td>" + fmt(r.ari && r.ari.ari) + "</td><td>" + pill(r.ari && r.ari.level) + "</td></tr>";
+      h += "<tr><td>Aptitude Confidence (ACI)</td><td>" + fmt(r.aci && r.aci.dkPercent) + "% DK</td><td>" + pill(r.aci && r.aci.level) + "</td></tr>";
+      h += "<tr><td>Overall Reliability (ORI)</td><td>" + fmt(r.ori && r.ori.minutes) + " min</td><td>" + pill(r.ori && r.ori.level) + "</td></tr>";
+      h += "<tr><td>Response Validity (RVS)</td><td>" + fmt(r.rvs && r.rvs.score) + "</td><td>" + pill(r.rvs && r.rvs.level) + "</td></tr>";
+      h += "</table>";
+      return h;
+    }
+
+    function renderReport(rep) {
+      let h = "<div class='card'>";
+      h += "<h2>Dominant styles</h2>";
+      h += "<div class='kv'><span>Career Style (DCS)</span><b>" + escapeHtml(rep.dominantCareerStyle.code) + " — " + escapeHtml(rep.dominantCareerStyle.style) + "</b></div>";
+      h += "<div class='kv'><span>Personality Style (DPS)</span><b>" + escapeHtml(rep.dominantPersonalityStyle.code) + " — " + escapeHtml(rep.dominantPersonalityStyle.style) + "</b></div>";
+      h += layerTable("RIASEC (interests)", rep.riasec);
+      h += layerTable("Big Five (personality)", rep.bigFive);
+      h += layerTable("Aptitude", rep.aptitude);
+      h += layerTable("Cognitive", rep.cognitive);
+      h += fitList("Stream Fit (Class 11 & 12) — top 3", rep.streamFit.top3);
+      h += fitList("Graduation Pathways — top 3", rep.graduationPathways.top3, { head: "Key exams", get: (it) => it.keyExams });
+      h += careerCards(rep.careerFit);
+      h += reliabilityTable(rep.reliability);
+      if (rep.meta && rep.meta.pending && rep.meta.pending.length) h += "<div class='muted' style='margin-top:10px'>Pending (not computed): " + rep.meta.pending.join(", ") + "</div>";
+      h += "<details style='margin-top:14px'><summary>Raw JSON</summary><pre>" + escapeHtml(JSON.stringify(rep, null, 2)) + "</pre></details>";
+      h += "</div>";
+      $("report").innerHTML = h;
+      $("report").scrollIntoView({ behavior: "smooth" });
+    }
+
+    function fmt(v) { return v === null || v === undefined ? "—" : v; }
+    function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  })();
+  </script>
+</body>
+</html>

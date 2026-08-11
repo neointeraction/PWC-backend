@@ -2,6 +2,7 @@ import type { z } from "zod";
 import { feedbackRequestParentDataSchema, renderFeedbackRequestParentEmail } from "./feedback-request-parent.js";
 import { loginCredentialsParentDataSchema, renderLoginCredentialsParentEmail } from "./login-credentials-parent.js";
 import { loginCredentialsStudentDataSchema, renderLoginCredentialsStudentEmail } from "./login-credentials-student.js";
+import { passwordResetDataSchema, renderPasswordResetEmail } from "./password-reset.js";
 import { preCounsellingParentDataSchema, renderPreCounsellingParentEmail } from "./pre-counselling-parent.js";
 import * as reminders from "./reminders.js";
 import { renderReportReadyParentEmail, reportReadyParentDataSchema } from "./report-ready-parent.js";
@@ -28,6 +29,7 @@ export const emailTemplateRegistry = {
   WELCOME_PARENT: { schema: welcomeParentDataSchema, render: renderWelcomeParentEmail },
   LOGIN_CREDENTIALS_STUDENT: { schema: loginCredentialsStudentDataSchema, render: renderLoginCredentialsStudentEmail },
   LOGIN_CREDENTIALS_PARENT: { schema: loginCredentialsParentDataSchema, render: renderLoginCredentialsParentEmail },
+  PASSWORD_RESET: { schema: passwordResetDataSchema, render: renderPasswordResetEmail },
   PRE_COUNSELLING_PARENT: { schema: preCounsellingParentDataSchema, render: renderPreCounsellingParentEmail },
   SESSION_DETAILS_PARENT: { schema: sessionDetailsParentDataSchema, render: renderSessionDetailsParentEmail },
   FEEDBACK_REQUEST_PARENT: { schema: feedbackRequestParentDataSchema, render: renderFeedbackRequestParentEmail },

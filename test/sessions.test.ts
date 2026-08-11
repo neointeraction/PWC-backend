@@ -1,5 +1,6 @@
 import argon2 from "argon2";
 import request from "supertest";
+import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
@@ -61,7 +62,7 @@ describe("Sessions API", () => {
   beforeAll(async () => {
     await cleanupInstitute("Test Institute Sessions");
 
-    const institute = await request(app).post("/api/v1/institutes").send({
+    const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Sessions",
       address: "1 Session St",
       contactNumber: "+919876570001",
@@ -79,10 +80,10 @@ describe("Sessions API", () => {
     });
     projectId = project.id;
 
-    const klass = await request(app)
+    const klass = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes`)
       .send({ name: "Grade 9" });
-    const division = await request(app)
+    const division = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
       .send({ name: "A" });
     divisionId = division.body.id;
@@ -140,7 +141,7 @@ describe("Sessions API", () => {
   });
 
   it("rejects booking before slots are imported", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .get(`/api/v1/sessions/students/${studentId}/booking-options`)
       .query({ sessionNumber: "SESSION_1" });
     expect(res.status).toBe(200);
@@ -148,7 +149,7 @@ describe("Sessions API", () => {
   });
 
   it("imports the counsellor slot sheet once, then rejects a second import", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .post("/api/v1/sessions/slots/import")
       .send({
         projectId,
@@ -161,14 +162,14 @@ describe("Sessions API", () => {
     expect(res.status).toBe(201);
     expect(res.body.imported).toBe(3);
 
-    const second = await request(app)
+    const second = await authRequest(app)
       .post("/api/v1/sessions/slots/import")
       .send({ projectId, slots: [{ counsellorId: counsellorAId, date: ymd(session1Date), startTime: "09:00", endTime: "09:30" }] });
     expect(second.status).toBe(409);
   });
 
   it("shows a blind, deduped Session 1 slot list", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .get(`/api/v1/sessions/students/${studentId}/booking-options`)
       .query({ sessionNumber: "SESSION_1" });
     expect(res.status).toBe(200);
@@ -180,7 +181,7 @@ describe("Sessions API", () => {
   });
 
   it("previews Session 2 options locked to Session 1's would-be counsellor", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .get(`/api/v1/sessions/students/${studentId}/booking-options`)
       .query({ sessionNumber: "SESSION_2", session1Date: ymd(session1Date), session1StartTime: hm(session1Start) });
     expect(res.status).toBe(200);
@@ -190,7 +191,7 @@ describe("Sessions API", () => {
   });
 
   it("books both sessions atomically, locking Session 2 to Session 1's counsellor", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .post(`/api/v1/sessions/students/${studentId}/book`)
       .send({
         session1: { date: ymd(session1Date), startTime: hm(session1Start) },
@@ -206,7 +207,7 @@ describe("Sessions API", () => {
   });
 
   it("rejects booking again for a student who already has sessions", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .post(`/api/v1/sessions/students/${studentId}/book`)
       .send({
         session1: { date: ymd(session1Date), startTime: hm(session1Start) },
@@ -216,7 +217,7 @@ describe("Sessions API", () => {
   });
 
   it("lists the student's two session cards", async () => {
-    const res = await request(app).get(`/api/v1/sessions/students/${studentId}`);
+    const res = await authRequest(app).get(`/api/v1/sessions/students/${studentId}`);
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(2);
   });
@@ -246,7 +247,7 @@ describe("Sessions API", () => {
     });
 
     const farFuture = addMinutes(now, 120);
-    const create = await request(app).post("/api/v1/sessions").send({
+    const create = await authRequest(app).post("/api/v1/sessions").send({
       studentId: otherStudent.id,
       counsellorId: counsellorAId,
       sessionNumber: "SESSION_1",
@@ -256,40 +257,40 @@ describe("Sessions API", () => {
     });
     expect(create.status).toBe(201);
 
-    const res = await request(app).post(`/api/v1/sessions/${create.body.id}/join`).send({ role: "STUDENT" });
+    const res = await authRequest(app).post(`/api/v1/sessions/${create.body.id}/join`).send({ role: "STUDENT" });
     expect(res.status).toBe(400);
   });
 
   it("sets the meeting link and allows join once inside the window", async () => {
-    const list = await request(app).get(`/api/v1/sessions/students/${studentId}`);
+    const list = await authRequest(app).get(`/api/v1/sessions/students/${studentId}`);
     const session1 = list.body.find((s: { sessionNumber: string }) => s.sessionNumber === "SESSION_1");
 
-    const linkRes = await request(app)
+    const linkRes = await authRequest(app)
       .patch(`/api/v1/sessions/${session1.id}/meeting-link`)
       .send({ meetingLink: "https://meet.example.com/abc" });
     expect(linkRes.status).toBe(200);
 
     // session1Start is ~5 minutes out, inside the 10-minute join window.
-    const joinRes = await request(app).post(`/api/v1/sessions/${session1.id}/join`).send({ role: "STUDENT" });
+    const joinRes = await authRequest(app).post(`/api/v1/sessions/${session1.id}/join`).send({ role: "STUDENT" });
     expect(joinRes.status).toBe(200);
     expect(joinRes.body.meetingLink).toBe("https://meet.example.com/abc");
     expect(joinRes.body.session.studentJoinedAt).not.toBeNull();
   });
 
   it("adds counsellor notes independent of the join flow", async () => {
-    const list = await request(app).get(`/api/v1/sessions/students/${studentId}`);
+    const list = await authRequest(app).get(`/api/v1/sessions/students/${studentId}`);
     const session1 = list.body.find((s: { sessionNumber: string }) => s.sessionNumber === "SESSION_1");
 
-    const res = await request(app).patch(`/api/v1/sessions/${session1.id}/notes`).send({ notes: "Strong interest in design." });
+    const res = await authRequest(app).patch(`/api/v1/sessions/${session1.id}/notes`).send({ notes: "Strong interest in design." });
     expect(res.status).toBe(200);
     expect(res.body.notes).toBe("Strong interest in design.");
   });
 
   it("completes Session 1 and advances the workflow status", async () => {
-    const list = await request(app).get(`/api/v1/sessions/students/${studentId}`);
+    const list = await authRequest(app).get(`/api/v1/sessions/students/${studentId}`);
     const session1 = list.body.find((s: { sessionNumber: string }) => s.sessionNumber === "SESSION_1");
 
-    const res = await request(app).post(`/api/v1/sessions/${session1.id}/complete`);
+    const res = await authRequest(app).post(`/api/v1/sessions/${session1.id}/complete`);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("COMPLETED");
 
@@ -298,10 +299,10 @@ describe("Sessions API", () => {
   });
 
   it("cancels Session 2 and releases its slot back to OPEN", async () => {
-    const list = await request(app).get(`/api/v1/sessions/students/${studentId}`);
+    const list = await authRequest(app).get(`/api/v1/sessions/students/${studentId}`);
     const session2 = list.body.find((s: { sessionNumber: string }) => s.sessionNumber === "SESSION_2");
 
-    const res = await request(app)
+    const res = await authRequest(app)
       .post(`/api/v1/sessions/${session2.id}/cancel`)
       .send({ reason: "STUDENT_UNAVAILABLE", notes: "Clashing exam", initiatedBy: "STUDENT" });
     expect(res.status).toBe(200);
@@ -318,7 +319,7 @@ describe("Sessions API", () => {
     it("lists every student across the counsellor's assigned projects, not just students with a booked session", async () => {
       // counsellorB has no Session with `studentId` (only counsellorA does, from the
       // booking test above) but is assigned to the same project, so should still see them.
-      const res = await request(app).get(`/api/v1/sessions/counsellors/${counsellorBId}/my-students`);
+      const res = await authRequest(app).get(`/api/v1/sessions/counsellors/${counsellorBId}/my-students`);
       expect(res.status).toBe(200);
       const entry = res.body.find((s: { id: string }) => s.id === studentId);
       expect(entry).toBeDefined();
@@ -332,7 +333,7 @@ describe("Sessions API", () => {
     });
 
     it("shows the counsellor's own sessions with a student they're actually assigned to", async () => {
-      const res = await request(app).get(`/api/v1/sessions/counsellors/${counsellorAId}/my-students`);
+      const res = await authRequest(app).get(`/api/v1/sessions/counsellors/${counsellorAId}/my-students`);
       expect(res.status).toBe(200);
       const entry = res.body.find((s: { id: string }) => s.id === studentId);
       expect(entry.sessions).toHaveLength(2);
@@ -340,7 +341,7 @@ describe("Sessions API", () => {
     });
 
     it("filters by workflowStatus", async () => {
-      const res = await request(app)
+      const res = await authRequest(app)
         .get(`/api/v1/sessions/counsellors/${counsellorAId}/my-students`)
         .query({ workflowStatus: "DRAFT" });
       expect(res.status).toBe(200);
@@ -351,7 +352,7 @@ describe("Sessions API", () => {
       const otherProject = await prisma.project.create({
         data: { instituteId, name: "Test Project Sessions Unassigned", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
       });
-      const res = await request(app)
+      const res = await authRequest(app)
         .get(`/api/v1/sessions/counsellors/${counsellorAId}/my-students`)
         .query({ projectId: otherProject.id });
       expect(res.status).toBe(400);
@@ -359,7 +360,7 @@ describe("Sessions API", () => {
     });
 
     it("404s for an unknown counsellor", async () => {
-      const res = await request(app).get(`/api/v1/sessions/counsellors/cnonexistent00000000000000/my-students`);
+      const res = await authRequest(app).get(`/api/v1/sessions/counsellors/cnonexistent00000000000000/my-students`);
       expect(res.status).toBe(404);
     });
   });
@@ -376,7 +377,7 @@ describe("Sessions API", () => {
         data: { counsellorId: counsellorAId, projectId, slotDate: newDate, startTime: hm(session2Start), endTime: hm(session2End) },
       });
 
-      const res = await request(app)
+      const res = await authRequest(app)
         .post(`/api/v1/sessions/${cancelled!.id}/reschedule`)
         .send({ date: ymd(newDate), startTime: hm(session2Start), initiatedBy: "ADMIN" });
       expect(res.status).toBe(200);
@@ -391,14 +392,14 @@ describe("Sessions API", () => {
 
     it("createSessionManually reactivates a CANCELLED session in place, even with a different counsellor", async () => {
       const active = await prisma.session.findFirst({ where: { studentId, sessionNumber: "SESSION_2" } });
-      const cancelRes = await request(app)
+      const cancelRes = await authRequest(app)
         .post(`/api/v1/sessions/${active!.id}/cancel`)
         .send({ reason: "COUNSELLOR_UNAVAILABLE", initiatedBy: "ADMIN" });
       expect(cancelRes.status).toBe(200);
 
       // A completely fresh assignment to counsellor B (bypasses slot inventory, like any admin manual create).
       const farFuture = addDays(session2Date, 20);
-      const res = await request(app).post("/api/v1/sessions").send({
+      const res = await authRequest(app).post("/api/v1/sessions").send({
         studentId,
         counsellorId: counsellorBId,
         sessionNumber: "SESSION_2",
@@ -415,7 +416,7 @@ describe("Sessions API", () => {
     });
 
     it("still rejects creating over an active (non-cancelled) session", async () => {
-      const res = await request(app).post("/api/v1/sessions").send({
+      const res = await authRequest(app).post("/api/v1/sessions").send({
         studentId,
         counsellorId: counsellorAId,
         sessionNumber: "SESSION_2",
@@ -465,7 +466,7 @@ describe("Sessions API", () => {
       });
       await prisma.counsellorSlot.update({ where: { id: slot.id }, data: { status: "BOOKED", sessionId: orphanSession.id } });
 
-      const del = await request(app).delete(`/api/v1/students/${orphanStudent.id}`);
+      const del = await authRequest(app).delete(`/api/v1/students/${orphanStudent.id}`);
       expect(del.status).toBe(204);
 
       const afterDelete = await prisma.counsellorSlot.findUnique({ where: { id: slot.id } });

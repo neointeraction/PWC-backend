@@ -1,4 +1,5 @@
 import request from "supertest";
+import { authRequest } from "./helpers/http.js";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 
@@ -6,7 +7,7 @@ const app = createApp();
 
 describe("Assessment API", () => {
   it("returns all 73 seeded questions in the interleaved presentation order", async () => {
-    const res = await request(app).get("/api/v1/assessment/questions").query({ cohort: "CLASS_9_10" });
+    const res = await authRequest(app).get("/api/v1/assessment/questions").query({ cohort: "CLASS_9_10" });
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveLength(73);
@@ -17,7 +18,7 @@ describe("Assessment API", () => {
   });
 
   it("filters by section", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .get("/api/v1/assessment/questions")
       .query({ cohort: "CLASS_9_10", section: "APTITUDE" });
 
@@ -27,7 +28,7 @@ describe("Assessment API", () => {
   });
 
   it("never exposes correctOption in the response", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .get("/api/v1/assessment/questions")
       .query({ cohort: "CLASS_9_10", section: "APTITUDE" });
 
@@ -38,7 +39,7 @@ describe("Assessment API", () => {
   });
 
   it("returns 400 when cohort query param is missing", async () => {
-    const res = await request(app).get("/api/v1/assessment/questions");
+    const res = await authRequest(app).get("/api/v1/assessment/questions");
 
     expect(res.status).toBe(400);
   });

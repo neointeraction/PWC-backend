@@ -1,4 +1,5 @@
 import request from "supertest";
+import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
@@ -12,7 +13,7 @@ let otherProjectId: string;
 
 describe("Students API", () => {
   beforeAll(async () => {
-    const institute = await request(app).post("/api/v1/institutes").send({
+    const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Students",
       address: "1 Student St",
       contactNumber: "+919876540001",
@@ -20,7 +21,7 @@ describe("Students API", () => {
     });
     instituteId = institute.body.id;
 
-    const otherInstitute = await request(app).post("/api/v1/institutes").send({
+    const otherInstitute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Students Other",
       address: "2 Student St",
       contactNumber: "+919876540002",
@@ -49,11 +50,11 @@ describe("Students API", () => {
     });
     otherProjectId = otherProject.id;
 
-    const klass = await request(app)
+    const klass = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes`)
       .send({ name: "Grade 9" });
 
-    const division = await request(app)
+    const division = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
       .send({ name: "A" });
     divisionId = division.body.id;
@@ -69,7 +70,7 @@ describe("Students API", () => {
   });
 
   it("creates a student with a linked user and returns a temp password", async () => {
-    const res = await request(app).post("/api/v1/students").send({
+    const res = await authRequest(app).post("/api/v1/students").send({
       firstName: "Asha",
       lastName: "Rao",
       email: "asha@test-student.example",
@@ -92,7 +93,7 @@ describe("Students API", () => {
   });
 
   it("rejects a divisionId that doesn't belong to the given project's institute", async () => {
-    const res = await request(app).post("/api/v1/students").send({
+    const res = await authRequest(app).post("/api/v1/students").send({
       firstName: "Ravi",
       lastName: "Kumar",
       email: "ravi@test-student.example",
@@ -112,7 +113,7 @@ describe("Students API", () => {
   });
 
   it("rejects a duplicate parent mobile with 409", async () => {
-    await request(app).post("/api/v1/students").send({
+    await authRequest(app).post("/api/v1/students").send({
       firstName: "Meera",
       lastName: "Iyer",
       email: "meera@test-student.example",
@@ -128,7 +129,7 @@ describe("Students API", () => {
       motherOccupation: "Doctor",
     });
 
-    const res = await request(app).post("/api/v1/students").send({
+    const res = await authRequest(app).post("/api/v1/students").send({
       firstName: "Nina",
       lastName: "Iyer",
       email: "nina@test-student.example",

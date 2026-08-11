@@ -3,6 +3,7 @@ import * as assessmentService from "./assessment.service.js";
 import type {
   AttemptIdParams,
   ListAssessmentQuestionsQuery,
+  PreviewScoreBody,
   SaveAssessmentAnswersBody,
   StartAttemptBody,
 } from "./assessment.schema.js";
@@ -11,6 +12,11 @@ export async function listAssessmentQuestions(req: Request, res: Response): Prom
   const query = req.query as unknown as ListAssessmentQuestionsQuery;
   const questions = await assessmentService.listAssessmentQuestions(query);
   res.status(200).json(questions);
+}
+
+export async function previewScore(req: Request, res: Response): Promise<void> {
+  const report = await assessmentService.previewAssessmentScore(req.body as PreviewScoreBody);
+  res.status(200).json(report);
 }
 
 export async function startAttempt(req: Request, res: Response): Promise<void> {

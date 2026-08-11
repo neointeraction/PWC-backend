@@ -1,4 +1,5 @@
 import request from "supertest";
+import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
@@ -42,7 +43,7 @@ describe("SCRI band computation", () => {
 
 describe("Counsellor Chart API", () => {
   beforeAll(async () => {
-    const institute = await request(app).post("/api/v1/institutes").send({
+    const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Counsellor Chart",
       address: "9 Chart Rd",
       contactNumber: "+919555000001",
@@ -57,13 +58,13 @@ describe("Counsellor Chart API", () => {
         toDate: new Date("2026-12-31"),
       },
     });
-    const klass = await request(app)
+    const klass = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes`)
       .send({ name: "Grade 10" });
-    const division = await request(app)
+    const division = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
       .send({ name: "B" });
-    const student = await request(app).post("/api/v1/students").send({
+    const student = await authRequest(app).post("/api/v1/students").send({
       firstName: "Meera",
       lastName: "Nair",
       email: `meera${SUFFIX}`,
@@ -82,17 +83,17 @@ describe("Counsellor Chart API", () => {
     studentId = student.body.student.id;
 
     // Save one pre-counselling student answer so the side-by-side assembly has data.
-    await request(app)
+    await authRequest(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${studentId}`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "fav_subject_block", answer: { subject: "Science" } }] });
 
     // Submit a full assessment so the chart's assessment section is populated.
-    const attempt = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
-    const questions = await request(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
-    await request(app)
+    const attempt = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    const questions = await authRequest(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
+    await authRequest(app)
       .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
       .send({ answers: questions.body.map((q: AssessmentQuestion) => ({ fieldKey: q.fieldKey, selectedOption: buildAnswer(q) })) });
-    await request(app).post(`/api/v1/assessment/attempts/${attempt.body.id}/submit`);
+    await authRequest(app).post(`/api/v1/assessment/attempts/${attempt.body.id}/submit`);
   });
 
   afterAll(async () => {
@@ -103,7 +104,7 @@ describe("Counsellor Chart API", () => {
   });
 
   it("assembles the chart: profile, pre-counselling side-by-side, assessment", async () => {
-    const res = await request(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
+    const res = await authRequest(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
     expect(res.status).toBe(200);
     expect(res.body.ourChampion.name).toBe("Meera Nair");
     expect(res.body.ourChampion.fatherOccupationCompany).toBe("Architect, BuildCo");
@@ -120,7 +121,7 @@ describe("Counsellor Chart API", () => {
   });
 
   it("saves synthesis notes, SCRI ratings and ratings; recomputes the SCRI band", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .put(`/api/v1/counsellor-chart/students/${studentId}`)
       .send({
         notes: [
@@ -149,7 +150,7 @@ describe("Counsellor Chart API", () => {
   it("partial SCRI update keeps the band null until all six are rated", async () => {
     // Fresh student with no prior SCRI would be null; here we only assert the rule via
     // the pure function already covered above, and that a partial patch is accepted.
-    const res = await request(app)
+    const res = await authRequest(app)
       .put(`/api/v1/counsellor-chart/students/${studentId}`)
       .send({ notes: [{ code: "G1", body: "Behavioural evidence noted." }] });
     expect(res.status).toBe(200);
@@ -159,7 +160,7 @@ describe("Counsellor Chart API", () => {
   });
 
   it("rejects an unknown synthesis-note code with 400", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .put(`/api/v1/counsellor-chart/students/${studentId}`)
       .send({ notes: [{ code: "Z9", body: "invalid" }] });
     expect(res.status).toBe(400);
@@ -171,11 +172,11 @@ describe("Counsellor Chart API", () => {
   it("amends a mirror-pair answer and re-scores the whole assessment", async () => {
     // All Likert answers are 4 -> SOCIAL (Q13-Q16) = 80%, and MP1 (Q4/Q16) is a strong
     // (gap-0) contradiction, so it's flagged.
-    const before = await request(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
+    const before = await authRequest(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
     expect(social(before.body.assessment.riasec.scores)).toBe(80);
     expect(before.body.flaggedMirrorPairs.some((p: { code: string }) => p.code === "MP1")).toBe(true);
 
-    const res = await request(app)
+    const res = await authRequest(app)
       .post(`/api/v1/counsellor-chart/students/${studentId}/mirror-pair-amendments`)
       .send({ questionCode: "Q16", amendedOption: 1, counsellorId: "counsellor-1" });
     expect(res.status).toBe(200);
@@ -184,12 +185,12 @@ describe("Counsellor Chart API", () => {
     expect(social(res.body.report.riasec.scores)).toBe(65);
 
     // MP1 gap is now |4-1| = 3 (good) -> no longer a flagged contradiction.
-    const after = await request(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
+    const after = await authRequest(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
     expect(after.body.flaggedMirrorPairs.some((p: { code: string }) => p.code === "MP1")).toBe(false);
   });
 
   it("reverts an amendment back to the student's original answer", async () => {
-    const res = await request(app).delete(
+    const res = await authRequest(app).delete(
       `/api/v1/counsellor-chart/students/${studentId}/mirror-pair-amendments/Q16`
     );
     expect(res.status).toBe(200);
@@ -197,7 +198,7 @@ describe("Counsellor Chart API", () => {
   });
 
   it("rejects amending a question that isn't part of a mirror pair", async () => {
-    const res = await request(app)
+    const res = await authRequest(app)
       .post(`/api/v1/counsellor-chart/students/${studentId}/mirror-pair-amendments`)
       .send({ questionCode: "Q1", amendedOption: 2 });
     expect(res.status).toBe(400);

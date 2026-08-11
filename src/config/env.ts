@@ -11,6 +11,12 @@ const envSchema = z.object({
   JWT_REFRESH_EXPIRES_IN: z.string().default("7d"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
 
+  // Frontend base URL used to build user-facing links in emails (e.g. the password
+  // reset link `${APP_WEB_URL}/reset-password?token=...`).
+  APP_WEB_URL: z.string().url().default("http://localhost:3000"),
+  // How long a forgot-password reset token stays valid.
+  PASSWORD_RESET_EXPIRES_IN: z.string().default("1h"),
+
   // Bootstraps the one SUPER_ADMIN account (prisma/seed.ts) — there's no self-register
   // endpoint, so this is the only way to get a first login. Change the password after
   // first login in any non-local environment.

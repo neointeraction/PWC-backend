@@ -1,4 +1,5 @@
 import request from "supertest";
+import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
@@ -24,7 +25,7 @@ function buildAnswer(question: AssessmentQuestion): unknown {
 
 describe("Assessment submission API", () => {
   beforeAll(async () => {
-    const institute = await request(app).post("/api/v1/institutes").send({
+    const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Assessment Submission",
       address: "1 Assessment St",
       contactNumber: "+919876560001",
@@ -41,14 +42,14 @@ describe("Assessment submission API", () => {
       },
     });
 
-    const klass = await request(app)
+    const klass = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes`)
       .send({ name: "Grade 9" });
-    const division = await request(app)
+    const division = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
       .send({ name: "A" });
 
-    const student = await request(app).post("/api/v1/students").send({
+    const student = await authRequest(app).post("/api/v1/students").send({
       firstName: "Kabir",
       lastName: "Shah",
       email: "kabir@test-assessment-submission.example",
@@ -76,7 +77,7 @@ describe("Assessment submission API", () => {
   });
 
   it("lists questions in the interleaved presentation order, not grouped by trait", async () => {
-    const res = await request(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
+    const res = await authRequest(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
     expect(res.status).toBe(200);
     const displayOrders = res.body.map((q: { displayOrder: number }) => q.displayOrder);
     // Returned sorted by displayOrder 1..73.
@@ -90,7 +91,7 @@ describe("Assessment submission API", () => {
   });
 
   it("starts a new attempt", async () => {
-    const res = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    const res = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("IN_PROGRESS");
@@ -98,16 +99,16 @@ describe("Assessment submission API", () => {
   });
 
   it("resumes the same in-progress attempt instead of creating a new one", async () => {
-    const first = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
-    const second = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    const first = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    const second = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
 
     expect(second.body.id).toBe(first.body.id);
   });
 
   it("rejects an unknown fieldKey with 400", async () => {
-    const attempt = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    const attempt = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
 
-    const res = await request(app)
+    const res = await authRequest(app)
       .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
       .send({ answers: [{ fieldKey: "not_a_real_question", selectedOption: "3" }] });
 
@@ -115,21 +116,21 @@ describe("Assessment submission API", () => {
   });
 
   it("never includes correctOption on the attempt's answered questions", async () => {
-    const attempt = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
-    await request(app)
+    const attempt = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    await authRequest(app)
       .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
       .send({ answers: [{ fieldKey: "riasec_realistic_r1", selectedOption: "3" }] });
 
-    const res = await request(app).get(`/api/v1/assessment/attempts/${attempt.body.id}`);
+    const res = await authRequest(app).get(`/api/v1/assessment/attempts/${attempt.body.id}`);
 
     expect(res.status).toBe(200);
     expect(res.body.answers[0].question).not.toHaveProperty("correctOption");
   });
 
   it("rejects submit with 400 and lists missing fieldKeys when incomplete", async () => {
-    const attempt = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    const attempt = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
 
-    const res = await request(app).post(`/api/v1/assessment/attempts/${attempt.body.id}/submit`);
+    const res = await authRequest(app).post(`/api/v1/assessment/attempts/${attempt.body.id}/submit`);
 
     expect(res.status).toBe(400);
     expect(Array.isArray(res.body.error.details.missingFieldKeys)).toBe(true);
@@ -137,26 +138,26 @@ describe("Assessment submission API", () => {
   });
 
   it("submits successfully once every question is answered, and locks it", async () => {
-    const attempt = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
-    const questions = await request(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
+    const attempt = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    const questions = await authRequest(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
 
     const answers = questions.body.map((q: AssessmentQuestion) => ({
       fieldKey: q.fieldKey,
       selectedOption: buildAnswer(q),
     }));
 
-    const saveRes = await request(app)
+    const saveRes = await authRequest(app)
       .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
       .send({ answers });
     expect(saveRes.status).toBe(200);
 
-    const submitRes = await request(app).post(`/api/v1/assessment/attempts/${attempt.body.id}/submit`);
+    const submitRes = await authRequest(app).post(`/api/v1/assessment/attempts/${attempt.body.id}/submit`);
     expect(submitRes.status).toBe(200);
     expect(submitRes.body.status).toBe("SUBMITTED");
     expect(submitRes.body.submittedAt).not.toBeNull();
 
     // The scoring engine ran on submit — the computed report is now retrievable.
-    const resultRes = await request(app).get(`/api/v1/assessment/attempts/${attempt.body.id}/result`);
+    const resultRes = await authRequest(app).get(`/api/v1/assessment/attempts/${attempt.body.id}/result`);
     expect(resultRes.status).toBe(200);
     expect(Object.keys(resultRes.body.traitScores)).toHaveLength(18);
     expect(resultRes.body.dominantCareerStyle).toBeTruthy();
@@ -186,12 +187,12 @@ describe("Assessment submission API", () => {
     expect(careerFit.top6Domains.every((d: { fitScore: number }) => d.fitScore >= 60)).toBe(true);
     expect(careerFit.top6Domains[0].representativeCareer.jobRole).toBeTruthy();
 
-    const resaveRes = await request(app)
+    const resaveRes = await authRequest(app)
       .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
       .send({ answers: [{ fieldKey: questions.body[0].fieldKey, selectedOption: "1" }] });
     expect(resaveRes.status).toBe(409);
 
-    const restartRes = await request(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
+    const restartRes = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
     expect(restartRes.status).toBe(409);
   });
 });

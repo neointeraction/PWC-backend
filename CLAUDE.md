@@ -119,12 +119,25 @@ slot-based booking, join/no-show tracking, reschedule/cancel — design in
 Mailgun for real sends — with the 9 kREATE lifecycle templates plus 31
 reminder/session-status templates; most sends are still a manual
 `POST /api/v1/email/send` call, though booking/reschedule/cancel in Sessions trigger
-the relevant template automatically), OpenAPI/Swagger docs. **Not yet implemented**:
-route-level auth enforcement (the `authenticate`/`requireRole` middleware in
-`src/common/middlewares/auth.ts` exists but isn't applied to any route — every
-endpoint is still open with no credentials), password reset/change, Counsellor CRUD,
-Project CRUD, Career Library writes/ratification flow, assessment result/scoring
-computation, Counsellor Chart editing, report generation, a scheduler/cron for
-automatic same-day/nudge reminders. Don't assume any of these exist — check
-`src/modules/` before referencing an endpoint, and see
-`docs/frontend-integration-guide.md` §12 for the full list with more detail.
+the relevant template automatically), OpenAPI/Swagger docs. **Route-level auth is now
+enforced** — `authenticate`/`requireRole` plus convenience stacks (`requireStaff`,
+`requireAdmin`, `requireStudentOrStaff`) and per-record ownership guards
+(`src/common/middlewares/ownership.ts`) are applied across every module; the parent
+forms are deliberately public (parents have no login), gated by the project window
+instead. Password change + forgot/reset flows are built (`src/modules/auth/`), and
+Counsellor CRUD (`src/modules/counsellors/` — create/list/get/update/delete + project
+assign/unassign) and Project CRUD (`src/modules/projects/` — create/list/get/update/
+delete; `status:CLOSED` is the soft-close, delete is blocked when students exist) exist.
+Career Library now has writes (`src/modules/career-library/` — admin create/update/delete
+with a `DRAFT`→`ACTIVE` publish step) plus the counsellor ratification-request flow
+(submit → admin approve/reject). The student assessment **Report** is built
+(`src/modules/reports/` — `GET /reports/students/:id/assessment` assembles the full report
+as JSON for the frontend to render/print) and a dev scoring tester is served at
+`/dev/assessment` (non-prod, `public/assessment-tester.html`, backed by
+`POST /assessment/score-preview`). **Not yet implemented**: server-side PDF rendering and
+parent/institution report variants, a scheduler/cron for automatic same-day/nudge
+reminders, and the composite ARI (needs per-question `timeTakenMs` from the frontend).
+Note the OpenAPI/Swagger spec (`src/config/openapi.ts`) is **hand-maintained** — add a
+`registry.registerPath(...)` there when you add a route. Don't assume any of these exist — check `src/modules/` before
+referencing an endpoint, and see `docs/frontend-integration-guide.md` §13 for the full
+list with more detail.

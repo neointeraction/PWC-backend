@@ -7,14 +7,43 @@ companion to the interactive Swagger UI.
 - Interactive docs (Swagger UI): `GET /docs`
 - Raw OpenAPI spec: `GET /docs/openapi.json`
 - Base path for all API routes below: `/api/v1` (except `/health`, which is unprefixed)
-- Auth: login/refresh/logout exist (see Auth section), but **no endpoint requires a
-  token yet** — `authenticate`/`requireRole` middleware exists
-  (`src/common/middlewares/auth.ts`) but isn't wired into any route. Every endpoint
-  below is still open with no credentials, in dev.
+- Auth: **route-level auth is now enforced** — see "Authentication & roles" below.
+  Most endpoints require an `Authorization: Bearer <accessToken>` header; a handful are
+  intentionally public (auth, health, docs, parent forms).
 
-Last updated: 2026-08-10 (after fixing two Sessions edge cases — rebooking after a
-cancellation, and slot release on student deletion — see the `POST /sessions`,
-`POST /sessions/{id}/reschedule`, and `DELETE /students/{id}` rows).
+Last updated: 2026-08-11 (route-level auth enforcement — every route now carries a role
+guard except the documented public set; see "Authentication & roles").
+
+## Authentication & roles
+
+Send the access token from `POST /auth/login` as `Authorization: Bearer <accessToken>`
+on every non-public request. Guards live in `src/common/middlewares/auth.ts`
+(`requireAuth`, `requireStudentOrStaff`, `requireStaff`, `requireAdmin`,
+`authenticateStudentForm`). Failures: **401** (missing/invalid/expired token) and
+**403** (authenticated but wrong role).
+
+Role groups:
+- **Student** — the student self-service flows (own assessment, own forms, session booking).
+- **Staff** = `COUNSELLOR` + `ADMIN` + `SUPER_ADMIN` — operational access (view students, sessions, counsellor-chart, feedback, email).
+- **Admin** = `ADMIN` + `SUPER_ADMIN` — management (create/edit/delete students & institutes, slot import, workflow override).
+
+Access tiers:
+
+| Tier | Who | Where |
+|---|---|---|
+| **Public** (no token) | anyone | `auth/*`, `GET /health`, `GET /docs` + `openapi.json`, and **parent forms** (`PRE_COUNSELLING_PARENT`, `FEEDBACK_PARENT`) — parents have no login; still project-window gated |
+| **Any authenticated** | student or staff | career-library reads, assessment question bank |
+| **Student or Staff** | `STUDENT` + staff | student forms (`*_STUDENT`), form-status, assessment attempts/result, session booking/join/reschedule/cancel |
+| **Staff** | counsellor + admin | student reads, session management, counsellor-chart, feedback, email |
+| **Admin** | admin + super admin | student create/update/delete + workflow-status, institutes writes, session slot import, manual session creation |
+
+**Per-record ownership** is also enforced on the student-tier routes: a `STUDENT` token
+may only act on *their own* records (matched via `Student.userId` = token `sub`). Acting
+on another student's `studentId`/`attemptId`/session returns **403**; an unknown target
+returns **404**. Staff bypass ownership (they act across students). Parent forms are
+exempt (public, no owner). Guards: `ownStudentParam` / `ownStudentBody` /
+`ownAttemptParam` / `ownSessionParam` / `ownStudentForm` in
+`src/common/middlewares/ownership.ts`.
 
 ## Health
 
@@ -37,11 +66,12 @@ password, never by signing up. The one Super Admin login is bootstrapped by
 | POST | `/api/v1/auth/login` | Body: `{ email, password }`. 401 on wrong password, unknown email, or an inactive (`isActive: false`) user — same generic "Invalid email or password" message either way (doesn't leak which). 200 with `{ accessToken, user }`; sets the `refreshToken` httpOnly cookie (path `/api/v1/auth`). |
 | POST | `/api/v1/auth/refresh` | No body — reads the `refreshToken` cookie. 401 if missing, expired, already used (rotation), or revoked (logged out). 200 with a new `{ accessToken, user }`; rotates the refresh token (new cookie, old one revoked — single use). |
 | POST | `/api/v1/auth/logout` | No body — reads the `refreshToken` cookie, revokes it, clears the cookie. 204 either way — idempotent, doesn't error on a missing/already-invalid cookie. |
+| POST | `/api/v1/auth/change-password` | **Requires `Authorization: Bearer`.** Body: `{ currentPassword, newPassword }` (new min 8 chars). 400 on wrong current password, too-short new, or new == current; 401 without a token. On success: 204, clears `mustChangePassword`, and **revokes all refresh sessions** (clears the cookie). |
+| POST | `/api/v1/auth/forgot-password` | Public. Body: `{ email }`. Mints a single-use reset token (TTL `PASSWORD_RESET_EXPIRES_IN`, default 1h) and emails a `${APP_WEB_URL}/reset-password?token=...` link via the `PASSWORD_RESET` template. **Always 202** with the same message whether or not the email exists (no account enumeration). |
+| POST | `/api/v1/auth/reset-password` | Public. Body: `{ token, newPassword }` (min 8). 400 if the token is unknown, already used, or expired. On success: 204, sets the new password, marks the token used (single-use), clears `mustChangePassword`, and revokes all refresh sessions. |
 
-**Not wired up yet**: no route in any other module requires a token. The
-`authenticate`/`requireRole` middleware (`src/common/middlewares/auth.ts`) is built and
-ready, but applying it — and deciding which roles can hit which endpoint — is separate
-follow-up work per module.
+The access token payload is `{ sub: userId, role, email }`. Other modules' routes read
+`req.user.role` via the guards described in "Authentication & roles" above.
 
 ## Institutes
 
@@ -57,6 +87,19 @@ follow-up work per module.
 | POST | `/api/v1/institutes/{id}/classes/{classId}/divisions` | Create a division under a class. Body: `name`. |
 | GET | `/api/v1/institutes/{id}/classes/{classId}/divisions` | List a class's divisions. |
 
+## Projects
+
+A counselling cycle/cohort run for an institute — students, forms, assessments, sessions
+are all scoped to a Project. Reads = staff; writes/management = admin.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/projects` | Create a project. Body: `instituteId, name, fromDate, toDate, status?` (`ACTIVE`\|`CLOSED`, default `ACTIVE`). 400 if `instituteId` is unknown or `fromDate > toDate`; 409 on a duplicate `name` within the same institute. |
+| GET | `/api/v1/projects` | List projects (with institute + `_count` of students/counsellors/counsellorSlots). Query: `instituteId?, status?`. |
+| GET | `/api/v1/projects/{id}` | Get one project. 404 if unknown. |
+| PATCH | `/api/v1/projects/{id}` | Update (partial): `name?, fromDate?, toDate?, status?`. Re-validates the effective date window against the existing row (400 if the merged `fromDate > toDate`). Setting `status:CLOSED` is the soft-close — the project-window gate then rejects student/parent form + assessment submissions (see "Project-window gate"). |
+| DELETE | `/api/v1/projects/{id}` | Delete. **409 if the project has any students** (`error.details.studentCount`) — hard-deleting would cascade-wipe the whole cohort's data; close it (`status:CLOSED`) instead. Empty projects delete cleanly (cascading counsellor slots + project-counsellor links). |
+
 ## Students
 
 | Method | Path | Description |
@@ -68,6 +111,21 @@ follow-up work per module.
 | DELETE | `/api/v1/students/{id}` | Delete a student (deletes the linked `User` too, which cascades). Also releases any `CounsellorSlot` still `BOOKED` by the student's sessions back to `OPEN` before the cascade deletes those `Session` rows — otherwise the slot would be stranded (`ON DELETE SET NULL` clears its `sessionId` but not its `status`), permanently unbookable. |
 | POST | `/api/v1/students/{id}/confirm-profile` | Student confirms their profile data (father/mother details, parent contact) is correct. Advances `workflowStatus` `DRAFT → PROFILE_COMPLETED`. 409 if not currently `DRAFT`. |
 | PATCH | `/api/v1/students/{id}/workflow-status` | Admin/ops override — sets `workflowStatus` directly (not forward-only, unlike the automatic triggers below). Body: `{ workflowStatus }`. Covers the stages not yet wired to a real trigger (Sessions, Counsellor Chart/Feedback, Reports don't exist as modules yet). |
+
+## Counsellors
+
+Admin-managed CRUD for counsellor accounts (each backed by a `User` with role
+`COUNSELLOR`). Reads = staff; writes/assignment = admin.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/counsellors` | Create a counsellor. Also creates a linked `User` (role `COUNSELLOR`) with a generated temp password, returned once. Body: `firstName, lastName, email, mobile, counsellorCode, instituteId, projectIds?`. 400 if `instituteId` is unknown or any `projectId` isn't under that institute; 409 on duplicate `email`/`mobile`/`counsellorCode`. |
+| GET | `/api/v1/counsellors` | List counsellors (with user, institute, assigned projects). Query: `instituteId?, projectId?` (filters to counsellors assigned to that project). |
+| GET | `/api/v1/counsellors/{id}` | Get one counsellor. 404 if unknown. |
+| PATCH | `/api/v1/counsellors/{id}` | Update. Body (partial): `firstName?, lastName?, mobile?, isActive?`. `isActive:false` deactivates the login without deleting. |
+| DELETE | `/api/v1/counsellors/{id}` | Delete (removes the linked `User`, cascading the counsellor, its slots, and project links). **409 if the counsellor has any `Session`** (would orphan session history) — deactivate with `isActive:false` instead; `error.details.sessionCount` is returned. |
+| POST | `/api/v1/counsellors/{id}/projects` | Assign the counsellor to a project (`ProjectCounsellor`). Body: `{ projectId }`. 400 if the project isn't under the counsellor's institute; 409 if already assigned. Returns the updated counsellor. |
+| DELETE | `/api/v1/counsellors/{id}/projects/{projectId}` | Unassign from a project. 404 if not currently assigned. Returns the updated counsellor. |
 
 ## Forms
 
@@ -108,6 +166,7 @@ still viewable.
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/assessment/questions` | List assessment questions for a cohort, ordered. Query: `cohort` (required), `section?` (`RIASEC` \| `BIG_FIVE` \| `APTITUDE` \| `COGNITIVE`). **`correctOption` is never included in the response** — it's the aptitude answer key and must not be exposed to whoever is taking the assessment. |
+| POST | `/api/v1/assessment/score-preview` | **Staff, dev/QA only.** Run the scoring engine over ad-hoc answers with **no student/attempt/persistence** — purely to inspect the report a given answer pattern produces. Body: `cohort, answers: [{ fieldKey, response }]` (partial OK — unanswered Likert defaults to neutral, aptitude to incorrect), `durationMinutes?` (feeds the ORI band, default 30). Returns the full computed report. Backs the browser tester below. 404 for an unknown cohort. |
 | POST | `/api/v1/assessment/attempts` | Start a new attempt, or resume the student's existing `IN_PROGRESS` one for the given cohort. Body: `studentId, cohort`. 200 either way (not 201 — may resume rather than create). 409 if the student already has a `SUBMITTED` attempt for this cohort. |
 | GET | `/api/v1/assessment/attempts/{attemptId}` | Get an attempt with its answers (questions included, `correctOption` excluded). |
 | PUT | `/api/v1/assessment/attempts/{attemptId}/answers` | Save/update answers ("Save Progress"). Body: `answers: [{ fieldKey, selectedOption, timeTakenMs? }]`. Upserts `AssessmentAnswer` rows; idempotent. 400 on an unknown `fieldKey`. 409 if the attempt is already submitted (locked). `timeTakenMs` (optional) is per-question elapsed time — send it for aptitude questions to enable the Time-Consistency component of ARI. |
@@ -123,6 +182,13 @@ Difficulty-Consistency reliability measures. **Deferred pending PWC sign-off** (
 until resolved): Time-Consistency & the composite ARI (need per-question `timeTakenMs`).
 See `docs/db-design.md`.
 
+**Scoring tester (dev only):** with the API running (`pnpm dev`), open
+`http://localhost:4000/dev/assessment` in a browser — a single self-contained page that
+logs in, loads the question bank, lets you fill answers (with quick-fill / randomise
+buttons), and renders the full computed report from `POST /assessment/score-preview`. No
+student/attempt/DB writes. Served only when `NODE_ENV !== production`
+(`public/assessment-tester.html`).
+
 **Workflow side effect**: starting a student's first attempt for a cohort advances
 `workflowStatus` to `ASSESSMENT_PENDING`; submitting it advances to
 `ASSESSMENT_COMPLETED`.
@@ -134,16 +200,36 @@ once the project is closed or past its `toDate`. Reads (`GET` attempt/result) st
 
 ## Career Library
 
-Read-only retrieval/search over the imported career library data (see
-`docs/db-design.md` → "Career Library workbook import" for the data model and
-cross-table mapping). No write endpoints (create/edit/delete, or the counsellor
-ratification request flow) yet.
+Retrieval/search over the imported career library data (see `docs/db-design.md` →
+"Career Library workbook import" for the data model and cross-table mapping). Reads =
+any authenticated user; entry writes = admin; the ratification request flow lets
+counsellors propose additions for admin review.
+
+Entries have a `status` (`DRAFT`\|`ACTIVE`). New entries default to `DRAFT` and are hidden
+from the default (ACTIVE-only) list until an admin publishes them by `PATCH`-ing
+`status:ACTIVE`.
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/career-library` | Search/list entries. Query: `search?` (free text across jobRole/cluster/industry/domain/oneLineDescription), `cluster?, industry?, domain?, aiResilienceGrade?` (`LOW`\|`MEDIUM`\|`HIGH`\|`VERY_HIGH`), `status?` (defaults to `ACTIVE`), `page?` (default 1), `pageSize?` (default 20, max 100). Returns `{ data, pagination: { page, pageSize, total, totalPages } }`. |
 | GET | `/api/v1/career-library/filters` | Distinct `clusters`, `industries`, `domains` (from `ACTIVE` entries) plus the fixed `aiResilienceGrades` list — for populating UI filter dropdowns. |
+| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `cluster, industry, domain, jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary text/numeric fields, qualifications, entrance exams, certifications, `topCompanies`, `topCourses`, `status` (default `DRAFT`). `createdBy` is the calling admin. |
+| PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` — the publish/unpublish toggle). Sets `updatedBy`. 404 if not found. |
+| DELETE | `/api/v1/career-library/{id}` | **Admin.** Delete an entry (first detaches any ratification request's `resultingEntryId`). 404 if not found. |
 | GET | `/api/v1/career-library/{id}` | Get one entry, plus `relatedInstitutions` (`UgInstitution` rows matching the entry's `industry`), `relatedCourses` (`UgCourse` rows matching `cluster`), and `relatedEntranceExams` (`UgEntranceExam` rows matching the extracted UG `entranceExams` list). 404 if not found. |
+
+### Ratification requests
+
+Counsellors propose careers that aren't in the library; admins review. `CareerLibraryRequest`
+status: `PENDING` → `APPROVED`\|`REJECTED`.
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/career-library/requests` | **Staff.** Submit a request. Body: `jobTitle, suggestedCluster, suggestedIndustry, suggestedDomain?, oneLineDescription, justification, referenceLinks?`. A counsellor is resolved as `requestedById` from their token; an admin filing on behalf passes `requestedById` (a counsellor id) explicitly. Created `PENDING`. |
+| GET | `/api/v1/career-library/requests` | **Staff.** List requests (newest first, with any linked `resultingEntry`). Query: `status?, requestedById?`. |
+| GET | `/api/v1/career-library/requests/{requestId}` | **Staff.** Get one request. 404 if not found. |
+| POST | `/api/v1/career-library/requests/{requestId}/approve` | **Admin.** Approve. Body: `{ resultingEntryId? }` (link the entry the admin created from it). Sets `status:APPROVED`, `reviewedBy`, `reviewedAt`. 409 if already reviewed; 400 if `resultingEntryId` is unknown. |
+| POST | `/api/v1/career-library/requests/{requestId}/reject` | **Admin.** Reject (no body). Sets `status:REJECTED`, `reviewedBy`, `reviewedAt`. 409 if already reviewed. |
 
 ## Sessions
 
@@ -213,6 +299,18 @@ feedback is weighted 80%, parent 20%; each form's sections carry fixed weights.
 Performance bands (applied to Final/Overall %): **90–100** Top Performer (₹1,000) ·
 **80–89** Strong Performer (₹750) · **70–79** Needs Improvement (₹500) · **<70**
 Critical (₹0). Lower-inclusive/upper-exclusive, top band fully inclusive.
+
+## Reports
+
+Assembles the student assessment report as one structured JSON payload — the frontend
+renders the print/PDF view from it. Nothing new is computed here; it composes the already-
+stored `AssessmentResult` report, the counsellor-authored `CounsellorChart` narrative, and
+the feedback score into the report's sections. Access: student-or-staff, and a `STUDENT`
+token may only read their own (it's the student-facing deliverable).
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/reports/students/{studentId}/assessment` | The full student assessment report. Returns `student` (name, code, institute/class/division, workflowStatus), `championProfile` (DCS + DPS), `traitMap` (RIASEC / Big Five / Aptitude / Cognitive layers + flat 18-trait map), `careerCompass` (Career Fit top-6 domains with representative careers + top-3 industries), `streamFit`, `graduationPathways`, `reliability` (RVS/ACI/ORI/DC), `counsellorNarrative` (chart strengths/hobbies/shortlist/SCRI/notes, or `null` if none authored), `feedback` (score or `{ complete:false }`), and `meta` (cohort, `assessmentSubmittedAt`, `finalized`, engine `pending` list). **404 until the student has a computed assessment result.** |
 
 ## Email
 

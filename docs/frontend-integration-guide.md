@@ -87,15 +87,45 @@ retry.
 cookie. **204** always, even with no cookie present (idempotent — safe to call from a
 generic "sign out" button without checking session state first).
 
-### 2.4 What's NOT built yet
+### 2.4 Auth is now enforced — send the token
 
-- **No route actually requires the access token.** Every other endpoint in this doc
-  (Institutes, Students, Sessions, etc.) is still completely open — sending or not
-  sending the `Authorization` header makes no difference today. The
-  `authenticate`/`requireRole` middleware exists on the backend but isn't wired into
-  any route yet.
-- **No password-reset/forgot-password flow.**
-- **No "change password" endpoint** — `mustChangePassword` is informational only.
+Route-level auth is **live**. Send `Authorization: Bearer <accessToken>` on every request
+except the public set below. Two failure codes to handle:
+- **401** — no token, or an invalid/expired one. Refresh (§2.2) then retry; if refresh
+  also 401s, send the user back to login.
+- **403** — the token is valid but the role isn't allowed. Show "not permitted"; don't retry.
+
+**Public (no token needed):** `POST /auth/login|refresh|logout`, `GET /health`, `GET /docs`,
+and the **parent forms** (`PRE_COUNSELLING_PARENT`, `FEEDBACK_PARENT`) — parents have no
+login and reach those via a shared link (still project-window gated).
+
+**Role tiers** (see `docs/api-list.md` → "Authentication & roles" for the full table):
+- *Student or Staff*: student's own forms (`*_STUDENT`), form-status, assessment attempts/result, session booking.
+- *Staff* (`COUNSELLOR`/`ADMIN`/`SUPER_ADMIN`): student reads, session management, counsellor-chart, feedback, email.
+- *Admin* (`ADMIN`/`SUPER_ADMIN`): student & institute writes, slot import, workflow override.
+- *Any authenticated*: career-library, assessment question bank.
+
+**Per-record ownership is enforced.** A `STUDENT` token may only touch their *own*
+records — their own forms, form-status, assessment attempts, and sessions. Targeting
+another student's `studentId`/`attemptId`/session id returns **403** (an unknown id
+returns **404**). Staff tokens are exempt (they act across students), and parent forms
+stay public. So build the student UI to only ever pass the logged-in student's own ids.
+
+**Password change & reset are live** (§2.5).
+
+### 2.5 Password change & reset
+
+- **First-login change** — after login, if `user.mustChangePassword` is `true`, send the
+  user to a change-password screen: `POST /auth/change-password` with `{ currentPassword, newPassword }`
+  and the access token. On 204 the flag is cleared and **all sessions are revoked** — the
+  refresh cookie is gone, so log the user in again with the new password (or re-login
+  transparently). `newPassword` must be ≥ 8 chars; wrong current / too-short / same-as-old → 400.
+- **Forgot password** — `POST /auth/forgot-password` `{ email }` → always **202** (never
+  reveals whether the email exists). The user gets an email with a
+  `${APP_WEB_URL}/reset-password?token=...` link.
+- **Reset** — your `/reset-password` page reads `token` from the query and calls
+  `POST /auth/reset-password` `{ token, newPassword }`. 204 on success; 400 if the token is
+  invalid/expired/already used. The token is single-use and expires in 1h by default.
 
 ## 3. Error response contract
 
@@ -1042,31 +1072,22 @@ versions.
 Do **not** start frontend work assuming these exist. Ask the backend team for status
 before building UI that depends on any of them:
 
-- **Route-level auth enforcement** — login/refresh/logout work (§2), but no other
-  endpoint checks the access token or a role yet. Every API call above still works
-  with no credentials at all, in dev. There's also no password-reset/forgot-password
-  or change-password flow.
-- **Counsellor CRUD** — no way to create/list/update counsellors via API yet, even
-  though the `Counsellor` table exists. Sessions (§10) can reference an existing
-  `counsellorId`, but there's nowhere to create one via the API — seed it directly.
-- **Project CRUD** — same story; `Project` rows currently only exist via direct DB
-  seeding, no API.
-- **Career Library writes** — no create/edit/delete, no counsellor ratification-
-  request flow.
 - **Assessment scoring — nearly complete.** Submitting an attempt computes the full
   `AssessmentResult` — trait scores/grades, DCS, DPS, Stream Fit, Graduation Pathways,
   Career Fit (top-6 domains + representative careers), and RVS/ACI/ORI/DC reliability
   (see §8.4). The **only** piece still not produced is Time-Consistency + composite ARI
   (needs per-question `timeTakenMs`); don't build the composite-ARI tile against this yet.
-- **Reports** (Career kREATE / IKIGAI PDF, parent/institution summaries) — no
-  generation logic yet. **Counsellor Chart is built** — `GET`/`PUT
+- **Reports** — the **student assessment report is built**: `GET
+  /api/v1/reports/students/{id}/assessment` returns the whole report as structured JSON
+  (student, championProfile, traitMap, careerCompass, streamFit, graduationPathways,
+  reliability, counsellorNarrative, feedback, meta) for the frontend to render/print. Still
+  not built: server-side **PDF** rendering (do it client-side for now) and the **parent /
+  institution summary** variants. Counsellor Chart is built too — `GET`/`PUT
   /api/v1/counsellor-chart/students/{id}` assemble the chart and save notes/SCRI/ratings,
   and `POST`/`DELETE …/mirror-pair-amendments` let the counsellor amend a flagged answer,
-  which re-runs the full scoring engine (see `docs/api-list.md`). `workflowStatus` stages
-  past `SESSION_2_COMPLETED` still only move via the `PATCH /students/{id}/workflow-status`
+  which re-runs the full scoring engine. `workflowStatus` stages past
+  `SESSION_2_COMPLETED` still only move via the `PATCH /students/{id}/workflow-status`
   admin override (§6.1).
-- **Role-based access control** — no concept of "this user can only see their own
-  data" enforced anywhere, in Sessions (§10) or elsewhere yet.
 - **Real meeting-link generation** — Sessions' `meetingLink` (§10.6) is a manually
   pasted plain string; no Calendly/Google Meet integration.
 - **Automatic email/reminder triggers** — the Email module (§12) can send any

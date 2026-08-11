@@ -1,5 +1,6 @@
 import argon2 from "argon2";
 import request from "supertest";
+import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
@@ -79,19 +80,19 @@ let counsellorId: string;
 interface TemplateQuestion { fieldKey: string; questionType: string }
 
 async function submitFeedback(studentId: string, formType: string, scaleValue: string): Promise<void> {
-  const template = await request(app).get(`/api/v1/forms/${formType}`).query({ cohort: COHORT });
+  const template = await authRequest(app).get(`/api/v1/forms/${formType}`).query({ cohort: COHORT });
   const answers = (template.body.questions as TemplateQuestion[]).map((q) => ({
     fieldKey: q.fieldKey,
     answer: q.questionType === "SCALE" ? scaleValue : "n/a",
   }));
-  await request(app)
+  await authRequest(app)
     .post(`/api/v1/forms/${formType}/students/${studentId}/submit`)
     .send({ cohort: COHORT, answers });
 }
 
 describe("Feedback score API", () => {
   beforeAll(async () => {
-    const institute = await request(app).post("/api/v1/institutes").send({
+    const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Feedback",
       address: "10 Feedback Rd",
       contactNumber: "+919556000001",
@@ -101,14 +102,14 @@ describe("Feedback score API", () => {
     const project = await prisma.project.create({
       data: { instituteId, name: "Test Project Feedback", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
     });
-    const klass = await request(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 9" });
-    const division = await request(app)
+    const klass = await authRequest(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 9" });
+    const division = await authRequest(app)
       .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
       .send({ name: "F" });
     const divisionId = division.body.id;
 
     async function makeStudent(n: number): Promise<string> {
-      const res = await request(app).post("/api/v1/students").send({
+      const res = await authRequest(app).post("/api/v1/students").send({
         firstName: "Fb", lastName: `Student${n}`, email: `student${n}${SUFFIX}`,
         mobile: `+91955600010${n}`, studentCode: `FB${n}`, projectId: project.id, divisionId,
         parentMobile: `+91955600020${n}`, parentEmail: `parent${n}${SUFFIX}`,
@@ -156,7 +157,7 @@ describe("Feedback score API", () => {
   });
 
   it("computes a student's final score when both feedback forms are complete", async () => {
-    const res = await request(app).get(`/api/v1/feedback/students/${studentAId}/score`);
+    const res = await authRequest(app).get(`/api/v1/feedback/students/${studentAId}/score`);
     expect(res.status).toBe(200);
     expect(res.body.complete).toBe(true);
     expect(res.body.score.finalPercent).toBe(80);
@@ -167,7 +168,7 @@ describe("Feedback score API", () => {
   });
 
   it("reports an incomplete pair instead of a score", async () => {
-    const res = await request(app).get(`/api/v1/feedback/students/${studentBId}/score`);
+    const res = await authRequest(app).get(`/api/v1/feedback/students/${studentBId}/score`);
     expect(res.status).toBe(200);
     expect(res.body.complete).toBe(false);
     expect(res.body.missingForms).toContain("FEEDBACK_PARENT");
@@ -175,7 +176,7 @@ describe("Feedback score API", () => {
   });
 
   it("averages only complete-pair students for the counsellor overall score", async () => {
-    const res = await request(app).get(`/api/v1/feedback/counsellors/${counsellorId}/score`);
+    const res = await authRequest(app).get(`/api/v1/feedback/counsellors/${counsellorId}/score`);
     expect(res.status).toBe(200);
     expect(res.body.totalStudents).toBe(2);
     expect(res.body.includedStudents).toBe(1); // only student A has both forms
