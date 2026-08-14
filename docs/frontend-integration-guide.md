@@ -104,6 +104,9 @@ login and reach those via a shared link (still project-window gated).
 - *Staff* (`COUNSELLOR`/`ADMIN`/`SUPER_ADMIN`): student reads, session management, counsellor-chart, feedback, email.
 - *Admin* (`ADMIN`/`SUPER_ADMIN`): student & institute writes, slot import, workflow override.
 - *Any authenticated*: career-library, assessment question bank.
+- `VIEW_ONLY_ADMIN`: same **read** access as staff/admin, but **every write returns 403**
+  (`"View-only access…"`). Use the `role` on the login response to render a read-only UI
+  (hide/disable create/edit/delete). It can still change its own password.
 
 **Per-record ownership is enforced.** A `STUDENT` token may only touch their *own*
 records — their own forms, form-status, assessment attempts, and sessions. Targeting
@@ -471,7 +474,8 @@ they return **403**:
 { "error": { "message": "This project has ended — submissions are closed (ended 2025-12-31).",
   "details": { "reason": "PROJECT_EXPIRED", "projectId": "...", "toDate": "2025-12-31T00:00:00.000Z", "status": "CLOSED" } } }
 ```
-`reason` is `PROJECT_EXPIRED` (past `toDate`) or `PROJECT_CLOSED` (manually closed). Show
+`reason` is `PROJECT_EXPIRED` (past `toDate`), `PROJECT_CLOSED` (manually closed), or
+`PROJECT_DELETED` (soft-deleted). Show
 an "this link has expired" screen — don't retry. Reads (template/submission/status) stay
 open. The same gate applies to the assessment write endpoints (§8.3).
 

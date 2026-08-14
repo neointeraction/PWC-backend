@@ -22,6 +22,12 @@ export async function updateProject(req: Request, res: Response): Promise<void> 
 }
 
 export async function deleteProject(req: Request, res: Response): Promise<void> {
-  await projectsService.deleteProject(req.params.id as string);
-  res.status(204).send();
+  // Soft-delete — returns the project now flagged DELETED (was a 204 hard delete).
+  const project = await projectsService.deleteProject(req.params.id as string);
+  res.status(200).json(project);
+}
+
+export async function restoreProject(req: Request, res: Response): Promise<void> {
+  const project = await projectsService.restoreProject(req.params.id as string);
+  res.status(200).json(project);
 }

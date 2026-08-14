@@ -118,7 +118,7 @@ describe("Projects API", () => {
     expect(missing.status).toBe(404);
   });
 
-  it("deletes an empty project", async () => {
+  it("soft-deletes a project, hides it from the default list, and restores it", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
       instituteId,
       name: "Test Project CRUD Delete",
@@ -127,14 +127,30 @@ describe("Projects API", () => {
     });
     const id = created.body.id;
 
+    // DELETE = soft-delete → 200, status DELETED, row still present.
     const del = await authRequest(app).delete(`/api/v1/projects/${id}`);
-    expect(del.status).toBe(204);
-
+    expect(del.status).toBe(200);
+    expect(del.body.status).toBe("DELETED");
     const got = await authRequest(app).get(`/api/v1/projects/${id}`);
-    expect(got.status).toBe(404);
+    expect(got.status).toBe(200);
+    expect(got.body.status).toBe("DELETED");
+
+    // Default list excludes it; status=DELETED lists only soft-deleted.
+    const defaultList = await authRequest(app).get("/api/v1/projects").query({ instituteId });
+    expect(defaultList.body.some((p: { id: string }) => p.id === id)).toBe(false);
+    const deletedList = await authRequest(app).get("/api/v1/projects").query({ instituteId, status: "DELETED" });
+    expect(deletedList.body.some((p: { id: string }) => p.id === id)).toBe(true);
+    expect(deletedList.body.every((p: { status: string }) => p.status === "DELETED")).toBe(true);
+
+    // Restore → always ACTIVE, back in the default list.
+    const restored = await authRequest(app).patch(`/api/v1/projects/${id}/restore`);
+    expect(restored.status).toBe(200);
+    expect(restored.body.status).toBe("ACTIVE");
+    const afterRestore = await authRequest(app).get("/api/v1/projects").query({ instituteId });
+    expect(afterRestore.body.some((p: { id: string }) => p.id === id)).toBe(true);
   });
 
-  it("409s deleting a project that has students (close it instead)", async () => {
+  it("soft-delete works even when the project has students (data preserved, no 409)", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
       instituteId,
       name: "Test Project CRUD WithStudents",
@@ -143,7 +159,7 @@ describe("Projects API", () => {
     });
     const id = created.body.id;
 
-    await authRequest(app).post("/api/v1/students").send({
+    const student = await authRequest(app).post("/api/v1/students").send({
       firstName: "Proj",
       lastName: "Student",
       email: "proj@test-projects.example",
@@ -160,12 +176,11 @@ describe("Projects API", () => {
     });
 
     const del = await authRequest(app).delete(`/api/v1/projects/${id}`);
-    expect(del.status).toBe(409);
-    expect(del.body.error.details.studentCount).toBe(1);
-
-    // Clean up the blocking student so afterAll can drop the project.
-    await prisma.user.deleteMany({ where: { email: "proj@test-projects.example" } });
-    await prisma.project.delete({ where: { id } });
+    expect(del.status).toBe(200);
+    expect(del.body.status).toBe("DELETED");
+    // The student (and all its data) is preserved.
+    const stillThere = await prisma.student.findUnique({ where: { id: student.body.student.id } });
+    expect(stillThere).not.toBeNull();
   });
 
   it("enforces auth: 401 without token, 403 for a counsellor creating (admin-only)", async () => {

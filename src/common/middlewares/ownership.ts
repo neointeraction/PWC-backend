@@ -11,7 +11,9 @@ import { PUBLIC_PARENT_FORM_TYPES } from "./auth.js";
 // The access token's `sub` is the User.id; a Student row links to it via `Student.userId`.
 // Each guard resolves the *owning* student's userId from the request and compares.
 
-const STAFF_ROLES = new Set(["COUNSELLOR", "ADMIN", "SUPER_ADMIN"]);
+// VIEW_ONLY_ADMIN included so it can READ any student's records (its writes are blocked
+// globally by blockViewOnlyWrites regardless).
+const STAFF_ROLES = new Set(["COUNSELLOR", "ADMIN", "SUPER_ADMIN", "VIEW_ONLY_ADMIN"]);
 
 // A resolver returns the userId of the student who owns the targeted record, or null if
 // no such record exists (→ 404, which also avoids leaking existence to other students).

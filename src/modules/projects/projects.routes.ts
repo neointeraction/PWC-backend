@@ -41,9 +41,18 @@ projectsRouter.patch(
   asyncHandler(projectsController.updateProject)
 );
 
+// Soft-delete (reversible) — flags the project DELETED; data is preserved.
 projectsRouter.delete(
   "/:id",
   ...requireAdmin,
   validate({ params: projectIdParamsSchema }),
   asyncHandler(projectsController.deleteProject)
+);
+
+// Restore a soft-deleted project back to ACTIVE.
+projectsRouter.patch(
+  "/:id/restore",
+  ...requireAdmin,
+  validate({ params: projectIdParamsSchema }),
+  asyncHandler(projectsController.restoreProject)
 );

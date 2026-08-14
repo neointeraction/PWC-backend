@@ -36,13 +36,21 @@ export async function assertStudentProjectWindowOpen(studentId: string): Promise
   );
   const expired = now > endOfDay;
 
-  if (project.status === "CLOSED" || expired) {
+  if (project.status === "CLOSED" || project.status === "DELETED" || expired) {
+    const reason =
+      project.status === "DELETED"
+        ? "PROJECT_DELETED"
+        : project.status === "CLOSED"
+          ? "PROJECT_CLOSED"
+          : "PROJECT_EXPIRED";
     throw new ForbiddenError(
-      `This project has ended — submissions are closed (ended ${project.toDate
-        .toISOString()
-        .slice(0, 10)}).`,
+      reason === "PROJECT_DELETED"
+        ? "This project is no longer available."
+        : `This project has ended — submissions are closed (ended ${project.toDate
+            .toISOString()
+            .slice(0, 10)}).`,
       {
-        reason: project.status === "CLOSED" ? "PROJECT_CLOSED" : "PROJECT_EXPIRED",
+        reason,
         projectId: project.id,
         projectName: project.name,
         toDate: project.toDate,

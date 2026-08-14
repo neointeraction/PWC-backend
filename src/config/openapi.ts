@@ -68,6 +68,12 @@ import {
 import { previewScoreBodySchema } from "../modules/assessment/assessment.schema.js";
 import { reportStudentParamsSchema } from "../modules/reports/reports.schema.js";
 import {
+  adminIdParamsSchema,
+  createAdminSchema,
+  listAdminsQuerySchema,
+  updateAdminSchema,
+} from "../modules/admins/admins.schema.js";
+import {
   bookSessionsBodySchema,
   bookingOptionsQuerySchema,
   cancelSessionBodySchema,
@@ -805,6 +811,67 @@ registry.registerPath({
   },
 });
 
+// --- App Admins (SUPER_ADMIN only) ---
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/admins",
+  tags: ["Admins"],
+  summary: "Create an App Admin (User with role ADMIN or VIEW_ONLY_ADMIN) + temp password. SUPER_ADMIN only.",
+  request: { body: { content: { "application/json": { schema: createAdminSchema } } } },
+  responses: {
+    201: { description: "Admin created (+ tempPassword)", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/admins",
+  tags: ["Admins"],
+  summary: "List App Admins (ADMIN + VIEW_ONLY_ADMIN). Query: role?. SUPER_ADMIN only.",
+  request: { query: listAdminsQuerySchema },
+  responses: {
+    200: { description: "List of app admins", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/admins/{id}",
+  tags: ["Admins"],
+  summary: "Get an App Admin by id (404 for non-admin users). SUPER_ADMIN only.",
+  request: { params: adminIdParamsSchema },
+  responses: {
+    200: { description: "App admin", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/admins/{id}",
+  tags: ["Admins"],
+  summary: "Update an App Admin: firstName?/lastName?/role?/isActive?. `role` flips ADMIN <-> VIEW_ONLY_ADMIN (the view-only toggle). SUPER_ADMIN only.",
+  request: { params: adminIdParamsSchema, body: { content: { "application/json": { schema: updateAdminSchema } } } },
+  responses: {
+    200: { description: "Updated app admin", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/admins/{id}",
+  tags: ["Admins"],
+  summary: "Delete an App Admin. SUPER_ADMIN only.",
+  request: { params: adminIdParamsSchema },
+  responses: {
+    204: { description: "Deleted" },
+    404: errorResponses[404],
+  },
+});
+
 // --- Counsellors ---
 
 registry.registerPath({
@@ -944,11 +1011,22 @@ registry.registerPath({
   method: "delete",
   path: "/api/v1/projects/{id}",
   tags: ["Projects"],
-  summary: "Delete a project (409 if it has students — close it instead). Admin only.",
+  summary: "Soft-delete a project (status → DELETED, reversible — data preserved). Admin only.",
   request: { params: projectIdParamsSchema },
   responses: {
-    204: { description: "Deleted" },
-    409: errorResponses[409],
+    200: { description: "The soft-deleted project (status DELETED)", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/projects/{id}/restore",
+  tags: ["Projects"],
+  summary: "Restore a soft-deleted project back to ACTIVE. Admin only.",
+  request: { params: projectIdParamsSchema },
+  responses: {
+    200: { description: "The restored project (status ACTIVE)", content: { "application/json": { schema: genericObjectSchema } } },
     404: errorResponses[404],
   },
 });

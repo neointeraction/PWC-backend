@@ -1,5 +1,5 @@
 import { prisma } from "../../config/prisma.js";
-import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
+import { BadRequestError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import type { CreateProjectInput, ListProjectsQuery, UpdateProjectInput } from "./projects.schema.js";
 
@@ -32,7 +32,12 @@ export async function createProject(input: CreateProjectInput) {
 
 export async function listProjects(query: ListProjectsQuery) {
   return prisma.project.findMany({
-    where: { instituteId: query.instituteId, status: query.status },
+    where: {
+      instituteId: query.instituteId,
+      // No status filter → exclude soft-deleted (active + closed). An explicit status
+      // (incl. DELETED) filters to exactly that.
+      status: query.status ?? { not: "DELETED" },
+    },
     include: projectInclude,
     orderBy: { createdAt: "desc" },
   });
@@ -72,20 +77,24 @@ export async function updateProject(id: string, input: UpdateProjectInput) {
   }
 }
 
+// Soft-delete: flag the project DELETED (reversible). Data is preserved — students,
+// forms, assessments, sessions all stay intact — the project is just hidden from the
+// default listing and its student/parent submissions are blocked (see projectWindow).
 export async function deleteProject(id: string) {
-  const existing = await getProjectById(id);
+  await getProjectById(id); // 404 if missing
+  return prisma.project.update({
+    where: { id },
+    data: { status: "DELETED" },
+    include: projectInclude,
+  });
+}
 
-  // A project scopes all of a cohort's students (and their forms/assessments/sessions).
-  // Hard-deleting one with students would cascade-wipe all of that — refuse and point the
-  // admin at closing it instead (PATCH status:CLOSED, the intended purge boundary).
-  if (existing._count.students > 0) {
-    throw new ConflictError(
-      "Project has students and cannot be deleted; close it instead (PATCH status:CLOSED)",
-      { studentCount: existing._count.students }
-    );
-  }
-
-  // No students — safe to remove. Cascades any counsellor slots and project-counsellor
-  // assignment links (both onDelete: Cascade).
-  await prisma.project.delete({ where: { id } });
+// Restore: always back to ACTIVE (prior status isn't tracked — matches the UI contract).
+export async function restoreProject(id: string) {
+  await getProjectById(id); // 404 if missing
+  return prisma.project.update({
+    where: { id },
+    data: { status: "ACTIVE" },
+    include: projectInclude,
+  });
 }

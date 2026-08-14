@@ -1,6 +1,11 @@
 import { z } from "zod";
 
+// Writable statuses (create/update). DELETED is set/cleared only via the DELETE + restore
+// endpoints, never by an arbitrary PATCH, so it's intentionally excluded here.
 export const projectStatusSchema = z.enum(["ACTIVE", "CLOSED"]);
+
+// Filter statuses for listing — includes DELETED so the UI can list soft-deleted projects.
+export const projectStatusFilterSchema = z.enum(["ACTIVE", "CLOSED", "DELETED"]);
 
 export const createProjectSchema = z
   .object({
@@ -32,6 +37,7 @@ export const projectIdParamsSchema = z.object({
 
 export const listProjectsQuerySchema = z.object({
   instituteId: z.string().cuid().optional(),
-  status: projectStatusSchema.optional(),
+  // No status → active + closed (excludes DELETED). `status=DELETED` lists only soft-deleted.
+  status: projectStatusFilterSchema.optional(),
 });
 export type ListProjectsQuery = z.infer<typeof listProjectsQuerySchema>;

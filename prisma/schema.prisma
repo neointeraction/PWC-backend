@@ -16,6 +16,7 @@ enum UserRole {
   COUNSELLOR
   ADMIN
   SUPER_ADMIN
+  VIEW_ONLY_ADMIN // same read access as an admin, but every write is blocked
 }
 
 model User {
@@ -134,6 +135,7 @@ model InstituteDivision {
 enum ProjectStatus {
   ACTIVE
   CLOSED
+  DELETED // soft-delete — hidden from default listings, restorable to ACTIVE
 }
 
 // A counselling cycle/cohort run for an institute (e.g. "2026 Batch, Class 9-10").

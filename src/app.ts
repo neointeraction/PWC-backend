@@ -12,11 +12,13 @@ import { env } from "./config/env.js";
 // only affects the compile-time type; runtime behaviour is unchanged.
 const helmet = helmetImport as unknown as (options?: Readonly<Record<string, unknown>>) => RequestHandler;
 import { errorHandler, notFoundHandler } from "./common/middlewares/errorHandler.js";
+import { blockViewOnlyWrites } from "./common/middlewares/auth.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { institutesRouter } from "./modules/institutes/institutes.routes.js";
 import { studentsRouter } from "./modules/students/students.routes.js";
 import { counsellorsRouter } from "./modules/counsellors/counsellors.routes.js";
+import { adminsRouter } from "./modules/admins/admins.routes.js";
 import { projectsRouter } from "./modules/projects/projects.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { cohortsRouter } from "./modules/cohorts/cohorts.routes.js";
@@ -44,9 +46,15 @@ export function createApp(): Express {
 
   app.use("/health", healthRouter);
   app.use("/api/v1/auth", authRouter);
+
+  // View-only enforcement: from here down, a VIEW_ONLY_ADMIN token is rejected on any
+  // write (non-GET). Mounted after /auth so login/refresh/logout/change-password still work.
+  app.use(blockViewOnlyWrites);
+
   app.use("/api/v1/institutes", institutesRouter);
   app.use("/api/v1/students", studentsRouter);
   app.use("/api/v1/counsellors", counsellorsRouter);
+  app.use("/api/v1/admins", adminsRouter);
   app.use("/api/v1/projects", projectsRouter);
   app.use("/api/v1/forms", formsRouter);
   app.use("/api/v1/assessment", assessmentRouter);

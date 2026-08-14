@@ -141,7 +141,7 @@ A counselling cycle/cohort under an institute.
 | instituteId | String | FK → Institute, cascade delete |
 | name | String | unique per institute |
 | fromDate, toDate | DateTime | cohort duration |
-| status | `ProjectStatus` enum | ACTIVE / CLOSED |
+| status | `ProjectStatus` enum | ACTIVE / CLOSED / DELETED (DELETED = reversible soft-delete via `DELETE` + `PATCH /:id/restore`; hidden from default listings) |
 
 ### `Counsellor`
 Extends `User` (role=COUNSELLOR). Belongs to exactly one institute; assigned to

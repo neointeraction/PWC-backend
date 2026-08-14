@@ -1,6 +1,8 @@
 # Keep the serverless bundle small — none of these are needed at runtime.
-test
-docs
-scripts
-public
+# Leading slash anchors to repo root so these don't also match same-named
+# dirs under src/ (e.g. src/modules/docs, which the build needs).
+/test
+/docs
+/scripts
+/public
 *.md

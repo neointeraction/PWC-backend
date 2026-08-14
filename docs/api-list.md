@@ -24,8 +24,9 @@ on every non-public request. Guards live in `src/common/middlewares/auth.ts`
 
 Role groups:
 - **Student** — the student self-service flows (own assessment, own forms, session booking).
-- **Staff** = `COUNSELLOR` + `ADMIN` + `SUPER_ADMIN` — operational access (view students, sessions, counsellor-chart, feedback, email).
+- **Staff** = `COUNSELLOR` + `ADMIN` + `SUPER_ADMIN` (+ `VIEW_ONLY_ADMIN` for reads) — operational access (view students, sessions, counsellor-chart, feedback, email).
 - **Admin** = `ADMIN` + `SUPER_ADMIN` — management (create/edit/delete students & institutes, slot import, workflow override).
+- **`VIEW_ONLY_ADMIN`** — sees everything staff/admins can see, but **every write is blocked**. It's in the read guards, but a global `blockViewOnlyWrites` middleware (`src/common/middlewares/auth.ts`, mounted after `/auth`) rejects any **non-GET** request from this role with **403** (`"View-only access…"`) — across every module, regardless of the route's own tier. It can still change its own password (auth self-service is exempt). Assign this role instead of `ADMIN` for a view-only app admin.
 
 Access tiers:
 
@@ -73,6 +74,22 @@ password, never by signing up. The one Super Admin login is bootstrapped by
 The access token payload is `{ sub: userId, role, email }`. Other modules' routes read
 `req.user.role` via the guards described in "Authentication & roles" above.
 
+## App Admins
+
+Manage App Admin accounts (Users with role `ADMIN` or `VIEW_ONLY_ADMIN`). **SUPER_ADMIN
+only** — and every operation is scoped to those two roles, so it can't touch students,
+counsellors, or super admins, and can't create/escalate to `SUPER_ADMIN`. The `role`
+field on create/update is the **view-only toggle** (`VIEW_ONLY_ADMIN` = read-only admin,
+enforced by `blockViewOnlyWrites`).
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/admins` | Create an App Admin. Body: `firstName, lastName, email, role?` (`ADMIN` \| `VIEW_ONLY_ADMIN`, default `ADMIN`). Returns the admin + one-time `tempPassword`. 400 if `role` isn't one of the two; 409 on duplicate email. |
+| GET | `/api/v1/admins` | List App Admins (newest first). Query: `role?`. |
+| GET | `/api/v1/admins/{id}` | Get one App Admin. **404 for any non-admin user id** (role-scoped). |
+| PATCH | `/api/v1/admins/{id}` | Update `firstName?, lastName?, role?, isActive?`. `role` flips `ADMIN` ↔ `VIEW_ONLY_ADMIN`; `isActive:false` deactivates the login. |
+| DELETE | `/api/v1/admins/{id}` | Delete an App Admin (they own no dependent records). 404 for a non-admin id. |
+
 ## Institutes
 
 | Method | Path | Description |
@@ -106,10 +123,11 @@ are all scoped to a Project. Reads = staff; writes/management = admin.
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/v1/projects` | Create a project. Body: `instituteId, name, fromDate, toDate, status?` (`ACTIVE`\|`CLOSED`, default `ACTIVE`). 400 if `instituteId` is unknown or `fromDate > toDate`; 409 on a duplicate `name` within the same institute. |
-| GET | `/api/v1/projects` | List projects (with institute + `_count` of students/counsellors/counsellorSlots). Query: `instituteId?, status?`. |
-| GET | `/api/v1/projects/{id}` | Get one project. 404 if unknown. |
-| PATCH | `/api/v1/projects/{id}` | Update (partial): `name?, fromDate?, toDate?, status?`. Re-validates the effective date window against the existing row (400 if the merged `fromDate > toDate`). Setting `status:CLOSED` is the soft-close — the project-window gate then rejects student/parent form + assessment submissions (see "Project-window gate"). |
-| DELETE | `/api/v1/projects/{id}` | Delete. **409 if the project has any students** (`error.details.studentCount`) — hard-deleting would cascade-wipe the whole cohort's data; close it (`status:CLOSED`) instead. Empty projects delete cleanly (cascading counsellor slots + project-counsellor links). |
+| GET | `/api/v1/projects` | List projects (with institute + `_count` of students/counsellors/counsellorSlots). Query: `instituteId?, status?`. **No `status` → excludes soft-deleted** (returns `ACTIVE` + `CLOSED`); `status=DELETED` lists only soft-deleted; `status=ACTIVE`/`CLOSED` filter exactly. |
+| GET | `/api/v1/projects/{id}` | Get one project (any status, incl. `DELETED`). 404 if unknown. |
+| PATCH | `/api/v1/projects/{id}` | Update (partial): `name?, fromDate?, toDate?, status?` (`status` writable values are `ACTIVE`/`CLOSED` only — use DELETE/restore for `DELETED`). Re-validates the effective date window (400 if merged `fromDate > toDate`). `status:CLOSED` is the soft-close — the project-window gate then rejects student/parent submissions. |
+| DELETE | `/api/v1/projects/{id}` | **Soft-delete** — sets `status:DELETED` (reversible; **data is preserved**, no cascade). Returns the updated project (`200`). Hidden from the default list; its student/parent submissions are blocked (`reason:PROJECT_DELETED`). 404 if unknown. |
+| PATCH | `/api/v1/projects/{id}/restore` | **Restore** a soft-deleted project — always back to `status:ACTIVE` (prior status isn't tracked). Returns the updated project. 404 if unknown. |
 
 ## Students
 
@@ -168,7 +186,7 @@ endpoints (draft `PUT` and `submit`) are gated on the student's **Project window
 the project is `CLOSED` or past its `toDate` (end date — **inclusive of the whole day**,
 so writes stay open through the end of that date and close at the start of the next day),
 they return **403** with
-`error.details.reason` = `PROJECT_CLOSED` \| `PROJECT_EXPIRED` (plus `projectId`,
+`error.details.reason` = `PROJECT_CLOSED` \| `PROJECT_DELETED` \| `PROJECT_EXPIRED` (plus `projectId`,
 `toDate`). Reads (`GET` template/submission/status) stay open so ended-cycle data is
 still viewable.
 
@@ -206,7 +224,7 @@ student/attempt/DB writes. Served only when `NODE_ENV !== production`
 
 **Project-window gate**: like the forms flow, the assessment is taken without a login, so
 the write endpoints (start attempt, save answers, submit) are gated on the student's
-Project window — **403** (`error.details.reason` = `PROJECT_CLOSED` \| `PROJECT_EXPIRED`)
+Project window — **403** (`error.details.reason` = `PROJECT_CLOSED` \| `PROJECT_DELETED` \| `PROJECT_EXPIRED`)
 once the project is closed or past its `toDate`. Reads (`GET` attempt/result) stay open.
 
 ## Career Library
