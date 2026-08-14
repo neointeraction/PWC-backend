@@ -1,9 +1,16 @@
 import { fileURLToPath } from "node:url";
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import express, { type Express } from "express";
-import helmet from "helmet";
+import express, { type Express, type RequestHandler } from "express";
+import helmetImport from "helmet";
 import { env } from "./config/env.js";
+
+// helmet@8 is a callable middleware factory at runtime, but its `exports` map has no
+// `types` condition, so under NodeNext + pnpm its default export can resolve to the
+// (non-callable) module namespace on some machines (notably Vercel's build), causing
+// `tsc` error TS2349 "has no call signatures". Coerce to the callable signature — this
+// only affects the compile-time type; runtime behaviour is unchanged.
+const helmet = helmetImport as unknown as (options?: Readonly<Record<string, unknown>>) => RequestHandler;
 import { errorHandler, notFoundHandler } from "./common/middlewares/errorHandler.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
