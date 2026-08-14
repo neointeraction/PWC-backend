@@ -3,6 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { env } from "../src/config/env.js";
 import { class9to10AssessmentQuestions } from "./seed-data/assessment/class9to10.js";
 import { seedCareerLibraryData } from "./seed-data/career-library/index.js";
+import { seedCareerLibraryNormalization } from "./seed-data/career-library/normalize.js";
 import { feedbackParentQuestions } from "./seed-data/forms/feedbackParent.js";
 import { feedbackStudentQuestions } from "./seed-data/forms/feedbackStudent.js";
 import { preCounsellingParentQuestions } from "./seed-data/forms/preCounsellingParent.js";
@@ -122,14 +123,26 @@ async function seedSuperAdmin(): Promise<void> {
   console.log(`Seeded Super Admin login: ${env.SEED_SUPER_ADMIN_EMAIL} / (password from SEED_SUPER_ADMIN_PASSWORD)`);
 }
 
+async function seedCohorts(): Promise<void> {
+  // Read-only lookup for cohort dropdowns. `code` matches the cohort strings used across
+  // the app's cohort-scoped content. Only Class 9-10 exists today.
+  await prisma.cohort.upsert({
+    where: { code: "CLASS_9_10" },
+    update: { name: "Class 9 & 10" },
+    create: { code: "CLASS_9_10", name: "Class 9 & 10", displayOrder: 1 },
+  });
+}
+
 async function main(): Promise<void> {
   await seedSuperAdmin();
+  await seedCohorts();
   await seedFormTemplate("PRE_COUNSELLING_STUDENT", preCounsellingStudentQuestions);
   await seedFormTemplate("PRE_COUNSELLING_PARENT", preCounsellingParentQuestions);
   await seedFormTemplate("FEEDBACK_STUDENT", feedbackStudentQuestions);
   await seedFormTemplate("FEEDBACK_PARENT", feedbackParentQuestions);
   await seedAssessmentQuestions(class9to10AssessmentQuestions);
   await seedCareerLibraryData(prisma);
+  await seedCareerLibraryNormalization(prisma);
 }
 
 main()

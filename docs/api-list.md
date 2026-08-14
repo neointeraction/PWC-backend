@@ -87,6 +87,17 @@ The access token payload is `{ sub: userId, role, email }`. Other modules' route
 | POST | `/api/v1/institutes/{id}/classes/{classId}/divisions` | Create a division under a class. Body: `name`. |
 | GET | `/api/v1/institutes/{id}/classes/{classId}/divisions` | List a class's divisions. |
 
+## Cohorts
+
+Read-only lookup for cohort dropdowns (e.g. selecting a cohort when creating a project).
+`Cohort.code` (e.g. `CLASS_9_10`) is the canonical string that the cohort-scoped content
+(forms, assessment questions/attempts) matches on — those columns stay plain strings, not
+FKs, for now. Only `CLASS_9_10` exists today. No CRUD yet — cohorts are managed via seed.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/cohorts` | List active cohorts (`{ id, code, name, displayOrder }`), ordered by `displayOrder`. Staff. |
+
 ## Projects
 
 A counselling cycle/cohort run for an institute — students, forms, assessments, sessions
@@ -209,14 +220,25 @@ Entries have a `status` (`DRAFT`\|`ACTIVE`). New entries default to `DRAFT` and 
 from the default (ACTIVE-only) list until an admin publishes them by `PATCH`-ing
 `status:ACTIVE`.
 
+**Normalized links (select-or-add).** Entrance exams, courses, and institutions/colleges
+are **canonical lookup tables** linked to each career (many-to-many). On create/update,
+`entranceExams` / `courses` / `institutions` each take an array where every item is
+**either** an existing row `{ id }` **or** a new one `{ name, … }` (find-or-create). Feed
+the dropdowns from the typeahead endpoints below. (`topCompanies` and `certifications*`
+remain free-text arrays for now; the old `String[]` exam/course columns are still
+dual-written during the transition — see `docs/career-library-normalization-spec.md`.)
+
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/career-library` | Search/list entries. Query: `search?` (free text across jobRole/cluster/industry/domain/oneLineDescription), `cluster?, industry?, domain?, aiResilienceGrade?` (`LOW`\|`MEDIUM`\|`HIGH`\|`VERY_HIGH`), `status?` (defaults to `ACTIVE`), `page?` (default 1), `pageSize?` (default 20, max 100). Returns `{ data, pagination: { page, pageSize, total, totalPages } }`. |
 | GET | `/api/v1/career-library/filters` | Distinct `clusters`, `industries`, `domains` (from `ACTIVE` entries) plus the fixed `aiResilienceGrades` list — for populating UI filter dropdowns. |
-| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `cluster, industry, domain, jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary text/numeric fields, qualifications, entrance exams, certifications, `topCompanies`, `topCourses`, `status` (default `DRAFT`). `createdBy` is the calling admin. |
-| PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` — the publish/unpublish toggle). Sets `updatedBy`. 404 if not found. |
-| DELETE | `/api/v1/career-library/{id}` | **Admin.** Delete an entry (first detaches any ratification request's `resultingEntryId`). 404 if not found. |
-| GET | `/api/v1/career-library/{id}` | Get one entry, plus `relatedInstitutions` (`UgInstitution` rows matching the entry's `industry`), `relatedCourses` (`UgCourse` rows matching `cluster`), and `relatedEntranceExams` (`UgEntranceExam` rows matching the extracted UG `entranceExams` list). 404 if not found. |
+| GET | `/api/v1/career-library/entrance-exams` | **Typeahead dropdown.** Canonical entrance exams. Query: `search?`, `level?` (`UG`\|`PG`), `limit?` (default 50). |
+| GET | `/api/v1/career-library/institutions` | **Typeahead dropdown.** Canonical institutions/colleges. Query: `search?`, `limit?`. |
+| GET | `/api/v1/career-library/courses` | **Typeahead dropdown.** Canonical courses. Query: `search?`, `level?`, `limit?`. |
+| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `cluster, industry, domain, jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields, `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name). Returns the assembled entry. `createdBy` = calling admin. |
+| PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` toggle). A provided link array **replaces** that entry's links; omitting it leaves them unchanged. 400 on an unknown link `id`. Sets `updatedBy`. 404 if not found. |
+| DELETE | `/api/v1/career-library/{id}` | **Admin.** Delete an entry (cascades its links; first detaches any request's `resultingEntryId`). 404 if not found. |
+| GET | `/api/v1/career-library/{id}` | Get one entry. Includes the curated normalized links `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions`, plus the legacy broad value-match view `relatedInstitutions` (by `industry`) / `relatedCourses` (by `cluster`) / `relatedEntranceExams` (kept during transition). 404 if not found. |
 
 ### Ratification requests
 

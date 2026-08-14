@@ -63,6 +63,23 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
+// Lookup of counselling cohorts (e.g. Class 9-10). `code` is the canonical string used
+// across the app's cohort-scoped content (FormTemplate.cohort, AssessmentQuestion.cohort,
+// AssessmentAttempt.cohort) — those columns stay plain strings that MATCH this code, not
+// FKs (deliberate: avoids a big migration while there's a single cohort). This table is a
+// read-only source of truth to populate cohort dropdowns; no CRUD yet.
+model Cohort {
+  id           String   @id @default(cuid())
+  code         String   @unique // "CLASS_9_10" — matches the cohort strings elsewhere
+  name         String // human label, e.g. "Class 9 & 10"
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("cohorts")
+}
+
 // Tenant (educational institution). Onboarded by Super Admin.
 model Institute {
   id            String   @id @default(cuid())
@@ -323,6 +340,12 @@ enum CareerLibraryStatus {
   ACTIVE
 }
 
+// UG vs PG, used to scope the canonical entrance-exam / course lookups.
+enum QualificationLevel {
+  UG
+  PG
+}
+
 // Central, PWC-owned career library (default ~1,300 roles).
 model CareerLibraryEntry {
   id                  String            @id @default(cuid())
@@ -368,6 +391,12 @@ model CareerLibraryEntry {
   updatedAt  DateTime            @updatedAt
 
   requests CareerLibraryRequest[]
+
+  // Normalized many-to-many links (the String[] columns above are kept transitionally and
+  // dropped once these are verified — see docs/career-library-normalization-spec.md).
+  entranceExamLinks CareerEntranceExam[]
+  courseLinks       CareerCourse[]
+  institutionLinks  CareerInstitution[]
 
   @@index([cluster])
   @@index([industry])
@@ -504,6 +533,98 @@ model PgEntranceExam {
 
   @@index([examName])
   @@map("pg_entrance_exams")
+}
+
+// --- Canonical lookups for career-library normalization ---
+// Deduped, dropdown-friendly lists (seeded from the Ug*/Pg* import directories above +
+// backfilled from existing career entries). Careers link to these via the join tables
+// below. See docs/career-library-normalization-spec.md.
+
+model EntranceExam {
+  id              String             @id @default(cuid())
+  name            String
+  level           QualificationLevel
+  fullForm        String?
+  conductingBody  String?
+  officialWebsite String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  careerLinks CareerEntranceExam[]
+
+  @@unique([name, level])
+  @@index([name])
+  @@map("entrance_exams")
+}
+
+model Institution {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  city      String?
+  state     String?
+  type      String?
+  website   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  careerLinks CareerInstitution[]
+
+  @@index([name])
+  @@map("institutions")
+}
+
+model Course {
+  id            String             @id @default(cuid())
+  name          String
+  level         QualificationLevel
+  fullForm      String?
+  durationYears String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  careerLinks CareerCourse[]
+
+  @@unique([name, level])
+  @@index([name])
+  @@map("courses")
+}
+
+// --- Career ↔ lookup join tables (many-to-many, curated per job role) ---
+
+model CareerEntranceExam {
+  careerEntryId  String
+  entranceExamId String
+  careerEntry    CareerLibraryEntry @relation(fields: [careerEntryId], references: [id], onDelete: Cascade)
+  entranceExam   EntranceExam       @relation(fields: [entranceExamId], references: [id], onDelete: Cascade)
+  createdAt      DateTime           @default(now())
+
+  @@id([careerEntryId, entranceExamId])
+  @@index([entranceExamId])
+  @@map("career_entrance_exams")
+}
+
+model CareerInstitution {
+  careerEntryId String
+  institutionId String
+  careerEntry   CareerLibraryEntry @relation(fields: [careerEntryId], references: [id], onDelete: Cascade)
+  institution   Institution        @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  createdAt     DateTime           @default(now())
+
+  @@id([careerEntryId, institutionId])
+  @@index([institutionId])
+  @@map("career_institutions")
+}
+
+model CareerCourse {
+  careerEntryId String
+  courseId      String
+  careerEntry   CareerLibraryEntry @relation(fields: [careerEntryId], references: [id], onDelete: Cascade)
+  course        Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt     DateTime           @default(now())
+
+  @@id([careerEntryId, courseId])
+  @@index([courseId])
+  @@map("career_courses")
 }
 
 enum CareerRequestStatus {
@@ -707,16 +828,16 @@ model AssessmentAttempt {
 }
 
 model AssessmentAnswer {
-  id             String             @id @default(cuid())
-  attemptId      String
-  attempt        AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
-  questionId     String
-  question       AssessmentQuestion @relation(fields: [questionId], references: [id])
-  selectedOption Json
+  id                       String             @id @default(cuid())
+  attemptId                String
+  attempt                  AssessmentAttempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId               String
+  question                 AssessmentQuestion @relation(fields: [questionId], references: [id])
+  selectedOption           Json
   // Per-question elapsed time (ms). Used by the aptitude Time Consistency component of
   // ARI; optional because the current frontend doesn't send it yet — TC/ARI activate
   // automatically once every aptitude answer carries it.
-  timeTakenMs    Int?
+  timeTakenMs              Int?
   // Counsellor override (Counsellor Chart mirror-pair amendment). When set, scoring uses
   // this instead of selectedOption; the student's original selectedOption is preserved.
   counsellorOverrideOption Json?
@@ -733,11 +854,11 @@ model AssessmentResult {
   attempt   AssessmentAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
 
   // Flat 18-trait score map { TRAIT_KEY: 0-100 } — handy for querying/aggregation.
-  traitScores Json
+  traitScores              Json
   // Full computed report (see src/modules/assessment/scoring AssessmentReport): layer
   // scores + grades, DCS/DPS, Stream Fit, reliability dashboard. Career Fit, RVS and
   // Time-Consistency/ARI are populated once their pending decisions land.
-  report      Json
+  report                   Json
   // Denormalized headline outputs for quick lookups without parsing `report`.
   recommendedStreams       String[] // Stream Fit top-3 sub-stream names
   dominantCareerStyle      String? // RIASEC-120 style label

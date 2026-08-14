@@ -12,6 +12,7 @@ import { studentsRouter } from "./modules/students/students.routes.js";
 import { counsellorsRouter } from "./modules/counsellors/counsellors.routes.js";
 import { projectsRouter } from "./modules/projects/projects.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
+import { cohortsRouter } from "./modules/cohorts/cohorts.routes.js";
 import { formsRouter } from "./modules/forms/forms.routes.js";
 import { assessmentRouter } from "./modules/assessment/assessment.routes.js";
 import { careerLibraryRouter } from "./modules/career-library/career-library.routes.js";
@@ -46,6 +47,7 @@ export function createApp(): Express {
   app.use("/api/v1/counsellor-chart", counsellorChartRouter);
   app.use("/api/v1/feedback", feedbackRouter);
   app.use("/api/v1/reports", reportsRouter);
+  app.use("/api/v1/cohorts", cohortsRouter);
   app.use("/api/v1/sessions", sessionsRouter);
   app.use("/api/v1/email", emailRouter);
   app.use("/docs", docsRouter);

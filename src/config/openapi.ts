@@ -39,6 +39,9 @@ import {
   createCareerRequestSchema,
   listCareerLibraryQuerySchema,
   listCareerRequestsQuerySchema,
+  listCoursesQuerySchema,
+  listEntranceExamsQuerySchema,
+  listInstitutionsQuerySchema,
   updateCareerEntrySchema,
 } from "../modules/career-library/career-library.schema.js";
 import { sendTemplateEmailBodySchema } from "../modules/email/email.schema.js";
@@ -96,7 +99,7 @@ registry.registerComponent("securitySchemes", "bearerAuth", {
   scheme: "bearer",
   bearerFormat: "JWT",
 });
-const PUBLIC = { security: [] as const };
+const PUBLIC = { security: [] as Array<Record<string, string[]>> };
 
 const errorResponseSchema = z.object({
   error: z.object({
@@ -802,6 +805,327 @@ registry.registerPath({
   },
 });
 
+// --- Counsellors ---
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/counsellors",
+  tags: ["Counsellors"],
+  summary: "Create a counsellor (creates a linked User with role COUNSELLOR + temp password). Optionally assign to projects. Admin only.",
+  request: { body: { content: { "application/json": { schema: createCounsellorSchema } } } },
+  responses: {
+    201: { description: "Counsellor created (+ tempPassword)", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/counsellors",
+  tags: ["Counsellors"],
+  summary: "List counsellors (with user, institute, assigned projects). Staff.",
+  request: { query: listCounsellorsQuerySchema },
+  responses: {
+    200: { description: "List of counsellors", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/counsellors/{id}",
+  tags: ["Counsellors"],
+  summary: "Get a counsellor by id. Staff.",
+  request: { params: counsellorCrudIdParamsSchema },
+  responses: {
+    200: { description: "Counsellor", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/counsellors/{id}",
+  tags: ["Counsellors"],
+  summary: "Update a counsellor (firstName/lastName/mobile/isActive). Admin only.",
+  request: { params: counsellorCrudIdParamsSchema, body: { content: { "application/json": { schema: updateCounsellorSchema } } } },
+  responses: {
+    200: { description: "Updated counsellor", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/counsellors/{id}",
+  tags: ["Counsellors"],
+  summary: "Delete a counsellor (409 if they have sessions — deactivate with isActive:false instead). Admin only.",
+  request: { params: counsellorCrudIdParamsSchema },
+  responses: {
+    204: { description: "Deleted" },
+    409: errorResponses[409],
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/counsellors/{id}/projects",
+  tags: ["Counsellors"],
+  summary: "Assign a counsellor to a project (ProjectCounsellor). Admin only.",
+  request: { params: counsellorCrudIdParamsSchema, body: { content: { "application/json": { schema: assignProjectBodySchema } } } },
+  responses: {
+    200: { description: "Updated counsellor", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/counsellors/{id}/projects/{projectId}",
+  tags: ["Counsellors"],
+  summary: "Unassign a counsellor from a project. Admin only.",
+  request: { params: counsellorProjectParamsSchema },
+  responses: {
+    200: { description: "Updated counsellor", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+// --- Projects ---
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/projects",
+  tags: ["Projects"],
+  summary: "Create a project (counselling cycle for an institute). Admin only.",
+  request: { body: { content: { "application/json": { schema: createProjectSchema } } } },
+  responses: {
+    201: { description: "Project created", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/projects",
+  tags: ["Projects"],
+  summary: "List projects (with institute + counts). Staff.",
+  request: { query: listProjectsQuerySchema },
+  responses: {
+    200: { description: "List of projects", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/projects/{id}",
+  tags: ["Projects"],
+  summary: "Get a project by id. Staff.",
+  request: { params: projectIdParamsSchema },
+  responses: {
+    200: { description: "Project", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/projects/{id}",
+  tags: ["Projects"],
+  summary: "Update a project (name/dates/status — status:CLOSED is the soft-close). Admin only.",
+  request: { params: projectIdParamsSchema, body: { content: { "application/json": { schema: updateProjectSchema } } } },
+  responses: {
+    200: { description: "Updated project", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/projects/{id}",
+  tags: ["Projects"],
+  summary: "Delete a project (409 if it has students — close it instead). Admin only.",
+  request: { params: projectIdParamsSchema },
+  responses: {
+    204: { description: "Deleted" },
+    409: errorResponses[409],
+    404: errorResponses[404],
+  },
+});
+
+// --- Career Library (writes + ratification) ---
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library",
+  tags: ["Career Library"],
+  summary: "Create a career library entry (defaults to DRAFT; publish by setting ACTIVE). Admin only.",
+  request: { body: { content: { "application/json": { schema: createCareerEntrySchema } } } },
+  responses: {
+    201: { description: "Entry created", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-library/{id}",
+  tags: ["Career Library"],
+  summary: "Update a career library entry (incl. status publish/unpublish). Admin only.",
+  request: { params: careerLibraryIdParamsSchema, body: { content: { "application/json": { schema: updateCareerEntrySchema } } } },
+  responses: {
+    200: { description: "Updated entry", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/career-library/{id}",
+  tags: ["Career Library"],
+  summary: "Delete a career library entry. Admin only.",
+  request: { params: careerLibraryIdParamsSchema },
+  responses: {
+    204: { description: "Deleted" },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/requests",
+  tags: ["Career Library"],
+  summary: "Submit a ratification request to add a career (counsellor resolved from token; admin passes requestedById). Staff.",
+  request: { body: { content: { "application/json": { schema: createCareerRequestSchema } } } },
+  responses: {
+    201: { description: "Request created (PENDING)", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library/requests",
+  tags: ["Career Library"],
+  summary: "List ratification requests (filter by status/requestedById). Staff.",
+  request: { query: listCareerRequestsQuerySchema },
+  responses: {
+    200: { description: "List of requests", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library/requests/{requestId}",
+  tags: ["Career Library"],
+  summary: "Get a ratification request by id. Staff.",
+  request: { params: careerRequestIdParamsSchema },
+  responses: {
+    200: { description: "Request", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/requests/{requestId}/approve",
+  tags: ["Career Library"],
+  summary: "Approve a ratification request (optionally link the resulting entry). Admin only. 409 if already reviewed.",
+  request: { params: careerRequestIdParamsSchema, body: { content: { "application/json": { schema: approveCareerRequestSchema } } } },
+  responses: {
+    200: { description: "Approved request", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/requests/{requestId}/reject",
+  tags: ["Career Library"],
+  summary: "Reject a ratification request. Admin only. 409 if already reviewed.",
+  request: { params: careerRequestIdParamsSchema },
+  responses: {
+    200: { description: "Rejected request", content: { "application/json": { schema: genericObjectSchema } } },
+    409: errorResponses[409],
+    404: errorResponses[404],
+  },
+});
+
+// --- Career Library (dropdown lookups for select-or-add) ---
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library/entrance-exams",
+  tags: ["Career Library"],
+  summary: "Typeahead list of canonical entrance exams (for the select-or-add dropdown). Any authenticated user.",
+  request: { query: listEntranceExamsQuerySchema },
+  responses: {
+    200: { description: "Entrance exams", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library/institutions",
+  tags: ["Career Library"],
+  summary: "Typeahead list of canonical institutions/colleges (for the select-or-add dropdown). Any authenticated user.",
+  request: { query: listInstitutionsQuerySchema },
+  responses: {
+    200: { description: "Institutions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library/courses",
+  tags: ["Career Library"],
+  summary: "Typeahead list of canonical courses (for the select-or-add dropdown). Any authenticated user.",
+  request: { query: listCoursesQuerySchema },
+  responses: {
+    200: { description: "Courses", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+// --- Assessment (score preview) ---
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/assessment/score-preview",
+  tags: ["Assessment"],
+  summary: "Dev/QA: run the scoring engine over ad-hoc answers (no student/attempt/persistence). Staff.",
+  request: { body: { content: { "application/json": { schema: previewScoreBodySchema } } } },
+  responses: {
+    200: { description: "Computed report", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+// --- Cohorts ---
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/cohorts",
+  tags: ["Cohorts"],
+  summary: "List active cohorts (read-only lookup for dropdowns, e.g. project creation). Staff.",
+  responses: {
+    200: { description: "Active cohorts, in display order", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+// --- Reports ---
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/reports/students/{studentId}/assessment",
+  tags: ["Reports"],
+  summary: "Full student assessment report as structured JSON (student sees own; staff any). 404 until the assessment is completed.",
+  request: { params: reportStudentParamsSchema },
+  responses: {
+    200: { description: "Assembled report", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
 export function generateOpenApiDocument() {
   const generator = new OpenApiGeneratorV3(registry.definitions);
   return generator.generateDocument({
@@ -809,8 +1133,13 @@ export function generateOpenApiDocument() {
     info: {
       title: "Counselling Platform API",
       version: "0.1.0",
-      description: "API for the counselling platform (students, institutes, auth, forms, sessions).",
+      description:
+        "API for the counselling platform. Most routes require a Bearer access token " +
+        "(Authorize button); the public exceptions are auth/login, refresh, logout, " +
+        "forgot/reset-password, health, and the parent forms.",
     },
     servers: [{ url: "/" }],
+    // Default: every path requires the bearer token, except those that set `security: []`.
+    security: [{ bearerAuth: [] }],
   });
 }

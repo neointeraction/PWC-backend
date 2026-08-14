@@ -98,6 +98,22 @@ tokens are rejected. A password change or reset also revokes all of the user's
 | expiresAt | DateTime | `now() + PASSWORD_RESET_EXPIRES_IN` (default 1h) at issue time |
 | usedAt | DateTime? | null while unused; set when the token is consumed (single-use) |
 
+### `Cohort`
+Read-only lookup of counselling cohorts, to populate cohort dropdowns (`GET /cohorts`).
+Deliberately **decoupled** from the cohort-scoped content: `FormTemplate.cohort`,
+`AssessmentQuestion.cohort` and `AssessmentAttempt.cohort` stay plain strings that *match*
+`Cohort.code` by convention, **not** FKs — this avoids a large migration while there's a
+single cohort. Only `CLASS_9_10` exists today; managed via `prisma/seed.ts` (no CRUD API).
+Linking a `Project` (or `Student`) to a cohort is deferred until a second cohort is onboarded.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | String (cuid) | PK |
+| code | String | unique, e.g. `CLASS_9_10` — the join key to cohort-scoped content |
+| name | String | human label, e.g. "Class 9 & 10" |
+| isActive | Boolean | default true; `GET /cohorts` returns active only |
+| displayOrder | Int | default 0; dropdown ordering |
+
 ### `Institute`
 The tenant. Onboarded by Super Admin.
 
@@ -326,6 +342,20 @@ After these fixes, mapping coverage is 100%: every `CareerLibraryEntry.industry`
 has at least one matching `UgInstitution` row, every extracted UG exam token matches a
 `UgEntranceExam.examName`, and every `CareerLibraryEntry.cluster` value matches at
 least one `UgCourse.careerCluster`.
+
+### Career Library normalization — canonical lookups + join tables
+
+Layered on top of the value-match directories above, so the client can **select existing
+or add new** exams/courses/colleges per job role (full design:
+`docs/career-library-normalization-spec.md`). Deduped canonical lookups —
+`EntranceExam`/`Course` (`@@unique([name, level])`, `QualificationLevel` = UG/PG) and
+`Institution` (`name @unique`) — are seeded from the `Ug*`/`Pg*` directories + entries'
+arrays. Careers link to them many-to-many via `CareerEntranceExam` / `CareerCourse` /
+`CareerInstitution` (composite PK, cascade). Backfill (`prisma/seed-data/career-library/
+normalize.ts`, run after the import in `prisma/seed.ts`): exams/courses from each entry's
+`String[]` columns, colleges from the entry's industry match. The old `String[]` columns
+(`entranceExams`, `entranceExamsPG`, `topCourses`) are kept and **dual-written** during
+the transition, to be dropped in a later migration.
 
 ### Forms — `FormTemplate` / `FormQuestion` / `FormSubmission` / `FormAnswer`
 

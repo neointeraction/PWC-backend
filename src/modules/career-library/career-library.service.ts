@@ -5,10 +5,16 @@ import { BadRequestError, ConflictError, NotFoundError } from "../../common/erro
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import type {
   ApproveCareerRequestInput,
+  CourseLinkItem,
   CreateCareerEntryInput,
   CreateCareerRequestInput,
+  ExamLinkItem,
+  InstitutionLinkItem,
   ListCareerLibraryQuery,
   ListCareerRequestsQuery,
+  ListCoursesQuery,
+  ListEntranceExamsQuery,
+  ListInstitutionsQuery,
   UpdateCareerEntryInput,
 } from "./career-library.schema.js";
 
@@ -93,11 +99,32 @@ export async function getCareerLibraryFilters() {
 // Detail view surfaces the cross-table mapping (see docs/db-design.md "Career Library
 // workbook import"): related UG institutions by industry, UG courses by cluster, and
 // UG entrance exams by the extracted exam-name list. Plain value matches, not FKs.
+// Selects the curated normalized links (the per-career exams/courses/colleges), flattened
+// onto the entry as `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions`.
+const entryLinkInclude = {
+  entranceExamLinks: {
+    select: { entranceExam: { select: { id: true, name: true, level: true, fullForm: true } } },
+    orderBy: { entranceExam: { name: "asc" } },
+  },
+  courseLinks: {
+    select: { course: { select: { id: true, name: true, level: true } } },
+    orderBy: { course: { name: "asc" } },
+  },
+  institutionLinks: {
+    select: { institution: { select: { id: true, name: true, city: true, state: true } } },
+    orderBy: { institution: { name: "asc" } },
+  },
+} satisfies Prisma.CareerLibraryEntryInclude;
+
 export async function getCareerLibraryEntryById(id: string) {
-  const entry = await prisma.careerLibraryEntry.findUnique({ where: { id } });
+  const entry = await prisma.careerLibraryEntry.findUnique({
+    where: { id },
+    include: entryLinkInclude,
+  });
   if (!entry) {
     throw new NotFoundError("Career library entry not found");
   }
+  const { entranceExamLinks, courseLinks, institutionLinks, ...rest } = entry;
 
   const [relatedInstitutions, relatedCourses, relatedEntranceExams] = await Promise.all([
     prisma.ugInstitution.findMany({
@@ -117,7 +144,12 @@ export async function getCareerLibraryEntryById(id: string) {
   ]);
 
   return {
-    ...entry,
+    ...rest,
+    // Curated per-career links (normalized) — the primary source going forward.
+    linkedEntranceExams: entranceExamLinks.map((l) => l.entranceExam),
+    linkedCourses: courseLinks.map((l) => l.course),
+    linkedInstitutions: institutionLinks.map((l) => l.institution),
+    // Legacy broad value-match view (industry/cluster) — kept during the transition.
     relatedInstitutions,
     relatedCourses,
     relatedEntranceExams,
@@ -126,11 +158,100 @@ export async function getCareerLibraryEntryById(id: string) {
 
 // --- Entry writes (admin/super admin) ------------------------------------------
 
-export async function createCareerEntry(input: CreateCareerEntryInput, actor: Actor) {
-  try {
-    return await prisma.careerLibraryEntry.create({
-      data: { ...input, createdBy: actor.userId },
+// --- "Select existing or add new" resolvers: map link items -> canonical rows,
+// find-or-creating the `{ name, ... }` ones and validating the `{ id }` ones. ---
+
+type ResolvedExam = { id: string; name: string; level: "UG" | "PG" };
+type ResolvedCourse = { id: string; name: string; level: "UG" | "PG" };
+type ResolvedInstitution = { id: string; name: string };
+
+async function resolveEntranceExams(items: ExamLinkItem[]): Promise<ResolvedExam[]> {
+  const ids = items.flatMap((i) => (i.id ? [i.id] : []));
+  const resolved = new Map<string, ResolvedExam>();
+  for (const it of items) {
+    if (it.id) continue;
+    const row = await prisma.entranceExam.upsert({
+      where: { name_level: { name: it.name!, level: it.level! } },
+      update: {},
+      create: { name: it.name!, level: it.level! },
+      select: { id: true, name: true, level: true },
     });
+    resolved.set(row.id, row);
+  }
+  if (ids.length) {
+    const existing = await prisma.entranceExam.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, level: true } });
+    if (existing.length !== new Set(ids).size) throw new BadRequestError("One or more entranceExams ids are invalid");
+    for (const r of existing) resolved.set(r.id, r);
+  }
+  return [...resolved.values()];
+}
+
+async function resolveCourses(items: CourseLinkItem[]): Promise<ResolvedCourse[]> {
+  const ids = items.flatMap((i) => (i.id ? [i.id] : []));
+  const resolved = new Map<string, ResolvedCourse>();
+  for (const it of items) {
+    if (it.id) continue;
+    const level = it.level ?? "UG";
+    const row = await prisma.course.upsert({
+      where: { name_level: { name: it.name!, level } },
+      update: {},
+      create: { name: it.name!, level },
+      select: { id: true, name: true, level: true },
+    });
+    resolved.set(row.id, row);
+  }
+  if (ids.length) {
+    const existing = await prisma.course.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, level: true } });
+    if (existing.length !== new Set(ids).size) throw new BadRequestError("One or more courses ids are invalid");
+    for (const r of existing) resolved.set(r.id, r);
+  }
+  return [...resolved.values()];
+}
+
+async function resolveInstitutions(items: InstitutionLinkItem[]): Promise<ResolvedInstitution[]> {
+  const ids = items.flatMap((i) => (i.id ? [i.id] : []));
+  const resolved = new Map<string, ResolvedInstitution>();
+  for (const it of items) {
+    if (it.id) continue;
+    const row = await prisma.institution.upsert({
+      where: { name: it.name! },
+      update: {},
+      create: { name: it.name!, city: it.city, state: it.state },
+      select: { id: true, name: true },
+    });
+    resolved.set(row.id, row);
+  }
+  if (ids.length) {
+    const existing = await prisma.institution.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+    if (existing.length !== new Set(ids).size) throw new BadRequestError("One or more institutions ids are invalid");
+    for (const r of existing) resolved.set(r.id, r);
+  }
+  return [...resolved.values()];
+}
+
+export async function createCareerEntry(input: CreateCareerEntryInput, actor: Actor) {
+  const { entranceExams = [], courses = [], institutions = [], ...scalar } = input;
+  const [exams, crs, insts] = await Promise.all([
+    resolveEntranceExams(entranceExams),
+    resolveCourses(courses),
+    resolveInstitutions(institutions),
+  ]);
+  try {
+    const created = await prisma.careerLibraryEntry.create({
+      data: {
+        ...scalar,
+        createdBy: actor.userId,
+        // Dual-write the transitional String[] columns from the resolved names.
+        entranceExams: exams.filter((e) => e.level === "UG").map((e) => e.name),
+        entranceExamsPG: exams.filter((e) => e.level === "PG").map((e) => e.name),
+        topCourses: crs.map((c) => c.name),
+        entranceExamLinks: { create: exams.map((e) => ({ entranceExamId: e.id })) },
+        courseLinks: { create: crs.map((c) => ({ courseId: c.id })) },
+        institutionLinks: { create: insts.map((i) => ({ institutionId: i.id })) },
+      },
+      select: { id: true },
+    });
+    return getCareerLibraryEntryById(created.id);
   } catch (err) {
     handlePrismaError(err);
   }
@@ -138,14 +259,73 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
 
 export async function updateCareerEntry(id: string, input: UpdateCareerEntryInput, actor: Actor) {
   await getCareerLibraryEntryById(id); // 404 if missing
+  const { entranceExams, courses, institutions, ...scalar } = input;
+  // Resolve only the link arrays that were provided (undefined = leave unchanged).
+  const exams = entranceExams !== undefined ? await resolveEntranceExams(entranceExams) : undefined;
+  const crs = courses !== undefined ? await resolveCourses(courses) : undefined;
+  const insts = institutions !== undefined ? await resolveInstitutions(institutions) : undefined;
   try {
-    return await prisma.careerLibraryEntry.update({
-      where: { id },
-      data: { ...input, updatedBy: actor.userId },
+    await prisma.$transaction(async (tx) => {
+      await tx.careerLibraryEntry.update({
+        where: { id },
+        data: {
+          ...scalar,
+          updatedBy: actor.userId,
+          ...(exams
+            ? {
+                entranceExams: exams.filter((e) => e.level === "UG").map((e) => e.name),
+                entranceExamsPG: exams.filter((e) => e.level === "PG").map((e) => e.name),
+              }
+            : {}),
+          ...(crs ? { topCourses: crs.map((c) => c.name) } : {}),
+        },
+      });
+      if (exams) {
+        await tx.careerEntranceExam.deleteMany({ where: { careerEntryId: id } });
+        await tx.careerEntranceExam.createMany({ data: exams.map((e) => ({ careerEntryId: id, entranceExamId: e.id })), skipDuplicates: true });
+      }
+      if (crs) {
+        await tx.careerCourse.deleteMany({ where: { careerEntryId: id } });
+        await tx.careerCourse.createMany({ data: crs.map((c) => ({ careerEntryId: id, courseId: c.id })), skipDuplicates: true });
+      }
+      if (insts) {
+        await tx.careerInstitution.deleteMany({ where: { careerEntryId: id } });
+        await tx.careerInstitution.createMany({ data: insts.map((i) => ({ careerEntryId: id, institutionId: i.id })), skipDuplicates: true });
+      }
     });
   } catch (err) {
     handlePrismaError(err);
   }
+  return getCareerLibraryEntryById(id);
+}
+
+// --- Dropdown / typeahead lookups ---
+
+export async function listEntranceExams(query: ListEntranceExamsQuery) {
+  return prisma.entranceExam.findMany({
+    where: { level: query.level, name: query.search ? { contains: query.search, mode: "insensitive" } : undefined },
+    orderBy: { name: "asc" },
+    take: query.limit,
+    select: { id: true, name: true, level: true, fullForm: true, conductingBody: true },
+  });
+}
+
+export async function listInstitutions(query: ListInstitutionsQuery) {
+  return prisma.institution.findMany({
+    where: { name: query.search ? { contains: query.search, mode: "insensitive" } : undefined },
+    orderBy: { name: "asc" },
+    take: query.limit,
+    select: { id: true, name: true, city: true, state: true, type: true },
+  });
+}
+
+export async function listCourses(query: ListCoursesQuery) {
+  return prisma.course.findMany({
+    where: { level: query.level, name: query.search ? { contains: query.search, mode: "insensitive" } : undefined },
+    orderBy: { name: "asc" },
+    take: query.limit,
+    select: { id: true, name: true, level: true, fullForm: true },
+  });
 }
 
 export async function deleteCareerEntry(id: string) {

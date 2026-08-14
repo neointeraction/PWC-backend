@@ -8,6 +8,9 @@ import type {
   CareerRequestIdParams,
   ListCareerLibraryQuery,
   ListCareerRequestsQuery,
+  ListCoursesQuery,
+  ListEntranceExamsQuery,
+  ListInstitutionsQuery,
 } from "./career-library.schema.js";
 
 function actorOf(req: Request): Actor {
@@ -49,6 +52,23 @@ export async function deleteCareerLibraryEntry(req: Request, res: Response): Pro
   const { id } = req.params as unknown as CareerLibraryIdParams;
   await careerLibraryService.deleteCareerEntry(id);
   res.status(204).send();
+}
+
+// --- Dropdown / typeahead lookups ---
+
+export async function listEntranceExams(req: Request, res: Response): Promise<void> {
+  const rows = await careerLibraryService.listEntranceExams(req.query as unknown as ListEntranceExamsQuery);
+  res.status(200).json(rows);
+}
+
+export async function listInstitutions(req: Request, res: Response): Promise<void> {
+  const rows = await careerLibraryService.listInstitutions(req.query as unknown as ListInstitutionsQuery);
+  res.status(200).json(rows);
+}
+
+export async function listCourses(req: Request, res: Response): Promise<void> {
+  const rows = await careerLibraryService.listCourses(req.query as unknown as ListCoursesQuery);
+  res.status(200).json(rows);
 }
 
 // --- Ratification requests ---
