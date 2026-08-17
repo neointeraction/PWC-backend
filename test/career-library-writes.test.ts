@@ -8,12 +8,11 @@ const app = createApp();
 
 let counsellorId: string; // Counsellor.id
 let counsellorToken: string; // Bearer for the counsellor's own user
+let testDomainId: string; // live taxonomy leaf the created entries point at
 
 function entryBody(overrides: Record<string, unknown> = {}) {
   return {
-    cluster: "Test CL Cluster",
-    industry: "Test CL Industry",
-    domain: "Test CL Domain",
+    domainId: testDomainId,
     jobRole: "Test CL Role Base",
     aiResilienceGrade: "HIGH",
     aiResilienceComment: "Resilient because reasons",
@@ -25,6 +24,16 @@ function entryBody(overrides: Record<string, unknown> = {}) {
 
 describe("Career Library writes + ratification", () => {
   beforeAll(async () => {
+    // A live Cluster → Industry → Domain the created entries can reference.
+    const cluster = await prisma.careerCluster.create({ data: { name: "Test CL Cluster" } });
+    const industry = await prisma.careerIndustry.create({
+      data: { clusterId: cluster.id, name: "Test CL Industry" },
+    });
+    const domain = await prisma.careerDomain.create({
+      data: { industryId: industry.id, name: "Test CL Domain" },
+    });
+    testDomainId = domain.id;
+
     const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute CareerLib",
       address: "1 CL St",
@@ -46,6 +55,9 @@ describe("Career Library writes + ratification", () => {
   afterAll(async () => {
     await prisma.careerLibraryRequest.deleteMany({ where: { jobTitle: { startsWith: "Test CL" } } });
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test CL Role" } } });
+    await prisma.careerDomain.deleteMany({ where: { name: "Test CL Domain" } });
+    await prisma.careerIndustry.deleteMany({ where: { name: "Test CL Industry" } });
+    await prisma.careerCluster.deleteMany({ where: { name: "Test CL Cluster" } });
     await prisma.user.deleteMany({ where: { email: { contains: "@test-careerlib.example" } } });
     await prisma.institute.deleteMany({ where: { name: "Test Institute CareerLib" } });
     await prisma.$disconnect();

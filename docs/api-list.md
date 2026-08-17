@@ -248,15 +248,15 @@ dual-written during the transition — see `docs/career-library-normalization-sp
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/career-library` | Search/list entries. Query: `search?` (free text across jobRole/cluster/industry/domain/oneLineDescription), `cluster?, industry?, domain?, aiResilienceGrade?` (`LOW`\|`MEDIUM`\|`HIGH`\|`VERY_HIGH`), `status?` (defaults to `ACTIVE`), `page?` (default 1), `pageSize?` (default 20, max 100). Returns `{ data, pagination: { page, pageSize, total, totalPages } }`. |
-| GET | `/api/v1/career-library/filters` | Distinct `clusters`, `industries`, `domains` (from `ACTIVE` entries) plus the fixed `aiResilienceGrades` list — for populating UI filter dropdowns. |
+| GET | `/api/v1/career-library` | Search/list entries. Query: `search?` (free text across jobRole/oneLineDescription and the taxonomy names), `clusterId?, industryId?, domainId?` (filter by taxonomy id at any level; combining `clusterId`+`industryId` ANDs them), `aiResilienceGrade?` (`LOW`\|`MEDIUM`\|`HIGH`\|`VERY_HIGH`), `status?` (defaults to `ACTIVE`), `page?` (default 1), `pageSize?` (default 20, max 100). Each entry includes its `domain` chain (`domain.industry.cluster`) so the cluster/industry/domain names are still present. Returns `{ data, pagination: { page, pageSize, total, totalPages } }`. |
+| GET | `/api/v1/career-library/filters` | Filter-dropdown source, now backed by the taxonomy tables (live rows only): `clusters` / `industries` / `domains` as `{id, name}` objects (industries carry `clusterId`, domains carry `industryId` for cascading) plus the fixed `aiResilienceGrades` list. For a fully nested picker use `GET /career-taxonomy/tree`. |
 | GET | `/api/v1/career-library/entrance-exams` | **Typeahead dropdown.** Canonical entrance exams. Query: `search?`, `level?` (`UG`\|`PG`), `limit?` (default 50). |
 | GET | `/api/v1/career-library/institutions` | **Typeahead dropdown.** Canonical institutions/colleges. Query: `search?`, `limit?`. |
 | GET | `/api/v1/career-library/courses` | **Typeahead dropdown.** Canonical courses. Query: `search?`, `level?`, `limit?`. |
-| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `cluster, industry, domain, jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields, `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name). Returns the assembled entry. `createdBy` = calling admin. |
+| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `domainId` (a live `CareerDomain` leaf — cluster/industry are derived from it; 400 if unknown or soft-deleted), `jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields, `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name). Returns the assembled entry. `createdBy` = calling admin. |
 | PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` toggle). A provided link array **replaces** that entry's links; omitting it leaves them unchanged. 400 on an unknown link `id`. Sets `updatedBy`. 404 if not found. |
 | DELETE | `/api/v1/career-library/{id}` | **Admin.** Delete an entry (cascades its links; first detaches any request's `resultingEntryId`). 404 if not found. |
-| GET | `/api/v1/career-library/{id}` | Get one entry. Includes the curated normalized links `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions`, plus the legacy broad value-match view `relatedInstitutions` (by `industry`) / `relatedCourses` (by `cluster`) / `relatedEntranceExams` (kept during transition). 404 if not found. |
+| GET | `/api/v1/career-library/{id}` | Get one entry. Includes the `domain` chain (`domain.industry.cluster`), the curated normalized links `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions`, plus the legacy broad value-match view `relatedInstitutions` (by `domain.industry.name`) / `relatedCourses` (by `domain.industry.cluster.name`) / `relatedEntranceExams` (kept during transition). 404 if not found. |
 
 ### Ratification requests
 
@@ -270,6 +270,35 @@ status: `PENDING` → `APPROVED`\|`REJECTED`.
 | GET | `/api/v1/career-library/requests/{requestId}` | **Staff.** Get one request. 404 if not found. |
 | POST | `/api/v1/career-library/requests/{requestId}/approve` | **Admin.** Approve. Body: `{ resultingEntryId? }` (link the entry the admin created from it). Sets `status:APPROVED`, `reviewedBy`, `reviewedAt`. 409 if already reviewed; 400 if `resultingEntryId` is unknown. |
 | POST | `/api/v1/career-library/requests/{requestId}/reject` | **Admin.** Reject (no body). Sets `status:REJECTED`, `reviewedBy`, `reviewedAt`. 409 if already reviewed. |
+
+## Career Taxonomy
+
+Admin-managed classification hierarchy behind the career library: **Cluster → Industry → Domain**.
+A `CareerLibraryEntry` references a `domainId` (the leaf). Reads = any authenticated user (feeds the
+pickers); writes = **Admin**. Nodes are **soft-deleted** (`deletedAt`): a deleted node drops out of
+the default lists/tree but its FK stays intact so existing job roles still resolve; restore reverses
+it. Default lists show live rows only; pass `?includeDeleted=true` for admin management views.
+Name uniqueness is enforced among **live** siblings, so a soft-deleted name can be reused (which then
+makes restoring the original **409**). Ids may be cuid or uuid (backfilled rows).
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/career-taxonomy/tree` | Full live hierarchy `clusters → industries → domains` (nested `{id, name, …}`), for the cascading "add job role" picker. |
+| GET | `/api/v1/career-taxonomy/clusters` | List clusters. Query: `includeDeleted?`. |
+| POST | `/api/v1/career-taxonomy/clusters` | **Admin.** Create. Body: `{ name }`. 409 if a live cluster has that name. |
+| PATCH | `/api/v1/career-taxonomy/clusters/{id}` | **Admin.** Rename (`{ name? }`). Renames propagate to all entries via the relation. 409 on clash, 404 if missing/deleted. |
+| DELETE | `/api/v1/career-taxonomy/clusters/{id}` | **Admin.** Soft-delete. Returns the node with `deletedAt` set. |
+| POST | `/api/v1/career-taxonomy/clusters/{id}/restore` | **Admin.** Clear `deletedAt`. 409 if a live cluster now holds the name. |
+| GET | `/api/v1/career-taxonomy/industries` | List industries. Query: `clusterId?, includeDeleted?`. |
+| POST | `/api/v1/career-taxonomy/industries` | **Admin.** Create. Body: `{ clusterId, name }`. 404 if the cluster is missing/deleted; 409 on duplicate name within the cluster. |
+| PATCH | `/api/v1/career-taxonomy/industries/{id}` | **Admin.** Rename and/or re-parent (`{ clusterId?, name? }`). 409 on clash within the target cluster. |
+| DELETE | `/api/v1/career-taxonomy/industries/{id}` | **Admin.** Soft-delete. |
+| POST | `/api/v1/career-taxonomy/industries/{id}/restore` | **Admin.** Restore. 409 on name clash. |
+| GET | `/api/v1/career-taxonomy/domains` | List domains. Query: `industryId?, includeDeleted?`. |
+| POST | `/api/v1/career-taxonomy/domains` | **Admin.** Create. Body: `{ industryId, name }`. 404 if the industry is missing/deleted; 409 on duplicate name within the industry. |
+| PATCH | `/api/v1/career-taxonomy/domains/{id}` | **Admin.** Rename and/or re-parent (`{ industryId?, name? }`). 409 on clash within the target industry. |
+| DELETE | `/api/v1/career-taxonomy/domains/{id}` | **Admin.** Soft-delete. |
+| POST | `/api/v1/career-taxonomy/domains/{id}/restore` | **Admin.** Restore. 409 on name clash. |
 
 ## Sessions
 

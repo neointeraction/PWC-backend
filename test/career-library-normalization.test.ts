@@ -1,16 +1,16 @@
 import request from "supertest";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import { authRequest, bearer } from "./helpers/http.js";
 
 const app = createApp();
 
+let testDomainId: string; // live taxonomy leaf the created entries point at
+
 function entryBody(overrides: Record<string, unknown> = {}) {
   return {
-    cluster: "Test Norm Cluster",
-    industry: "Test Norm Industry",
-    domain: "Test Norm Domain",
+    domainId: testDomainId,
     jobRole: "Test Norm Role",
     aiResilienceGrade: "HIGH",
     aiResilienceComment: "x",
@@ -21,8 +21,22 @@ function entryBody(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Career Library normalization (select-or-add + dropdowns)", () => {
+  beforeAll(async () => {
+    const cluster = await prisma.careerCluster.create({ data: { name: "Test Norm Cluster" } });
+    const industry = await prisma.careerIndustry.create({
+      data: { clusterId: cluster.id, name: "Test Norm Industry" },
+    });
+    const domain = await prisma.careerDomain.create({
+      data: { industryId: industry.id, name: "Test Norm Domain" },
+    });
+    testDomainId = domain.id;
+  });
+
   afterAll(async () => {
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test Norm Role" } } });
+    await prisma.careerDomain.deleteMany({ where: { name: "Test Norm Domain" } });
+    await prisma.careerIndustry.deleteMany({ where: { name: "Test Norm Industry" } });
+    await prisma.careerCluster.deleteMany({ where: { name: "Test Norm Cluster" } });
     await prisma.entranceExam.deleteMany({ where: { name: { startsWith: "Test Norm " } } });
     await prisma.course.deleteMany({ where: { name: { startsWith: "Test Norm " } } });
     await prisma.institution.deleteMany({ where: { name: { startsWith: "Test Norm " } } });

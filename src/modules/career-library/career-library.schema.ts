@@ -4,11 +4,12 @@ const AI_RESILIENCE_GRADES = ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"] as const;
 const CAREER_LIBRARY_STATUSES = ["DRAFT", "ACTIVE"] as const;
 
 export const listCareerLibraryQuerySchema = z.object({
-  // Free-text search across jobRole, cluster, industry, domain, oneLineDescription.
+  // Free-text search across jobRole, oneLineDescription, and the taxonomy names.
   search: z.string().trim().min(1).optional(),
-  cluster: z.string().trim().min(1).optional(),
-  industry: z.string().trim().min(1).optional(),
-  domain: z.string().trim().min(1).optional(),
+  // Taxonomy filters by id (any level; ids may be cuid or uuid — see career-taxonomy.schema).
+  clusterId: z.string().min(1).optional(),
+  industryId: z.string().min(1).optional(),
+  domainId: z.string().min(1).optional(),
   aiResilienceGrade: z.enum(AI_RESILIENCE_GRADES).optional(),
   // Defaults to ACTIVE-only — callers who need drafts (e.g. Admin review) pass it explicitly.
   status: z.enum(CAREER_LIBRARY_STATUSES).default("ACTIVE"),
@@ -59,9 +60,9 @@ export type CourseLinkItem = z.infer<typeof courseLinkItemSchema>;
 export type InstitutionLinkItem = z.infer<typeof institutionLinkItemSchema>;
 
 export const createCareerEntrySchema = z.object({
-  cluster: z.string().trim().min(1),
-  industry: z.string().trim().min(1),
-  domain: z.string().trim().min(1),
+  // Leaf of the Cluster → Industry → Domain taxonomy; must reference a live CareerDomain
+  // (validated in the service). cluster/industry are derived by walking up.
+  domainId: z.string().min(1),
   jobRole: z.string().trim().min(1),
   aiResilienceGrade: z.enum(AI_RESILIENCE_GRADES),
   aiResilienceComment: z.string().trim().min(1),

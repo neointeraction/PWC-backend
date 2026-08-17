@@ -3,6 +3,7 @@ import type { UserRole } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
+import { assertLiveDomain } from "../career-taxonomy/career-taxonomy.service.js";
 import type {
   ApproveCareerRequestInput,
   CourseLinkItem,
@@ -24,21 +25,41 @@ export interface Actor {
   role: UserRole;
 }
 
+// Flattens the domain → industry → cluster chain onto each entry so responses still carry the
+// cluster/industry/domain names (as {id,name} objects), now that they're normalized.
+const domainChainInclude = {
+  domain: {
+    select: {
+      id: true,
+      name: true,
+      industry: {
+        select: { id: true, name: true, cluster: { select: { id: true, name: true } } },
+      },
+    },
+  },
+} satisfies Prisma.CareerLibraryEntryInclude;
+
 export async function listCareerLibraryEntries(query: ListCareerLibraryQuery) {
+  const search = query.search;
+  // Taxonomy filters at any level, traversed through the leaf domain relation. Merged into one
+  // `domain` filter so combining industryId + clusterId ANDs them (rather than colliding on key).
+  const domainFilter: Prisma.CareerDomainWhereInput = {};
+  if (query.industryId) domainFilter.industryId = query.industryId;
+  if (query.clusterId) domainFilter.industry = { clusterId: query.clusterId };
+
   const where: Prisma.CareerLibraryEntryWhereInput = {
     status: query.status,
-    cluster: query.cluster,
-    industry: query.industry,
-    domain: query.domain,
     aiResilienceGrade: query.aiResilienceGrade,
-    ...(query.search
+    ...(query.domainId ? { domainId: query.domainId } : {}),
+    ...(Object.keys(domainFilter).length ? { domain: domainFilter } : {}),
+    ...(search
       ? {
           OR: [
-            { jobRole: { contains: query.search, mode: "insensitive" } },
-            { cluster: { contains: query.search, mode: "insensitive" } },
-            { industry: { contains: query.search, mode: "insensitive" } },
-            { domain: { contains: query.search, mode: "insensitive" } },
-            { oneLineDescription: { contains: query.search, mode: "insensitive" } },
+            { jobRole: { contains: search, mode: "insensitive" } },
+            { oneLineDescription: { contains: search, mode: "insensitive" } },
+            { domain: { name: { contains: search, mode: "insensitive" } } },
+            { domain: { industry: { name: { contains: search, mode: "insensitive" } } } },
+            { domain: { industry: { cluster: { name: { contains: search, mode: "insensitive" } } } } },
           ],
         }
       : {}),
@@ -48,7 +69,11 @@ export async function listCareerLibraryEntries(query: ListCareerLibraryQuery) {
     prisma.careerLibraryEntry.count({ where }),
     prisma.careerLibraryEntry.findMany({
       where,
-      orderBy: [{ cluster: "asc" }, { jobRole: "asc" }],
+      include: domainChainInclude,
+      orderBy: [
+        { domain: { industry: { cluster: { name: "asc" } } } },
+        { jobRole: "asc" },
+      ],
       skip: (query.page - 1) * query.pageSize,
       take: query.pageSize,
     }),
@@ -65,33 +90,32 @@ export async function listCareerLibraryEntries(query: ListCareerLibraryQuery) {
   };
 }
 
-// Distinct values for building filter dropdowns (Cluster / Industry / Domain / AI Grade).
+// Filter-dropdown source, now backed by the taxonomy tables (live rows only). Each level is
+// returned as {id, name} objects (the list endpoint filters by id). Industries/domains carry their
+// parent id so the frontend can cascade. For a fully nested picker, use GET /career-taxonomy/tree.
 export async function getCareerLibraryFilters() {
   const [clusters, industries, domains] = await Promise.all([
-    prisma.careerLibraryEntry.findMany({
-      where: { status: "ACTIVE" },
-      distinct: ["cluster"],
-      select: { cluster: true },
-      orderBy: { cluster: "asc" },
+    prisma.careerCluster.findMany({
+      where: { deletedAt: null },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
     }),
-    prisma.careerLibraryEntry.findMany({
-      where: { status: "ACTIVE" },
-      distinct: ["industry"],
-      select: { industry: true },
-      orderBy: { industry: "asc" },
+    prisma.careerIndustry.findMany({
+      where: { deletedAt: null, cluster: { deletedAt: null } },
+      select: { id: true, name: true, clusterId: true },
+      orderBy: { name: "asc" },
     }),
-    prisma.careerLibraryEntry.findMany({
-      where: { status: "ACTIVE" },
-      distinct: ["domain"],
-      select: { domain: true },
-      orderBy: { domain: "asc" },
+    prisma.careerDomain.findMany({
+      where: { deletedAt: null, industry: { deletedAt: null, cluster: { deletedAt: null } } },
+      select: { id: true, name: true, industryId: true },
+      orderBy: { name: "asc" },
     }),
   ]);
 
   return {
-    clusters: clusters.map((c) => c.cluster),
-    industries: industries.map((i) => i.industry),
-    domains: domains.map((d) => d.domain),
+    clusters,
+    industries,
+    domains,
     aiResilienceGrades: ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"],
   };
 }
@@ -102,6 +126,7 @@ export async function getCareerLibraryFilters() {
 // Selects the curated normalized links (the per-career exams/courses/colleges), flattened
 // onto the entry as `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions`.
 const entryLinkInclude = {
+  ...domainChainInclude,
   entranceExamLinks: {
     select: { entranceExam: { select: { id: true, name: true, level: true, fullForm: true } } },
     orderBy: { entranceExam: { name: "asc" } },
@@ -128,11 +153,11 @@ export async function getCareerLibraryEntryById(id: string) {
 
   const [relatedInstitutions, relatedCourses, relatedEntranceExams] = await Promise.all([
     prisma.ugInstitution.findMany({
-      where: { industry: entry.industry },
+      where: { industry: entry.domain.industry.name },
       orderBy: { name: "asc" },
     }),
     prisma.ugCourse.findMany({
-      where: { careerCluster: entry.cluster },
+      where: { careerCluster: entry.domain.industry.cluster.name },
       orderBy: { courseName: "asc" },
     }),
     entry.entranceExams.length > 0
@@ -231,6 +256,7 @@ async function resolveInstitutions(items: InstitutionLinkItem[]): Promise<Resolv
 
 export async function createCareerEntry(input: CreateCareerEntryInput, actor: Actor) {
   const { entranceExams = [], courses = [], institutions = [], ...scalar } = input;
+  await assertLiveDomain(scalar.domainId); // 400 if domainId isn't a live taxonomy leaf
   const [exams, crs, insts] = await Promise.all([
     resolveEntranceExams(entranceExams),
     resolveCourses(courses),
@@ -260,6 +286,7 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
 export async function updateCareerEntry(id: string, input: UpdateCareerEntryInput, actor: Actor) {
   await getCareerLibraryEntryById(id); // 404 if missing
   const { entranceExams, courses, institutions, ...scalar } = input;
+  if (scalar.domainId !== undefined) await assertLiveDomain(scalar.domainId); // 400 if invalid/deleted
   // Resolve only the link arrays that were provided (undefined = leave unchanged).
   const exams = entranceExams !== undefined ? await resolveEntranceExams(entranceExams) : undefined;
   const crs = courses !== undefined ? await resolveCourses(courses) : undefined;

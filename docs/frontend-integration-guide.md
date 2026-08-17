@@ -702,21 +702,30 @@ entries plus related UG/PG institution, course, and entrance-exam reference data
 
 ### 9.1 Search / list
 
-`GET /?search=&cluster=&industry=&domain=&aiResilienceGrade=&status=&page=&pageSize=`
+`GET /?search=&clusterId=&industryId=&domainId=&aiResilienceGrade=&status=&page=&pageSize=`
 
-All query params optional. `search` does a free-text match across job role, cluster,
-industry, domain, and description. `status` defaults to `ACTIVE` (the other value is
-`DRAFT`). `page` defaults to `1`, `pageSize` defaults to `20` (max `100` — requesting
-more returns 400).
+All query params optional. **Classification is filtered by taxonomy id now, not name** —
+`clusterId` / `industryId` / `domainId` (get the ids from `GET /filters` or the taxonomy
+endpoints in §9.4). Combining `clusterId`+`industryId` ANDs them. `search` does a free-text
+match across job role, description, and the cluster/industry/domain **names**. `status`
+defaults to `ACTIVE` (the other value is `DRAFT`). `page` defaults to `1`, `pageSize`
+defaults to `20` (max `100` — requesting more returns 400).
 
 ```json
 {
   "data": [
     {
       "id": "cm...",
-      "cluster": "Information Technology & Digital",
-      "industry": "Data Science & Artificial Intelligence",
-      "domain": "Data Science",
+      "domainId": "cm...",
+      "domain": {
+        "id": "cm...",
+        "name": "Data Science",
+        "industry": {
+          "id": "cm...",
+          "name": "Data Science & Artificial Intelligence",
+          "cluster": { "id": "cm...", "name": "Information Technology & Digital" }
+        }
+      },
       "jobRole": "Data Scientist",
       "aiResilienceGrade": "MEDIUM",
       "aiResilienceComment": "...",
@@ -747,6 +756,12 @@ more returns 400).
   "pagination": { "page": 1, "pageSize": 20, "total": 1317, "totalPages": 66 }
 }
 ```
+**⚠️ Breaking change (taxonomy normalization)**: the flat `cluster` / `industry` / `domain`
+**string** fields are gone. Classification is now a nested `domain` object
+(`domain.industry.cluster`) plus a `domainId` scalar. Read names from `entry.domain.name`,
+`entry.domain.industry.name`, `entry.domain.industry.cluster.name`. Filtering and entry
+create/update use ids (see §9.4).
+
 **Important**: `salaryIndiaMinLPA`/`salaryIndiaMaxLPA`/`salaryGlobalMinUSD`/
 `salaryGlobalMaxUSD` can be **`null`** — the source data has non-numeric ranges (e.g.
 "0–Limitless", "$0–Millions"). Always fall back to displaying the corresponding
@@ -757,23 +772,24 @@ more returns 400).
 `GET /filters`
 ```json
 {
-  "clusters": ["Arts, Design & Creative", "Aviation", ...],
-  "industries": ["Actuarial Science", "Allied Medicine", ...],
-  "domains": ["...", "..."],
+  "clusters": [{ "id": "cm...", "name": "Arts, Design & Creative" }, ...],
+  "industries": [{ "id": "cm...", "name": "Actuarial Science", "clusterId": "cm..." }, ...],
+  "domains": [{ "id": "cm...", "name": "...", "industryId": "cm..." }, ...],
   "aiResilienceGrades": ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"]
 }
 ```
-`clusters`/`industries`/`domains` are derived from `ACTIVE` entries only — build your
-dropdowns from this endpoint rather than hardcoding the list (it can grow as more
-careers are added).
+Now backed by the taxonomy tables (live rows only), each level is `{id, name}` — industries
+carry `clusterId`, domains carry `industryId`, so you can cascade the dropdowns. Pass the
+selected `id` as `clusterId`/`industryId`/`domainId` to the list endpoint. For a single nested
+payload instead of three flat lists, use `GET /api/v1/career-taxonomy/tree` (§9.4).
 
 ### 9.3 Single entry with related data
 
 `GET /{id}` — 404 if not found.
 
-Returns everything from the list shape above, plus three related-data arrays
-(matched by value — industry/cluster/exam-name — not a strict foreign key, so an
-empty array is possible and valid, not a bug):
+Returns everything from the list shape above (including the nested `domain` chain), plus
+three related-data arrays (matched by value — the derived industry/cluster names and
+exam-name — not a strict foreign key, so an empty array is possible and valid, not a bug):
 
 ```json
 {
@@ -784,8 +800,27 @@ empty array is possible and valid, not a bug):
 }
 ```
 
-There's no write API for Career Library (no create/edit/delete, no counsellor
-"request to add a career" flow) — display only.
+### 9.4 Career taxonomy (managing Cluster → Industry → Domain)
+
+Base path: `/api/v1/career-taxonomy`. This is the admin-managed classification behind the
+library. Reads are open to any authenticated user (build the "add job role" cascading picker
+from `GET /career-taxonomy/tree`); writes are **Admin**.
+
+- `GET /tree` → nested `[{ id, name, industries: [{ id, name, domains: [{ id, name }] }] }]`
+  (live rows only) — the cascading picker source.
+- `GET /clusters`, `GET /industries?clusterId=`, `GET /domains?industryId=` — flat lists;
+  add `?includeDeleted=true` for admin management views.
+- `POST /clusters` `{ name }`, `POST /industries` `{ clusterId, name }`,
+  `POST /domains` `{ industryId, name }` — 409 on a duplicate live name within the parent.
+- `PATCH /{clusters|industries|domains}/{id}` — rename (and re-parent industries/domains via
+  `clusterId`/`industryId`). A rename propagates everywhere automatically (entries reference the
+  node, not a copy of the name).
+- `DELETE /{...}/{id}` — **soft delete**: the node disappears from the pickers but existing job
+  roles keep resolving; `POST /{...}/{id}/restore` reverses it (409 if the name was reused).
+
+**Creating/updating a job role** (`POST`/`PATCH /api/v1/career-library`) now takes a `domainId`
+(the leaf), not cluster/industry/domain strings — resolve it from the cascading picker. An
+unknown or soft-deleted `domainId` returns 400.
 
 ---
 

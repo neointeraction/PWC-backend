@@ -24,16 +24,21 @@ describe("Career Library API", () => {
     expect(res.body.data.some((e: { jobRole: string }) => e.jobRole === "Data Scientist")).toBe(true);
   });
 
-  it("filters by cluster/industry/domain/aiResilienceGrade", async () => {
-    const res = await authRequest(app)
-      .get("/api/v1/career-library")
-      .query({ cluster: "Information Technology & Digital" });
+  it("filters by clusterId (taxonomy), returning only entries under that cluster", async () => {
+    const filters = await authRequest(app).get("/api/v1/career-library/filters");
+    const cluster = filters.body.clusters.find(
+      (c: { name: string }) => c.name === "Information Technology & Digital"
+    );
+    expect(cluster).toBeDefined();
+
+    const res = await authRequest(app).get("/api/v1/career-library").query({ clusterId: cluster.id });
 
     expect(res.status).toBe(200);
     expect(res.body.data.length).toBeGreaterThan(0);
     expect(
       res.body.data.every(
-        (e: { cluster: string }) => e.cluster === "Information Technology & Digital"
+        (e: { domain: { industry: { cluster: { name: string } } } }) =>
+          e.domain.industry.cluster.name === "Information Technology & Digital"
       )
     ).toBe(true);
   });
@@ -52,12 +57,19 @@ describe("Career Library API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns distinct filter option lists", async () => {
+  it("returns taxonomy-backed filter option lists ({id,name} per level)", async () => {
     const res = await authRequest(app).get("/api/v1/career-library/filters");
 
     expect(res.status).toBe(200);
-    expect(res.body.clusters).toContain("Information Technology & Digital");
-    expect(res.body.industries).toContain("Data Science & Artificial Intelligence");
+    expect(
+      res.body.clusters.some((c: { name: string }) => c.name === "Information Technology & Digital")
+    ).toBe(true);
+    expect(
+      res.body.industries.some(
+        (i: { name: string; clusterId: string }) =>
+          i.name === "Data Science & Artificial Intelligence" && typeof i.clusterId === "string"
+      )
+    ).toBe(true);
     expect(res.body.aiResilienceGrades).toEqual(["LOW", "MEDIUM", "HIGH", "VERY_HIGH"]);
   });
 
@@ -69,11 +81,13 @@ describe("Career Library API", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.jobRole).toBe("Data Scientist");
+    // Classification is now the nested taxonomy chain, not flat strings.
+    expect(res.body.domain.industry.cluster.name).toBeTruthy();
     expect(Array.isArray(res.body.relatedInstitutions)).toBe(true);
     expect(res.body.relatedInstitutions.length).toBeGreaterThan(0);
     expect(
       res.body.relatedInstitutions.every(
-        (i: { industry: string }) => i.industry === res.body.industry
+        (i: { industry: string }) => i.industry === res.body.domain.industry.name
       )
     ).toBe(true);
     expect(Array.isArray(res.body.relatedCourses)).toBe(true);

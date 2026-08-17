@@ -390,12 +390,17 @@ async function loadCareerLibraryForFit(): Promise<{
   domainUnits: DomainUnit[];
   careersByKey: Map<string, RepresentativeCareer[]>;
 }> {
-  const entries = await prisma.careerLibraryEntry.findMany({
+  const rows = await prisma.careerLibraryEntry.findMany({
     where: { status: "ACTIVE" },
     select: {
-      cluster: true,
-      industry: true,
-      domain: true,
+      // cluster/industry/domain are normalized — read them through the domain relation and
+      // flatten back to strings so the ranking logic below is unchanged.
+      domain: {
+        select: {
+          name: true,
+          industry: { select: { name: true, cluster: { select: { name: true } } } },
+        },
+      },
       jobRole: true,
       aiResilienceGrade: true,
       aiResilienceComment: true,
@@ -405,6 +410,18 @@ async function loadCareerLibraryForFit(): Promise<{
       salaryGlobalRangeText: true,
     },
   });
+  const entries = rows.map((r) => ({
+    cluster: r.domain.industry.cluster.name,
+    industry: r.domain.industry.name,
+    domain: r.domain.name,
+    jobRole: r.jobRole,
+    aiResilienceGrade: r.aiResilienceGrade,
+    aiResilienceComment: r.aiResilienceComment,
+    oneLineDescription: r.oneLineDescription,
+    topCompanies: r.topCompanies,
+    salaryIndiaRangeText: r.salaryIndiaRangeText,
+    salaryGlobalRangeText: r.salaryGlobalRangeText,
+  }));
 
   const careersByKey = new Map<string, RepresentativeCareer[]>();
   const bestRankByDomain = new Map<string, DomainUnit>();

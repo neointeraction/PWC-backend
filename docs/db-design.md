@@ -254,6 +254,25 @@ slot this session currently holds (released back to `OPEN` on cancel/reschedule)
 "Join Now" stays active from 10 minutes before `startTime` through `endTime` — a party
 can join late, any time up to the scheduled end (resolved decision E).
 
+### `CareerCluster` / `CareerIndustry` / `CareerDomain` — career taxonomy
+Admin-managed 3-level classification hierarchy (Cluster → Industry → Domain), seeded from the
+workbook's distinct values (13 clusters / 43 industries / 571 domains) and editable via the
+`/api/v1/career-taxonomy/*` endpoints. A `CareerLibraryEntry` points at its leaf `CareerDomain`.
+
+| Model | Key fields | Notes |
+|---|---|---|
+| `CareerCluster` | `name`, `deletedAt?` | top level; `name` unique among live rows |
+| `CareerIndustry` | `clusterId` (FK), `name`, `deletedAt?` | belongs to one cluster; `(clusterId, name)` unique among live rows |
+| `CareerDomain` | `industryId` (FK), `name`, `deletedAt?` | belongs to one industry; `(industryId, name)` unique among live rows. Domain **names repeat across industries** (e.g. "Academia" under several), so uniqueness is per-industry |
+
+- **Soft delete**: `deletedAt` (null = live). Deleting hides a node from the pickers/tree but keeps
+  its FK intact, so job roles that still reference it keep resolving; restorable via
+  `POST .../restore`. Name uniqueness is enforced in the service layer over live rows only (not a DB
+  constraint — a partial unique index can't be expressed in the Prisma schema without being flagged
+  as drift), so a soft-deleted name can be reused.
+- **Ids** may be cuid (app/seed-created) or uuid (rows backfilled by the `normalize_career_taxonomy`
+  migration via `gen_random_uuid()`).
+
 ### `CareerLibraryEntry`
 Central, PWC-owned career database. Populated from `Career Library_Updated_0508.xlsx`
 ("CL" tab) — 1,317 rows imported via `scripts/export-career-library.py` +
@@ -262,7 +281,8 @@ the full import design and cross-table mapping.
 
 | Field | Type | Notes |
 |---|---|---|
-| cluster, industry, domain, jobRole | String | classification |
+| domainId | String (FK → `CareerDomain`) | leaf of the normalized Cluster → Industry → Domain taxonomy; cluster/industry are derived by walking up the relations (was three free-text `cluster`/`industry`/`domain` columns before the `normalize_career_taxonomy` migration) |
+| jobRole | String | the career's title |
 | aiResilienceGrade | `AiResilienceGrade` enum | LOW / MEDIUM / HIGH / VERY_HIGH (source only uses the first three) |
 | aiResilienceComment | String | justifies the grade |
 | oneLineDescription | String | |
@@ -306,10 +326,10 @@ matched **by value** at query time, not by foreign key:
 | Workbook tab | Table | Rows | Join key → `CareerLibraryEntry` |
 |---|---|---|---|
 | CL | `CareerLibraryEntry` | 1,317 | (the hub table) |
-| UG Institutions_IND | `UgInstitution` | 702 | `industry` ↔ `CareerLibraryEntry.industry` |
+| UG Institutions_IND | `UgInstitution` | 702 | `industry` ↔ entry's `domain.industry.name` |
 | UG Inst+Uty_IND | `UgInstitutionUniversity` | 34 | none (general directory, not industry-mapped) |
 | UG Entrance_IND | `UgEntranceExam` | 109 | `examName` ↔ `CareerLibraryEntry.entranceExams` (UG, extracted) |
-| UG Courses_IND | `UgCourse` | 67 | `careerCluster` ↔ `CareerLibraryEntry.cluster` |
+| UG Courses_IND | `UgCourse` | 67 | `careerCluster` ↔ entry's `domain.industry.cluster.name` |
 | PG Institutions_IND | `PgInstitution` | 1,368 | none (not requested; `industry` field kept but unmapped) |
 | PG Entrance_IND | `PgEntranceExam` | 29 | none (not requested) |
 
@@ -338,10 +358,11 @@ corrected in the export script (`INDUSTRY_ALIASES`, `EXAM_ALIASES` in
   where `UG Entrance_IND` names the exam `"CUET UG"` — normalized to `"CUET UG"` on
   import.
 
-After these fixes, mapping coverage is 100%: every `CareerLibraryEntry.industry` value
+After these fixes, mapping coverage is 100%: every entry's `domain.industry.name` value
 has at least one matching `UgInstitution` row, every extracted UG exam token matches a
-`UgEntranceExam.examName`, and every `CareerLibraryEntry.cluster` value matches at
-least one `UgCourse.careerCluster`.
+`UgEntranceExam.examName`, and every entry's `domain.industry.cluster.name` value matches at
+least one `UgCourse.careerCluster`. (The `industry`/`cluster` names are now read through the
+normalized taxonomy relations rather than free-text columns on the entry.)
 
 ### Career Library normalization — canonical lookups + join tables
 

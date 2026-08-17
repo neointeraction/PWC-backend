@@ -139,6 +139,10 @@ export async function seedCareerLibraryData(prisma: PrismaClient): Promise<void>
   // first so the delete below doesn't hit the FK constraint.
   await prisma.careerLibraryRequest.deleteMany({ where: { resultingEntryId: { not: null } } });
   await prisma.careerLibraryEntry.deleteMany({});
+  // Taxonomy, deleted after the entries that reference it (domain → industry → cluster).
+  await prisma.careerDomain.deleteMany({});
+  await prisma.careerIndustry.deleteMany({});
+  await prisma.careerCluster.deleteMany({});
   await prisma.ugInstitution.deleteMany({});
   await prisma.ugInstitutionUniversity.deleteMany({});
   await prisma.ugEntranceExam.deleteMany({});
@@ -146,9 +150,56 @@ export async function seedCareerLibraryData(prisma: PrismaClient): Promise<void>
   await prisma.pgInstitution.deleteMany({});
   await prisma.pgEntranceExam.deleteMany({});
 
+  // Build the taxonomy (Cluster → Industry → Domain) from the rows' classification columns.
+  // Raw (untrimmed) values are used as keys so the distinct sets match the migration's backfill
+  // (13 clusters / 43 industries / 571 domains). Domain names repeat across industries, so a
+  // domain is keyed by (industryId, name), not name alone.
+  const clusterNames = [...new Set(careerLibrary.map((r) => r.cluster))];
+  await prisma.careerCluster.createMany({ data: clusterNames.map((name) => ({ name })) });
+  const clusterId = new Map(
+    (await prisma.careerCluster.findMany({ select: { id: true, name: true } })).map((c) => [c.name, c.id])
+  );
+
+  const industryPairs = [
+    ...new Map(careerLibrary.map((r) => [`${r.cluster}||${r.industry}`, r])).values(),
+  ];
+  await prisma.careerIndustry.createMany({
+    data: industryPairs.map((r) => ({ clusterId: clusterId.get(r.cluster)!, name: r.industry })),
+  });
+  const industryId = new Map(
+    (await prisma.careerIndustry.findMany({ select: { id: true, clusterId: true, name: true } })).map((i) => [
+      `${i.clusterId}||${i.name}`,
+      i.id,
+    ])
+  );
+
+  const domainTriples = [
+    ...new Map(careerLibrary.map((r) => [`${r.cluster}||${r.industry}||${r.domain}`, r])).values(),
+  ];
+  await prisma.careerDomain.createMany({
+    data: domainTriples.map((r) => ({
+      industryId: industryId.get(`${clusterId.get(r.cluster)!}||${r.industry}`)!,
+      name: r.domain,
+    })),
+  });
+  const domainId = new Map(
+    (await prisma.careerDomain.findMany({ select: { id: true, industryId: true, name: true } })).map((d) => [
+      `${d.industryId}||${d.name}`,
+      d.id,
+    ])
+  );
+
+  // Resolve a row's leaf domainId by walking cluster → industry → domain.
+  const resolveDomainId = (row: CareerLibraryRow): string => {
+    const cId = clusterId.get(row.cluster)!;
+    const iId = industryId.get(`${cId}||${row.industry}`)!;
+    return domainId.get(`${iId}||${row.domain}`)!;
+  };
+
   await prisma.careerLibraryEntry.createMany({
-    data: careerLibrary.map((row) => ({
-      ...row,
+    data: careerLibrary.map(({ cluster: _c, industry: _i, domain: _d, ...rest }) => ({
+      ...rest,
+      domainId: resolveDomainId({ cluster: _c, industry: _i, domain: _d, ...rest }),
       status: "ACTIVE",
       createdBy: IMPORT_LABEL,
     })),
@@ -160,6 +211,10 @@ export async function seedCareerLibraryData(prisma: PrismaClient): Promise<void>
   await prisma.pgInstitution.createMany({ data: pgInstitutions });
   await prisma.pgEntranceExam.createMany({ data: pgEntranceExams });
 
+  console.log(
+    `Seeded career taxonomy: ${clusterNames.length} clusters, ${industryPairs.length} industries, ` +
+      `${domainTriples.length} domains`
+  );
   console.log(
     `Seeded career library data: ${careerLibrary.length} careers, ` +
       `${ugInstitutions.length} UG institutions (by industry), ` +

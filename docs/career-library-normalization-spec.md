@@ -10,9 +10,12 @@ That requires turning today's list-like columns into proper lookup + join tables
 The **taxonomy is fixed** — the client selects from existing values, doesn't invent new
 ones:
 
-- `cluster`, `industry`, `domain` — a fixed 3-level hierarchy. Dropdowns already have a
-  source (`GET /career-library/filters` returns distinct values). **No new tables needed
-  now** (a `Taxonomy` table is a possible future tidy-up, out of scope here).
+- `cluster`, `industry`, `domain` — a fixed 3-level hierarchy. **✅ Done (2026-08-17):** these
+  were normalized into the `CareerCluster` → `CareerIndustry` → `CareerDomain` tables (the
+  `normalize_career_taxonomy` migration); the entry now carries a `domainId` FK, and the taxonomy
+  is admin-managed + soft-deletable via `/api/v1/career-taxonomy/*`. `GET /career-library/filters`
+  and `GET /career-taxonomy/tree` now source from those tables. See `docs/api-list.md` §"Career
+  Taxonomy".
 
 The **job role is the new record**, and adding one may introduce new exams/courses/colleges
 (or reuse existing ones). Those are what we normalize.
@@ -21,7 +24,7 @@ The **job role is the new record**, and adding one may introduce new exams/cours
 
 | Field on `CareerLibraryEntry` | Today | Proposed |
 |---|---|---|
-| `cluster`, `industry`, `domain` | String (fixed taxonomy) | **unchanged** (dropdown from existing distinct values) |
+| `cluster`, `industry`, `domain` | String (fixed taxonomy) | **✅ normalized** → `CareerCluster`/`CareerIndustry`/`CareerDomain` tables; entry now has a `domainId` FK (admin-managed via `/api/v1/career-taxonomy/*`) |
 | `jobRole` | String | **unchanged** (the new record's label) |
 | `aiResilienceGrade`, `aiResilienceComment`, `oneLineDescription` | scalar | **unchanged** |
 | salary* / qualification* / `entranceExamsUGDescription` | scalar text | **unchanged** (free text) |

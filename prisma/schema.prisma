@@ -355,9 +355,11 @@ enum QualificationLevel {
 // Central, PWC-owned career library (default ~1,300 roles).
 model CareerLibraryEntry {
   id                  String            @id @default(cuid())
-  cluster             String
-  industry            String
-  domain              String
+  // Classification is normalized into the CareerCluster → CareerIndustry → CareerDomain
+  // hierarchy. The entry points at its leaf domain; cluster/industry are derived by walking
+  // up the relations. See docs/career-library-normalization-spec.md.
+  domainId            String
+  domain              CareerDomain      @relation(fields: [domainId], references: [id])
   jobRole             String
   aiResilienceGrade   AiResilienceGrade
   aiResilienceComment String
@@ -404,10 +406,53 @@ model CareerLibraryEntry {
   courseLinks       CareerCourse[]
   institutionLinks  CareerInstitution[]
 
-  @@index([cluster])
-  @@index([industry])
-  @@index([domain])
+  @@index([domainId])
   @@map("career_library_entries")
+}
+
+// --- Career taxonomy: a fixed 3-level hierarchy (Cluster → Industry → Domain), admin-managed.
+// Domain names repeat across industries (e.g. "Academia" under Law and Political Science), so a
+// domain is unique per-industry, not globally. Soft-deleted via `deletedAt` (null = live): a
+// deleted node is hidden from pickers but keeps its FK so existing job roles still resolve.
+// Name uniqueness is enforced by partial unique indexes over live rows only (see the migration),
+// so a soft-deleted name can be reused. ---
+model CareerCluster {
+  id         String           @id @default(cuid())
+  name       String
+  deletedAt  DateTime?
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+  industries CareerIndustry[]
+
+  @@map("career_clusters")
+}
+
+model CareerIndustry {
+  id        String         @id @default(cuid())
+  clusterId String
+  cluster   CareerCluster  @relation(fields: [clusterId], references: [id])
+  name      String
+  deletedAt DateTime?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  domains   CareerDomain[]
+
+  @@index([clusterId])
+  @@map("career_industries")
+}
+
+model CareerDomain {
+  id         String               @id @default(cuid())
+  industryId String
+  industry   CareerIndustry       @relation(fields: [industryId], references: [id])
+  name       String
+  deletedAt  DateTime?
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  entries    CareerLibraryEntry[]
+
+  @@index([industryId])
+  @@map("career_domains")
 }
 
 // --- UG/PG reference data, imported from the Career Library workbook. Each model

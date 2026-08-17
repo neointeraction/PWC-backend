@@ -44,6 +44,18 @@ import {
   listInstitutionsQuerySchema,
   updateCareerEntrySchema,
 } from "../modules/career-library/career-library.schema.js";
+import {
+  createClusterSchema,
+  createDomainSchema,
+  createIndustrySchema,
+  listClustersQuerySchema,
+  listDomainsQuerySchema,
+  listIndustriesQuerySchema,
+  taxonomyIdParamsSchema,
+  updateClusterSchema,
+  updateDomainSchema,
+  updateIndustrySchema,
+} from "../modules/career-taxonomy/career-taxonomy.schema.js";
 import { sendTemplateEmailBodySchema } from "../modules/email/email.schema.js";
 import {
   changePasswordBodySchema,
@@ -1202,6 +1214,148 @@ registry.registerPath({
     200: { description: "Assembled report", content: { "application/json": { schema: genericObjectSchema } } },
     404: errorResponses[404],
   },
+});
+
+// --- Career Taxonomy (Cluster → Industry → Domain) ---
+
+const taxTag = ["Career Taxonomy"];
+const taxListResponses = {
+  200: { description: "Taxonomy nodes", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  400: errorResponses[400],
+};
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-taxonomy/tree",
+  tags: taxTag,
+  summary: "Full live hierarchy (clusters → industries → domains) for the cascading picker. Any authenticated user.",
+  responses: { 200: { description: "Taxonomy tree", content: { "application/json": { schema: z.array(genericObjectSchema) } } } },
+});
+
+// Clusters
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-taxonomy/clusters",
+  tags: taxTag,
+  summary: "List clusters (live only; ?includeDeleted=true for soft-deleted). Any authenticated user.",
+  request: { query: listClustersQuerySchema },
+  responses: taxListResponses,
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/clusters",
+  tags: taxTag,
+  summary: "Create a cluster (admin). 409 if a live cluster already has the name.",
+  request: { body: { content: { "application/json": { schema: createClusterSchema } } } },
+  responses: { 201: { description: "Created cluster", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-taxonomy/clusters/{id}",
+  tags: taxTag,
+  summary: "Rename a cluster (admin). 409 on name clash.",
+  request: { params: taxonomyIdParamsSchema, body: { content: { "application/json": { schema: updateClusterSchema } } } },
+  responses: { 200: { description: "Updated cluster", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/career-taxonomy/clusters/{id}",
+  tags: taxTag,
+  summary: "Soft-delete a cluster (admin). Hidden from pickers; existing job roles still resolve.",
+  request: { params: taxonomyIdParamsSchema },
+  responses: { 200: { description: "Soft-deleted cluster", content: { "application/json": { schema: genericObjectSchema } } }, 404: errorResponses[404] },
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/clusters/{id}/restore",
+  tags: taxTag,
+  summary: "Restore a soft-deleted cluster (admin). 409 if a live cluster now holds the name.",
+  request: { params: taxonomyIdParamsSchema },
+  responses: { 200: { description: "Restored cluster", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+// Industries
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-taxonomy/industries",
+  tags: taxTag,
+  summary: "List industries (?clusterId to scope; ?includeDeleted=true). Any authenticated user.",
+  request: { query: listIndustriesQuerySchema },
+  responses: taxListResponses,
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/industries",
+  tags: taxTag,
+  summary: "Create an industry under a cluster (admin). 409 on duplicate name within the cluster.",
+  request: { body: { content: { "application/json": { schema: createIndustrySchema } } } },
+  responses: { 201: { description: "Created industry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-taxonomy/industries/{id}",
+  tags: taxTag,
+  summary: "Rename or re-parent an industry (admin). 409 on name clash within the target cluster.",
+  request: { params: taxonomyIdParamsSchema, body: { content: { "application/json": { schema: updateIndustrySchema } } } },
+  responses: { 200: { description: "Updated industry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/career-taxonomy/industries/{id}",
+  tags: taxTag,
+  summary: "Soft-delete an industry (admin).",
+  request: { params: taxonomyIdParamsSchema },
+  responses: { 200: { description: "Soft-deleted industry", content: { "application/json": { schema: genericObjectSchema } } }, 404: errorResponses[404] },
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/industries/{id}/restore",
+  tags: taxTag,
+  summary: "Restore a soft-deleted industry (admin). 409 on name clash.",
+  request: { params: taxonomyIdParamsSchema },
+  responses: { 200: { description: "Restored industry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+// Domains
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-taxonomy/domains",
+  tags: taxTag,
+  summary: "List domains (?industryId to scope; ?includeDeleted=true). Any authenticated user.",
+  request: { query: listDomainsQuerySchema },
+  responses: taxListResponses,
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/domains",
+  tags: taxTag,
+  summary: "Create a domain under an industry (admin). 409 on duplicate name within the industry.",
+  request: { body: { content: { "application/json": { schema: createDomainSchema } } } },
+  responses: { 201: { description: "Created domain", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-taxonomy/domains/{id}",
+  tags: taxTag,
+  summary: "Rename or re-parent a domain (admin). 409 on name clash within the target industry.",
+  request: { params: taxonomyIdParamsSchema, body: { content: { "application/json": { schema: updateDomainSchema } } } },
+  responses: { 200: { description: "Updated domain", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/career-taxonomy/domains/{id}",
+  tags: taxTag,
+  summary: "Soft-delete a domain (admin).",
+  request: { params: taxonomyIdParamsSchema },
+  responses: { 200: { description: "Soft-deleted domain", content: { "application/json": { schema: genericObjectSchema } } }, 404: errorResponses[404] },
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/domains/{id}/restore",
+  tags: taxTag,
+  summary: "Restore a soft-deleted domain (admin). 409 on name clash.",
+  request: { params: taxonomyIdParamsSchema },
+  responses: { 200: { description: "Restored domain", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 
 export function generateOpenApiDocument() {

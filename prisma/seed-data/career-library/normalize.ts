@@ -19,9 +19,23 @@ async function createManyBatched<T>(
 }
 
 export async function seedCareerLibraryNormalization(prisma: PrismaClient): Promise<void> {
-  const entries = await prisma.careerLibraryEntry.findMany({
-    select: { id: true, industry: true, entranceExams: true, entranceExamsPG: true, topCourses: true },
+  const entryRows = await prisma.careerLibraryEntry.findMany({
+    select: {
+      id: true,
+      entranceExams: true,
+      entranceExamsPG: true,
+      topCourses: true,
+      // industry is now normalized — read it through the domain → industry relation.
+      domain: { select: { industry: { select: { name: true } } } },
+    },
   });
+  const entries = entryRows.map((e) => ({
+    id: e.id,
+    industry: e.domain.industry.name,
+    entranceExams: e.entranceExams,
+    entranceExamsPG: e.entranceExamsPG,
+    topCourses: e.topCourses,
+  }));
 
   // --- 1. Canonical EntranceExam (UG from UgEntranceExam, PG from PgEntranceExam, plus
   //        any names only present on entries' arrays) ---
