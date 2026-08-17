@@ -5,6 +5,11 @@
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
     "outDir": "dist",
+    // Lets the Vercel serverless entry (api/index.ts) import the compiled
+    // ../dist/src/app.js without a .d.ts — tsc reads the JS to infer its types
+    // instead of failing with TS7016. No .js files exist under src/prisma, so
+    // this has no effect on the main build output.
+    "allowJs": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
