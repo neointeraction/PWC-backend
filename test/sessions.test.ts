@@ -176,8 +176,10 @@ describe("Sessions API", () => {
     // 2 distinct (date, startTime, endTime) combos — counsellor A and B both offered
     // session1Date/startTime, so that pair is deduped down to one entry.
     expect(res.body).toHaveLength(2);
-    const session1Option = res.body.find((s: { slotDate: string }) => s.slotDate.startsWith(ymd(session1Date)));
-    expect(session1Option.startTime).toBe(hm(session1Start));
+    const session1Option = res.body.find((s: { startTime: string }) => s.startTime === hm(session1Start));
+    expect(session1Option).toBeDefined();
+    // slotDate is now rendered in the generic display format ("01 Aug 2026"), not ISO.
+    expect(session1Option.slotDate).toMatch(/^\d{2} [A-Z][a-z]{2} \d{4}$/);
   });
 
   it("previews Session 2 options locked to Session 1's would-be counsellor", async () => {

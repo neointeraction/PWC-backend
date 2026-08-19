@@ -3,8 +3,28 @@ import { workflowStatusSchema } from "../students/students.schema.js";
 
 // "HH:mm", 24h — matches CounsellorSlot/Session.startTime/endTime.
 const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Time must be in HH:mm 24h format");
-// "YYYY-MM-DD" — matches the @db.Date columns.
-const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be in YYYY-MM-DD format");
+
+// Accepts either machine form "YYYY-MM-DD" or the display form "01 Aug 2026" that responses
+// now emit (so a slot picked from a booking-options response can be sent straight back), and
+// always normalizes to "YYYY-MM-DD" for the service layer.
+const MONTHS: Record<string, string> = {
+  jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+  jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+};
+const dateSchema = z
+  .string()
+  .trim()
+  .transform((val, ctx) => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+    const m = /^(\d{2}) ([A-Za-z]{3}) (\d{4})$/.exec(val);
+    if (m) {
+      const [, day, mon, year] = m;
+      const month = MONTHS[mon!.toLowerCase()];
+      if (month) return `${year}-${month}-${day}`;
+    }
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Date must be in YYYY-MM-DD or DD Mon YYYY format" });
+    return z.NEVER;
+  });
 
 const sessionNumberSchema = z.enum(["SESSION_1", "SESSION_2"]);
 const initiatedBySchema = z.enum(["STUDENT", "COUNSELLOR", "ADMIN"]);

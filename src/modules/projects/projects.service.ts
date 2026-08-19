@@ -5,14 +5,34 @@ import type { CreateProjectInput, ListProjectsQuery, UpdateProjectInput } from "
 
 const projectInclude = {
   institute: { select: { id: true, name: true } },
+  language: { select: { id: true, code: true, name: true } },
   _count: { select: { students: true, counsellors: true, counsellorSlots: true } },
 } as const;
+
+// Resolves the language for a project. An explicit (active) languageId wins; otherwise we
+// fall back to the seeded default (English today). Throws if the id is unknown/inactive, or
+// if no default is configured (misconfigured seed).
+async function resolveLanguageId(languageId?: string): Promise<string> {
+  if (languageId) {
+    const language = await prisma.language.findFirst({ where: { id: languageId, isActive: true } });
+    if (!language) {
+      throw new BadRequestError("languageId does not exist or is inactive");
+    }
+    return language.id;
+  }
+  const fallback = await prisma.language.findFirst({ where: { isDefault: true, isActive: true } });
+  if (!fallback) {
+    throw new BadRequestError("No default language is configured");
+  }
+  return fallback.id;
+}
 
 export async function createProject(input: CreateProjectInput) {
   const institute = await prisma.institute.findUnique({ where: { id: input.instituteId } });
   if (!institute) {
     throw new BadRequestError("instituteId does not exist");
   }
+  const languageId = await resolveLanguageId(input.languageId);
 
   try {
     return await prisma.project.create({
@@ -22,6 +42,7 @@ export async function createProject(input: CreateProjectInput) {
         fromDate: input.fromDate,
         toDate: input.toDate,
         status: input.status,
+        languageId,
       },
       include: projectInclude,
     });
@@ -61,6 +82,9 @@ export async function updateProject(id: string, input: UpdateProjectInput) {
     throw new BadRequestError("fromDate must be on or before toDate");
   }
 
+  // Only re-resolve when a languageId was supplied (undefined leaves it unchanged).
+  const languageId = input.languageId !== undefined ? await resolveLanguageId(input.languageId) : undefined;
+
   try {
     return await prisma.project.update({
       where: { id },
@@ -69,6 +93,7 @@ export async function updateProject(id: string, input: UpdateProjectInput) {
         fromDate: input.fromDate,
         toDate: input.toDate,
         status: input.status,
+        languageId,
       },
       include: projectInclude,
     });

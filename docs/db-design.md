@@ -114,6 +114,22 @@ Linking a `Project` (or `Student`) to a cohort is deferred until a second cohort
 | isActive | Boolean | default true; `GET /cohorts` returns active only |
 | displayOrder | Int | default 0; dropdown ordering |
 
+### `Language`
+Read-only lookup of the language a project is delivered in, to populate the project-creation
+dropdown (`GET /languages`). `English` is seeded as the default (`isDefault: true`) and is the
+only row today; managed via `prisma/seed.ts` (no CRUD API). A `Project` references it via the
+nullable `languageId` FK — the service resolves the default on create, so new projects always
+carry a language (see `Project`).
+
+| Field | Type | Notes |
+|---|---|---|
+| id | String (cuid) | PK |
+| code | String | unique, BCP 47 / ISO 639-1, e.g. `en` |
+| name | String | human label, e.g. "English" |
+| isActive | Boolean | default true; `GET /languages` returns active only |
+| isDefault | Boolean | default false; exactly one row (English) is the default used when a project omits `languageId` |
+| displayOrder | Int | default 0; dropdown ordering |
+
 ### `Institute`
 The tenant. Onboarded by Super Admin.
 
@@ -142,6 +158,7 @@ A counselling cycle/cohort under an institute.
 | name | String | unique per institute |
 | fromDate, toDate | DateTime | cohort duration |
 | status | `ProjectStatus` enum | ACTIVE / CLOSED / DELETED (DELETED = reversible soft-delete via `DELETE` + `PATCH /:id/restore`; hidden from default listings) |
+| languageId | String? | FK → Language. Nullable at the DB level (pre-language backfill), but the service resolves the default (English) on create, so new projects always carry one. Future: admins pick another language at creation. |
 
 ### `Counsellor`
 Extends `User` (role=COUNSELLOR). Belongs to exactly one institute; assigned to
@@ -274,10 +291,14 @@ workbook's distinct values (13 clusters / 43 industries / 571 domains) and edita
   migration via `gen_random_uuid()`).
 
 ### `CareerLibraryEntry`
-Central, PWC-owned career database. Populated from `Career Library_Updated_0508.xlsx`
-("CL" tab) — 1,317 rows imported via `scripts/export-career-library.py` +
-`prisma/seed-data/career-library/`. See "Career Library workbook import" below for
-the full import design and cross-table mapping.
+Central, PWC-owned career database. The "CL" tab is now imported from
+`docs/Career Library_Updated_1808.xlsx` — 1,317 rows via
+`scripts/export-career-library.py` + `prisma/seed-data/career-library/` (the 1808
+workbook added the yellow columns: `roleOverview`, `keySkills`,
+`qualification10th12thExplanation`, and the `*Defined` qualification variants). The
+reference tabs (UG/PG institutions, exams, courses) are imported from the same 1808
+workbook. See "Career Library workbook import" below for the full import design and
+cross-table mapping.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -286,13 +307,17 @@ the full import design and cross-table mapping.
 | aiResilienceGrade | `AiResilienceGrade` enum | LOW / MEDIUM / HIGH / VERY_HIGH (source only uses the first three) |
 | aiResilienceComment | String | justifies the grade |
 | oneLineDescription | String | |
+| roleOverview | String? | longer-form role write-up (yellow "Role Overview & Scope" column added in the 1808 workbook) |
+| keySkills | String[] | key skill requirements (yellow "Key Skill Requirements" column; comma-separated in the source, split to a list) |
 | topCompanies | String[] | tag-style multi-value |
 | salaryIndiaRangeText | String? | raw source text, e.g. "₹6–25 LPA" (kept — source has non-numeric ranges like "0–Limitless") |
 | salaryIndiaMinLPA, salaryIndiaMaxLPA | Float? | best-effort parse of the above; null when unparseable |
 | salaryGlobalRangeText | String? | raw source text, e.g. "$70k–$160k" |
 | salaryGlobalMinUSD, salaryGlobalMaxUSD | Float? | best-effort parse (in USD, not $k); null when unparseable |
 | qualification10th12th | String | required |
+| qualification10th12thExplanation | String? | the "10+2 Explanation" note (yellow column) accompanying the 10th/12th qualification |
 | qualificationGraduation, qualificationPG | String? | source has 3 distinct qualification levels, not 1 |
+| qualificationGraduationDefined, qualificationPGDefined | String? | cleaned/normalized "DEFINED" variants of the graduation/PG qualifications (yellow columns added in the 1808 workbook) |
 | entranceExamsUGDescription | String? | full descriptive text from the source |
 | entranceExams | String[] | UG level, cleaned/short exam names — join key against `UgEntranceExam.examName` |
 | entranceExamsPG | String[] | PG level |
@@ -318,10 +343,13 @@ before becoming a permanent `CareerLibraryEntry`.
 
 ### Career Library workbook import — UG/PG reference tables
 
-`Career Library_Updated_0508.xlsx` has 8 tabs; the last (`Post-12_Entrance_Exams__India__`)
+`docs/Career Library_Updated_1808.xlsx` has 8 tabs; the last (`Post-12_Entrance_Exams__India__`)
 is out of scope per instruction and was not imported. The other 7 tabs each map to
 exactly one table — no FK relations to `CareerLibraryEntry` or to each other; they're
-matched **by value** at query time, not by foreign key:
+matched **by value** at query time, not by foreign key. (All tabs, including the UG/PG
+reference tables, are now sourced from the 1808 workbook; note its `UG Institutions_IND`
+tab dropped the "Programmes Offered After Class 12" and "Key Programmes Offered" columns,
+so `UgInstitution.programmesOfferedAfterClass12` / `keyProgrammesOffered` are now null.)
 
 | Workbook tab | Table | Rows | Join key → `CareerLibraryEntry` |
 |---|---|---|---|

@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   // "native" for local dev; "rhel-openssl-3.0.x" for Vercel's Node 18/20 serverless
   // runtime (Amazon Linux 2023) so the query-engine binary is present when deployed.
   // If you see "Query engine binary not found" on Vercel, try "rhel-openssl-1.0.x".
@@ -85,6 +85,24 @@ model Cohort {
   @@map("cohorts")
 }
 
+// Read-only lookup for the language a project is delivered in. English is seeded as the
+// default; a project picks it up automatically unless another language is chosen (future).
+// Add more rows to offer them in the project-creation dropdown.
+model Language {
+  id           String   @id @default(cuid())
+  code         String   @unique // BCP 47 / ISO 639-1, e.g. "en"
+  name         String // human label, e.g. "English"
+  isActive     Boolean  @default(true)
+  isDefault    Boolean  @default(false) // exactly one row is the default (English today)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  projects Project[]
+
+  @@map("languages")
+}
+
 // Tenant (educational institution). Onboarded by Super Admin.
 model Institute {
   id            String   @id @default(cuid())
@@ -149,6 +167,10 @@ model Project {
   fromDate    DateTime
   toDate      DateTime
   status      ProjectStatus @default(ACTIVE)
+  // Delivery language. Nullable at the DB level for the pre-language backfill; the service
+  // always resolves it to the default (English) on create, so new projects are never null.
+  languageId  String?
+  language    Language?     @relation(fields: [languageId], references: [id])
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -158,6 +180,7 @@ model Project {
 
   @@unique([instituteId, name])
   @@index([instituteId])
+  @@index([languageId])
   @@map("projects")
 }
 
@@ -364,6 +387,10 @@ model CareerLibraryEntry {
   aiResilienceGrade   AiResilienceGrade
   aiResilienceComment String
   oneLineDescription  String
+  // Longer-form editorial fields from the source workbook (yellow columns): a full
+  // role write-up and the key skill requirements (comma-separated list in the source).
+  roleOverview        String?
+  keySkills           String[]
   topCompanies        String[]
 
   // Raw range text is always kept (source data includes non-numeric values like
@@ -377,9 +404,14 @@ model CareerLibraryEntry {
   salaryGlobalMaxUSD    Float?
 
   // Three distinct qualification levels, matching the source "Career Library" sheet.
-  qualification10th12th   String
-  qualificationGraduation String?
-  qualificationPG         String?
+  // Each has a raw column plus a cleaned/normalized "DEFINED" variant (yellow columns in
+  // the workbook); `qualification10th12thExplanation` is the "10+2 Explanation" note.
+  qualification10th12th            String
+  qualification10th12thExplanation String?
+  qualificationGraduation          String?
+  qualificationGraduationDefined   String?
+  qualificationPG                  String?
+  qualificationPGDefined           String?
 
   // UG-level: full descriptive text plus a cleaned/short list (the latter is the join
   // key against UgEntranceExam.examName). PG-level exams are a separate list.

@@ -5,7 +5,7 @@ import type { PrismaClient } from "@prisma/client";
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 
-// Data source: "Career Library_Updated_0508.xlsx", exported to JSON by
+// Data source: "docs/Career Library_Updated_1808.xlsx", exported to JSON by
 // scripts/export-career-library.py (rerun that script if the workbook changes).
 const IMPORT_LABEL = "seed:career-library-import";
 
@@ -21,6 +21,8 @@ interface CareerLibraryRow {
   aiResilienceGrade: "LOW" | "MEDIUM" | "HIGH" | "VERY_HIGH";
   aiResilienceComment: string;
   oneLineDescription: string;
+  roleOverview: string | null;
+  keySkills: string[];
   topCompanies: string[];
   salaryIndiaRangeText: string | null;
   salaryIndiaMinLPA: number | null;
@@ -29,10 +31,13 @@ interface CareerLibraryRow {
   salaryGlobalMinUSD: number | null;
   salaryGlobalMaxUSD: number | null;
   qualification10th12th: string;
+  qualification10th12thExplanation: string | null;
   qualificationGraduation: string | null;
+  qualificationGraduationDefined: string | null;
   entranceExamsUGDescription: string | null;
   entranceExams: string[];
   qualificationPG: string | null;
+  qualificationPGDefined: string | null;
   entranceExamsPG: string[];
   certificationsStudent: string[];
   certificationsUG: string[];

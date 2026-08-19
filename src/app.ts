@@ -22,6 +22,7 @@ import { adminsRouter } from "./modules/admins/admins.routes.js";
 import { projectsRouter } from "./modules/projects/projects.routes.js";
 import { reportsRouter } from "./modules/reports/reports.routes.js";
 import { cohortsRouter } from "./modules/cohorts/cohorts.routes.js";
+import { languagesRouter } from "./modules/languages/languages.routes.js";
 import { formsRouter } from "./modules/forms/forms.routes.js";
 import { assessmentRouter } from "./modules/assessment/assessment.routes.js";
 import { careerLibraryRouter } from "./modules/career-library/career-library.routes.js";
@@ -31,6 +32,7 @@ import { feedbackRouter } from "./modules/feedback/feedback.routes.js";
 import { sessionsRouter } from "./modules/sessions/sessions.routes.js";
 import { emailRouter } from "./modules/email/email.routes.js";
 import { docsRouter } from "./modules/docs/docs.routes.js";
+import { formatResponseDates } from "./common/middlewares/formatDates.js";
 
 export function createApp(): Express {
   const app = express();
@@ -44,6 +46,10 @@ export function createApp(): Express {
   );
   app.use(express.json());
   app.use(cookieParser());
+
+  // Render user-facing date/time fields in a generic display format ("01 Aug 2026",
+  // "01 Aug 2026 14:30" IST) across all responses. See formatDates.ts for the field list.
+  app.use(formatResponseDates());
 
   app.use("/health", healthRouter);
   app.use("/api/v1/auth", authRouter);
@@ -65,6 +71,7 @@ export function createApp(): Express {
   app.use("/api/v1/feedback", feedbackRouter);
   app.use("/api/v1/reports", reportsRouter);
   app.use("/api/v1/cohorts", cohortsRouter);
+  app.use("/api/v1/languages", languagesRouter);
   app.use("/api/v1/sessions", sessionsRouter);
   app.use("/api/v1/email", emailRouter);
   app.use("/docs", docsRouter);

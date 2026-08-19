@@ -88,13 +88,14 @@ enforced by `blockViewOnlyWrites`).
 | GET | `/api/v1/admins` | List App Admins (newest first). Query: `role?`. |
 | GET | `/api/v1/admins/{id}` | Get one App Admin. **404 for any non-admin user id** (role-scoped). |
 | PATCH | `/api/v1/admins/{id}` | Update `firstName?, lastName?, role?, isActive?`. `role` flips `ADMIN` ↔ `VIEW_ONLY_ADMIN`; `isActive:false` deactivates the login. |
+| POST | `/api/v1/admins/{id}/regenerate-password` | Mint a fresh temporary password for an App Admin. Returns `{ admin, tempPassword }` — the new plaintext password is shown **once** (never stored in the clear) and `mustChangePassword` is set. 404 for a non-admin id. |
 | DELETE | `/api/v1/admins/{id}` | Delete an App Admin (they own no dependent records). 404 for a non-admin id. |
 
 ## Institutes
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/institutes` | Create an institute. Body: `name, address, contactNumber (E.164), primaryEmail`. All unique. |
+| POST | `/api/v1/institutes` | Create an institute. Body: `name, address?, contactNumber (E.164), primaryEmail` (`address` optional, stored as `""` when omitted). Name/contactNumber/primaryEmail unique. |
 | GET | `/api/v1/institutes` | List all institutes. |
 | GET | `/api/v1/institutes/{id}` | Get one institute, including its classes/divisions. |
 | PATCH | `/api/v1/institutes/{id}` | Update an institute (partial body, same fields as create). |
@@ -115,6 +116,16 @@ FKs, for now. Only `CLASS_9_10` exists today. No CRUD yet — cohorts are manage
 |---|---|---|
 | GET | `/api/v1/cohorts` | List active cohorts (`{ id, code, name, displayOrder }`), ordered by `displayOrder`. Staff. |
 
+## Languages
+
+Read-only lookup for the language a project is delivered in (populates the project-creation
+language dropdown). `English` is seeded as the default (`isDefault: true`) and is the only
+option today — more can be added via seed. No CRUD yet.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/languages` | List active languages (`{ id, code, name, isDefault, displayOrder }`), ordered by `displayOrder`. Staff. |
+
 ## Projects
 
 A counselling cycle/cohort run for an institute — students, forms, assessments, sessions
@@ -122,10 +133,10 @@ are all scoped to a Project. Reads = staff; writes/management = admin.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/projects` | Create a project. Body: `instituteId, name, fromDate, toDate, status?` (`ACTIVE`\|`CLOSED`, default `ACTIVE`). 400 if `instituteId` is unknown or `fromDate > toDate`; 409 on a duplicate `name` within the same institute. |
+| POST | `/api/v1/projects` | Create a project. Body: `instituteId, name, fromDate, toDate, status?` (`ACTIVE`\|`CLOSED`, default `ACTIVE`), `languageId?` (from `GET /languages`; **omitted → defaults to English**). 400 if `instituteId`/`languageId` is unknown or `fromDate > toDate`; 409 on a duplicate `name` within the same institute. Responses include `language: { id, code, name }`. |
 | GET | `/api/v1/projects` | List projects (with institute + `_count` of students/counsellors/counsellorSlots). Query: `instituteId?, status?`. **No `status` → excludes soft-deleted** (returns `ACTIVE` + `CLOSED`); `status=DELETED` lists only soft-deleted; `status=ACTIVE`/`CLOSED` filter exactly. |
 | GET | `/api/v1/projects/{id}` | Get one project (any status, incl. `DELETED`). 404 if unknown. |
-| PATCH | `/api/v1/projects/{id}` | Update (partial): `name?, fromDate?, toDate?, status?` (`status` writable values are `ACTIVE`/`CLOSED` only — use DELETE/restore for `DELETED`). Re-validates the effective date window (400 if merged `fromDate > toDate`). `status:CLOSED` is the soft-close — the project-window gate then rejects student/parent submissions. |
+| PATCH | `/api/v1/projects/{id}` | Update (partial): `name?, fromDate?, toDate?, status?, languageId?` (`status` writable values are `ACTIVE`/`CLOSED` only — use DELETE/restore for `DELETED`). Re-validates the effective date window (400 if merged `fromDate > toDate`); 400 if `languageId` is unknown. `status:CLOSED` is the soft-close — the project-window gate then rejects student/parent submissions. |
 | DELETE | `/api/v1/projects/{id}` | **Soft-delete** — sets `status:DELETED` (reversible; **data is preserved**, no cascade). Returns the updated project (`200`). Hidden from the default list; its student/parent submissions are blocked (`reason:PROJECT_DELETED`). 404 if unknown. |
 | PATCH | `/api/v1/projects/{id}/restore` | **Restore** a soft-deleted project — always back to `status:ACTIVE` (prior status isn't tracked). Returns the updated project. 404 if unknown. |
 
@@ -133,7 +144,7 @@ are all scoped to a Project. Reads = staff; writes/management = admin.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/students` | Create a student. Also creates a linked `User` (role `STUDENT`) with a generated temp password, returned once in the response. Body: `firstName, lastName, email, mobile, whatsappNumber?, studentCode, projectId, divisionId, parentMobile, parentEmail, fatherName, fatherOccupation, fatherEmployer?, motherName, motherOccupation, motherEmployer?`. |
+| POST | `/api/v1/students` | Create a student. Also creates a linked `User` (role `STUDENT`) with a temp password (from the `password?` body field if given, otherwise generated; `mustChangePassword` set), returned once in the response. Body: `firstName, lastName, email, mobile, whatsappNumber?, studentCode, projectId, divisionId, parentMobile, parentEmail, fatherName?, fatherOccupation?, fatherEmployer?, motherName?, motherOccupation?, motherEmployer?` — the father/mother breakdown is optional (bulk imports may carry only a single parent contact); stored as `""` when omitted. |
 | GET | `/api/v1/students` | List students. Query: `projectId?, divisionId?, workflowStatus?`. |
 | GET | `/api/v1/students/{id}` | Get one student (with user, project, division). Includes `workflowStatus`. |
 | PATCH | `/api/v1/students/{id}` | Update a student (partial body; validates `divisionId` still belongs to the student's project institute if changed). |
@@ -148,7 +159,7 @@ Admin-managed CRUD for counsellor accounts (each backed by a `User` with role
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/counsellors` | Create a counsellor. Also creates a linked `User` (role `COUNSELLOR`) with a generated temp password, returned once. Body: `firstName, lastName, email, mobile, counsellorCode, instituteId, projectIds?`. 400 if `instituteId` is unknown or any `projectId` isn't under that institute; 409 on duplicate `email`/`mobile`/`counsellorCode`. |
+| POST | `/api/v1/counsellors` | Create a counsellor. Also creates a linked `User` (role `COUNSELLOR`) with a temp password (from the `password?` body field if given — e.g. carried in an import sheet — otherwise generated), returned once. `mustChangePassword` is set so it's changed at first login. Body: `firstName, lastName, email, mobile, counsellorCode, password?, instituteId, projectIds?`. 400 if `instituteId` is unknown or any `projectId` isn't under that institute; 409 on duplicate `email`/`mobile`/`counsellorCode`. |
 | GET | `/api/v1/counsellors` | List counsellors (with user, institute, assigned projects). Query: `instituteId?, projectId?` (filters to counsellors assigned to that project). |
 | GET | `/api/v1/counsellors/{id}` | Get one counsellor. 404 if unknown. |
 | PATCH | `/api/v1/counsellors/{id}` | Update. Body (partial): `firstName?, lastName?, mobile?, isActive?`. `isActive:false` deactivates the login without deleting. |
@@ -253,7 +264,7 @@ dual-written during the transition — see `docs/career-library-normalization-sp
 | GET | `/api/v1/career-library/entrance-exams` | **Typeahead dropdown.** Canonical entrance exams. Query: `search?`, `level?` (`UG`\|`PG`), `limit?` (default 50). |
 | GET | `/api/v1/career-library/institutions` | **Typeahead dropdown.** Canonical institutions/colleges. Query: `search?`, `limit?`. |
 | GET | `/api/v1/career-library/courses` | **Typeahead dropdown.** Canonical courses. Query: `search?`, `level?`, `limit?`. |
-| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `domainId` (a live `CareerDomain` leaf — cluster/industry are derived from it; 400 if unknown or soft-deleted), `jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields, `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name). Returns the assembled entry. `createdBy` = calling admin. |
+| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `domainId` (a live `CareerDomain` leaf — cluster/industry are derived from it; 400 if unknown or soft-deleted), `jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields (incl. `qualification10th12thExplanation`, `qualificationGraduationDefined`, `qualificationPGDefined`), `roleOverview`, `keySkills` (string list), `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name). Returns the assembled entry. `createdBy` = calling admin. |
 | PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` toggle). A provided link array **replaces** that entry's links; omitting it leaves them unchanged. 400 on an unknown link `id`. Sets `updatedBy`. 404 if not found. |
 | DELETE | `/api/v1/career-library/{id}` | **Admin.** Delete an entry (cascades its links; first detaches any request's `resultingEntryId`). 404 if not found. |
 | GET | `/api/v1/career-library/{id}` | Get one entry. Includes the `domain` chain (`domain.industry.cluster`), the curated normalized links `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions`, plus the legacy broad value-match view `relatedInstitutions` (by `domain.industry.name`) / `relatedCourses` (by `domain.industry.cluster.name`) / `relatedEntranceExams` (kept during transition). 404 if not found. |

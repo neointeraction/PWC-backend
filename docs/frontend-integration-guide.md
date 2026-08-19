@@ -175,7 +175,20 @@ highlighting which form fields are missing).
 
 - **IDs** are `cuid`s (opaque strings like `"cmsegbt740000v0t3mleia6yv"`), not
   sequential integers. Never parse or assume structure — treat as opaque.
-- **Timestamps** are ISO 8601 strings (`"2026-08-05T13:26:24.340Z"`).
+- **Dates & times** come in two flavours:
+  - **User-facing date/time fields** are pre-formatted for display, in **IST
+    (Asia/Kolkata)**, so you can render them as-is:
+    - calendar dates → `"01 Aug 2026"` (fields: `slotDate`, `scheduledDate`,
+      `rescheduledFromDate`, `fromDate`, `toDate`)
+    - instants → `"01 Aug 2026 14:30"` (24-hour clock; fields: `studentJoinedAt`,
+      `counsellorJoinedAt`, `submittedAt`, `startedAt`, `finalizedAt`, `generatedAt`,
+      `reviewedAt`, `overriddenAt`)
+  - **Audit timestamps** (`createdAt`, `updatedAt`) and token expiries stay **ISO 8601
+    UTC** (`"2026-08-05T13:26:24.340Z"`) — parse these if you need to sort/compute.
+  - **On the way in**, date inputs still accept ISO `"YYYY-MM-DD"`; the session
+    booking/reschedule endpoints *also* accept the display form `"01 Aug 2026"`, so a
+    slot taken straight from a booking-options response can be sent back unchanged.
+    Session times (`startTime`/`endTime`) remain `"HH:mm"` 24-hour strings.
 - **Phone numbers** must be E.164 format on the way in (`+919876543210`) — the API
   rejects anything else with a 400.
 - **Enums** are UPPER_SNAKE_CASE strings — see each module's enum list below. Match
@@ -227,9 +240,13 @@ Base path: `/api/v1/institutes`
 ```
 `GET /{id}` additionally nests `classes: [{ ...class, divisions: [...] }]`.
 
-**Note**: there's no `Project` endpoint yet (see §13), but `Student.projectId`
-references one — for now, get a project ID from whoever seeds/creates it directly in
-the DB, or wait for the Project module.
+**Note**: Project CRUD now exists (`/api/v1/projects` — see `docs/api-list.md`).
+Each project has a **delivery language**: `POST /projects` accepts an optional
+`languageId`, and **omitting it defaults to English** — the only language seeded today.
+Populate the picker from `GET /api/v1/languages` (staff; returns
+`{ id, code, name, isDefault, displayOrder }`), and project responses include
+`language: { id, code, name }`. Selecting a non-English language is wired end-to-end but
+there's only English to choose for now.
 
 ---
 
@@ -472,7 +489,7 @@ inclusive — writes stay open through the whole of the end date and close the n
 they return **403**:
 ```json
 { "error": { "message": "This project has ended — submissions are closed (ended 2025-12-31).",
-  "details": { "reason": "PROJECT_EXPIRED", "projectId": "...", "toDate": "2025-12-31T00:00:00.000Z", "status": "CLOSED" } } }
+  "details": { "reason": "PROJECT_EXPIRED", "projectId": "...", "toDate": "31 Dec 2025", "status": "CLOSED" } } }
 ```
 `reason` is `PROJECT_EXPIRED` (past `toDate`), `PROJECT_CLOSED` (manually closed), or
 `PROJECT_DELETED` (soft-deleted). Show
@@ -514,7 +531,7 @@ to send/remind the parent's pre-counselling or feedback link.
 {
   "studentId": "cm...",
   "forms": {
-    "preCounsellingStudent": { "submitted": true,  "submittedAt": "2026-08-05T..." },
+    "preCounsellingStudent": { "submitted": true,  "submittedAt": "05 Aug 2026 18:56" },
     "preCounsellingParent":  { "submitted": false, "submittedAt": null },
     "feedbackStudent":       { "submitted": false, "submittedAt": null },
     "feedbackParent":        { "submitted": false, "submittedAt": null }
@@ -586,7 +603,7 @@ attempt for this cohort — the assessment can only be taken once.
   "studentId": "cm...",
   "cohort": "CLASS_9_10",
   "status": "IN_PROGRESS",
-  "startedAt": "2026-08-05T...",
+  "startedAt": "05 Aug 2026 18:56",
   "submittedAt": null,
   "answers": []
 }
@@ -730,6 +747,8 @@ defaults to `20` (max `100` — requesting more returns 400).
       "aiResilienceGrade": "MEDIUM",
       "aiResilienceComment": "...",
       "oneLineDescription": "...",
+      "roleOverview": "In this role, a Data Scientist builds predictive models and extracts insights ...",
+      "keySkills": ["Data Analysis & Statistical Reasoning", "Analytical & Problem-Solving Skills", "..."],
       "topCompanies": ["Google", "Amazon", "..."],
       "salaryIndiaRangeText": "₹6–25 LPA",
       "salaryIndiaMinLPA": 6,
@@ -738,8 +757,11 @@ defaults to `20` (max `100` — requesting more returns 400).
       "salaryGlobalMinUSD": 70000,
       "salaryGlobalMaxUSD": 160000,
       "qualification10th12th": "12th (PCM/Commerce with Maths)",
+      "qualification10th12thExplanation": "Minimum aggregate as per the respective institution's admission norms",
       "qualificationGraduation": "Graduation in CS/IT/Maths/Statistics.",
+      "qualificationGraduationDefined": "BTech / BSc / BCA / Statistics / Maths, Recommended focus: ...",
       "qualificationPG": "...",
+      "qualificationPGDefined": "MSc Data Science, MBA Business Analytics, MTech Data Science, ...",
       "entranceExamsUGDescription": "...",
       "entranceExams": ["BITSAT", "CUET UG", "JEE Main"],
       "entranceExamsPG": ["GATE", "CAT/XAT"],
@@ -851,7 +873,7 @@ slots imported. `400` if any `counsellorId` isn't assigned to the project via
 open `{ slotDate, startTime, endTime }` combos across the student's project. **No
 counsellor is shown or returned** — that's the point of blind booking.
 ```json
-[{ "slotDate": "2026-08-20T00:00:00.000Z", "startTime": "16:00", "endTime": "16:45" }]
+[{ "slotDate": "20 Aug 2026", "startTime": "16:00", "endTime": "16:45" }]
 ```
 
 ### 10.3 Session 2 preview (locked to Session 1's counsellor)

@@ -12,3 +12,5 @@ Reminder scheduler (cron)	The 41 email templates all work (you just previewed th
 
 No FKs — FormTemplate.cohort / AssessmentQuestion.cohort / AssessmentAttempt.cohort stay plain strings matching Cohort.code. The table is a decoupled source of truth; converting those columns to relations is deferred.
 No Project↔Cohort link and no Student.cohort — that's the real multi-cohort work (students need to carry their cohort since forms/assessments are cohort-specific), deferred until you actually onboard a second cohort. Both the db-design doc and the schema comment record this decision so the next person knows why it's decoupled.
+
+New@123456

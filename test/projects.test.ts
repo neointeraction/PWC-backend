@@ -11,6 +11,13 @@ let divisionId: string;
 
 describe("Projects API", () => {
   beforeAll(async () => {
+    // Project creation resolves the default language (English); ensure it exists.
+    await prisma.language.upsert({
+      where: { code: "en" },
+      update: { isDefault: true, isActive: true },
+      create: { code: "en", name: "English", isDefault: true, displayOrder: 1 },
+    });
+
     const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Projects",
       address: "1 Proj St",
@@ -45,6 +52,8 @@ describe("Projects API", () => {
     expect(res.body.status).toBe("ACTIVE");
     expect(res.body.institute.id).toBe(instituteId);
     expect(res.body._count.students).toBe(0);
+    // Defaults to English when no languageId is supplied.
+    expect(res.body.language.code).toBe("en");
   });
 
   it("rejects a bad date order with 400", async () => {

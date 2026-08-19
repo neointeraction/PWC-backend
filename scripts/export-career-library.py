@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-One-off export: reads "Career Library_Updated_0508.xlsx" and writes clean JSON per
-tab into prisma/seed-data/career-library/, for prisma/seed.ts to load.
+One-off export: reads the "Career Library" workbook and writes clean JSON per tab into
+prisma/seed-data/career-library/, for prisma/seed.ts to load.
+
+All tabs are sourced from the latest workbook ("docs/Career Library_Updated_1808.xlsx").
+Versus the earlier 0508 workbook, 1808 added the CL yellow columns (10+2 explanation, the
+"DEFINED" graduation/PG qualifications, role overview, key skills) — shifting CL's column
+order — and dropped two columns from "UG Institutions_IND" ("Programmes Offered After
+Class 12" and "Key Programmes Offered", now unpopulated). The other reference tabs kept
+their layout. The column indices in each exporter below match the 1808 workbook.
 
 Ignores the "Post-12_Entrance_Exams__India__" tab per instruction (out of scope).
 Not part of the app's runtime — rerun manually if the source workbook changes.
@@ -13,7 +20,7 @@ from pathlib import Path
 import openpyxl
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "Career Library_Updated_0508.xlsx"
+SRC = ROOT / "docs" / "Career Library_Updated_1808.xlsx"
 OUT_DIR = ROOT / "prisma" / "seed-data" / "career-library"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -84,6 +91,10 @@ AI_GRADE_MAP = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH", "very high": "
 
 
 def export_career_library(wb):
+    # Column layout of the 1808 workbook's "CL" tab (0-based). The yellow columns added
+    # since 0508 — 10+2 explanation (L), the "DEFINED" graduation (N) and PG (R)
+    # qualifications, role overview (W), and key skills (X) — shifted the later columns,
+    # so these indices differ from the previous export.
     ws = wb["CL"]
     out = []
     skipped = 0
@@ -107,6 +118,8 @@ def export_career_library(wb):
                 "aiResilienceGrade": AI_GRADE_MAP.get(ai_grade_raw.lower(), "MEDIUM"),
                 "aiResilienceComment": s(r[5]) or "",
                 "oneLineDescription": s(r[6]) or "",
+                "roleOverview": s(r[22]),  # W: Role Overview & Scope
+                "keySkills": split_list(r[23]),  # X: Key Skill Requirements (comma-separated)
                 "topCompanies": split_list(r[7]),
                 "salaryIndiaRangeText": s(r[8]),
                 "salaryIndiaMinLPA": india_min,
@@ -114,15 +127,18 @@ def export_career_library(wb):
                 "salaryGlobalRangeText": s(r[9]),
                 "salaryGlobalMinUSD": global_min,
                 "salaryGlobalMaxUSD": global_max,
-                "qualification10th12th": qual_10_12,
-                "qualificationGraduation": s(r[11]),
-                "entranceExamsUGDescription": s(r[12]),
-                "entranceExams": [EXAM_ALIASES.get(t, t) for t in split_list(r[13])],
-                "qualificationPG": s(r[14]),
-                "entranceExamsPG": split_list(r[15]),
-                "certificationsStudent": split_list(r[16], ";"),
-                "certificationsUG": split_list(r[17], ";"),
-                "topCourses": split_list(r[18]),
+                "qualification10th12th": qual_10_12,  # K
+                "qualification10th12thExplanation": s(r[11]),  # L: 10+2 Explanation
+                "qualificationGraduation": s(r[12]),  # M
+                "qualificationGraduationDefined": s(r[13]),  # N: Grad qualification DEFINED
+                "entranceExamsUGDescription": s(r[14]),  # O
+                "entranceExams": [EXAM_ALIASES.get(t, t) for t in split_list(r[15])],  # P: extracted
+                "qualificationPG": s(r[16]),  # Q
+                "qualificationPGDefined": s(r[17]),  # R: PG qualification DEFINED
+                "entranceExamsPG": split_list(r[18]),  # S
+                "certificationsStudent": split_list(r[19], ";"),  # T
+                "certificationsUG": split_list(r[20], ";"),  # U
+                "topCourses": split_list(r[21]),  # V
             }
         )
     print(f"CL: {len(out)} rows exported, {skipped} skipped (missing required field)")
@@ -130,6 +146,9 @@ def export_career_library(wb):
 
 
 def export_ug_institutions(wb):
+    # 1808 layout (14 cols). The 0508 columns "Programmes Offered After Class 12" and
+    # "Key Programmes Offered" were removed, shifting the tail left; those two model
+    # fields are now left null.
     ws = wb["UG Institutions_IND"]
     out = []
     for r in ws.iter_rows(min_row=2, values_only=True):
@@ -147,14 +166,14 @@ def export_ug_institutions(wb):
                 "type": s(r[5]),
                 "category": s(r[6]),
                 "programmesOffered": s(r[7]),
-                "programmesOfferedAfterClass12": s(r[8]),
-                "keyProgrammesOffered": s(r[9]),
-                "primaryEntranceExams": s(r[10]),
-                "nirfRanking": s(r[11]),
-                "otherRankings": s(r[12]),
-                "approxAnnualFee": s(r[13]),
-                "approxPlacementCtc": s(r[14]),
-                "website": s(r[15]),
+                "programmesOfferedAfterClass12": None,  # column removed in 1808 workbook
+                "keyProgrammesOffered": None,  # column removed in 1808 workbook
+                "primaryEntranceExams": s(r[8]),
+                "nirfRanking": s(r[9]),
+                "otherRankings": s(r[10]),
+                "approxAnnualFee": s(r[11]),
+                "approxPlacementCtc": s(r[12]),
+                "website": s(r[13]),
             }
         )
     print(f"UG Institutions_IND: {len(out)} rows exported")

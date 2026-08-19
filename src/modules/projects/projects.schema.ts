@@ -14,6 +14,9 @@ export const createProjectSchema = z
     fromDate: z.coerce.date(),
     toDate: z.coerce.date(),
     status: projectStatusSchema.optional(),
+    // Delivery language. Optional for now — omitting it defaults to English (the seeded
+    // default). Wired ahead of the UI that will let admins pick another language.
+    languageId: z.string().cuid().optional(),
   })
   .refine((d) => d.fromDate <= d.toDate, {
     message: "fromDate must be on or before toDate",
@@ -28,6 +31,7 @@ export const updateProjectSchema = z.object({
   fromDate: z.coerce.date().optional(),
   toDate: z.coerce.date().optional(),
   status: projectStatusSchema.optional(),
+  languageId: z.string().cuid().optional(),
 });
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
 

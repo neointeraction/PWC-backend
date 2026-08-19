@@ -1202,6 +1202,18 @@ registry.registerPath({
   },
 });
 
+// --- Languages ---
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/languages",
+  tags: ["Languages"],
+  summary: "List active languages (read-only lookup for the project-creation dropdown). Staff.",
+  responses: {
+    200: { description: "Active languages, in display order (English is the default)", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
 // --- Reports ---
 
 registry.registerPath({

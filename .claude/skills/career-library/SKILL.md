@@ -76,9 +76,16 @@ exists **and** the weight row exists for its industry/domain. See the
 ## Re-import from the source workbook
 
 ```bash
-python3 scripts/export-career-library.py   # "Career Library_Updated_0508.xlsx" → prisma/seed-data/career-library/*.json
+python3 scripts/export-career-library.py   # all tabs of "docs/Career Library_Updated_1808.xlsx" → *.json
 pnpm db:seed                                # loads the JSON via prisma/seed.ts
 ```
+
+All tabs are exported from `docs/Career Library_Updated_1808.xlsx`. The CL tab carries
+the yellow columns (`roleOverview`, `keySkills`, `qualification10th12thExplanation`, and
+the `*Defined` qualification variants). Note 1808's `UG Institutions_IND` tab dropped two
+columns vs. the older 0508 workbook, so `UgInstitution.programmesOfferedAfterClass12` /
+`keyProgrammesOffered` are exported as null. Each exporter's column indices match 1808;
+re-check them if the workbook layout changes again.
 
 Unlike the assessment reference data (`.ts`), the library is seeded **into the
 database** as JSON, so a re-import needs a re-seed, not just a rebuild.
