@@ -14,15 +14,18 @@ export const createStudentSchema = z.object({
   mobile: phoneSchema,
   whatsappNumber: phoneSchema.optional(),
   studentCode: z.string().trim().min(1), // admin-generated login id, e.g. "CB1"
+  password: z.string().min(1).optional(), // temp password from the import sheet; generated if omitted
   projectId: z.string().cuid(),
   divisionId: z.string().cuid(),
   parentMobile: phoneSchema,
   parentEmail: emailSchema,
-  fatherName: z.string().trim().min(1),
-  fatherOccupation: z.string().trim().min(1),
+  // Parent/guardian breakdown is optional — bulk imports may carry only a single
+  // "parent" contact. Stored as "" when omitted (columns are NOT NULL).
+  fatherName: z.string().trim().min(1).optional(),
+  fatherOccupation: z.string().trim().min(1).optional(),
   fatherEmployer: z.string().trim().min(1).optional(),
-  motherName: z.string().trim().min(1),
-  motherOccupation: z.string().trim().min(1),
+  motherName: z.string().trim().min(1).optional(),
+  motherOccupation: z.string().trim().min(1).optional(),
   motherEmployer: z.string().trim().min(1).optional(),
 });
 export type CreateStudentInput = z.infer<typeof createStudentSchema>;

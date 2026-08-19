@@ -44,7 +44,9 @@ async function assertDivisionBelongsToProject(divisionId: string, projectId: str
 export async function createStudent(input: CreateStudentInput) {
   await assertDivisionBelongsToProject(input.divisionId, input.projectId);
 
-  const tempPassword = generateTempPassword();
+  // Bulk imports may carry the temp password in the sheet; otherwise generate one.
+  // Either way mustChangePassword defaults to true, so it's changed at first login.
+  const tempPassword = input.password ?? generateTempPassword();
   const passwordHash = await argon2.hash(tempPassword);
 
   try {
@@ -69,11 +71,12 @@ export async function createStudent(input: CreateStudentInput) {
           whatsappNumber: input.whatsappNumber,
           parentMobile: input.parentMobile,
           parentEmail: input.parentEmail,
-          fatherName: input.fatherName,
-          fatherOccupation: input.fatherOccupation,
+          // Optional in the API; the columns are NOT NULL so default to "".
+          fatherName: input.fatherName ?? "",
+          fatherOccupation: input.fatherOccupation ?? "",
           fatherEmployer: input.fatherEmployer,
-          motherName: input.motherName,
-          motherOccupation: input.motherOccupation,
+          motherName: input.motherName ?? "",
+          motherOccupation: input.motherOccupation ?? "",
           motherEmployer: input.motherEmployer,
         },
         include: studentInclude,

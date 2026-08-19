@@ -41,6 +41,14 @@ adminsRouter.patch(
   asyncHandler(adminsController.updateAdmin)
 );
 
+// Mint a fresh temporary password for an App Admin — returns it once.
+adminsRouter.post(
+  "/:id/regenerate-password",
+  ...requireSuperAdmin,
+  validate({ params: adminIdParamsSchema }),
+  asyncHandler(adminsController.regenerateAdminPassword)
+);
+
 adminsRouter.delete(
   "/:id",
   ...requireSuperAdmin,

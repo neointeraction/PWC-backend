@@ -47,7 +47,9 @@ export async function createCounsellor(input: CreateCounsellorInput) {
   const projectIds = input.projectIds ?? [];
   await assertProjectsBelongToInstitute(projectIds, input.instituteId);
 
-  const tempPassword = generateTempPassword();
+  // Import sheets may carry the temp password; otherwise generate one. mustChangePassword
+  // defaults to true either way, so it's changed at first login.
+  const tempPassword = input.password ?? generateTempPassword();
   const passwordHash = await argon2.hash(tempPassword);
 
   try {

@@ -7,6 +7,7 @@ export const createCounsellorSchema = z.object({
   email: emailSchema,
   mobile: phoneSchema,
   counsellorCode: z.string().trim().min(1), // admin-generated login id, e.g. "CN1"
+  password: z.string().min(1).optional(), // temp password from the import sheet; generated if omitted
   instituteId: z.string().cuid(),
   // Optional: assign to these projects on creation (each must belong to the institute).
   projectIds: z.array(z.string().cuid()).optional(),

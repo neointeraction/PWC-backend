@@ -21,6 +21,11 @@ export async function updateAdmin(req: Request, res: Response): Promise<void> {
   res.status(200).json(admin);
 }
 
+export async function regenerateAdminPassword(req: Request, res: Response): Promise<void> {
+  const result = await adminsService.regenerateAdminPassword(req.params.id as string);
+  res.status(200).json(result);
+}
+
 export async function deleteAdmin(req: Request, res: Response): Promise<void> {
   await adminsService.deleteAdmin(req.params.id as string);
   res.status(204).send();

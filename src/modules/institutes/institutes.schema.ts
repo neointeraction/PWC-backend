@@ -3,7 +3,8 @@ import { emailSchema, phoneSchema } from "../../common/validators/shared.js";
 
 export const createInstituteSchema = z.object({
   name: z.string().trim().min(1),
-  address: z.string().trim().min(1),
+  // Location/address is optional; stored as "" when omitted (column is NOT NULL).
+  address: z.string().trim().min(1).optional(),
   contactNumber: phoneSchema,
   primaryEmail: emailSchema,
 });

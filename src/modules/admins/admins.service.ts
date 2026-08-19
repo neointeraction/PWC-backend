@@ -85,6 +85,21 @@ export async function updateAdmin(id: string, input: UpdateAdminInput) {
   }
 }
 
+// Super Admin mints a fresh temporary password for an App Admin. Returns the new
+// plaintext password ONCE (never stored in the clear) so it can be shown/copied, and
+// flags mustChangePassword so it's treated as a temporary credential.
+export async function regenerateAdminPassword(id: string) {
+  await getAdminById(id); // 404 unless it's an App Admin
+  const tempPassword = generateTempPassword();
+  const passwordHash = await argon2.hash(tempPassword);
+  const admin = await prisma.user.update({
+    where: { id },
+    data: { passwordHash, mustChangePassword: true },
+    select: adminSelect,
+  });
+  return { admin, tempPassword };
+}
+
 export async function deleteAdmin(id: string) {
   await getAdminById(id); // 404 unless it's an App Admin
   // App admins own no dependent records (no Student/Counsellor profile); their refresh /

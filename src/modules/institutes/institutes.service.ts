@@ -10,7 +10,7 @@ import type {
 
 export async function createInstitute(input: CreateInstituteInput) {
   try {
-    return await prisma.institute.create({ data: input });
+    return await prisma.institute.create({ data: { ...input, address: input.address ?? "" } });
   } catch (err) {
     handlePrismaError(err);
   }
