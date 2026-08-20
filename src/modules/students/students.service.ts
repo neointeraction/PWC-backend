@@ -71,12 +71,12 @@ export async function createStudent(input: CreateStudentInput) {
           whatsappNumber: input.whatsappNumber,
           parentMobile: input.parentMobile,
           parentEmail: input.parentEmail,
-          // Optional in the API; the columns are NOT NULL so default to "".
+          // fatherName column is NOT NULL so default to ""; the others are nullable.
           fatherName: input.fatherName ?? "",
-          fatherOccupation: input.fatherOccupation ?? "",
+          fatherOccupation: input.fatherOccupation,
           fatherEmployer: input.fatherEmployer,
-          motherName: input.motherName ?? "",
-          motherOccupation: input.motherOccupation ?? "",
+          motherName: input.motherName,
+          motherOccupation: input.motherOccupation,
           motherEmployer: input.motherEmployer,
         },
         include: studentInclude,

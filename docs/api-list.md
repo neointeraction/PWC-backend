@@ -144,7 +144,7 @@ are all scoped to a Project. Reads = staff; writes/management = admin.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/students` | Create a student. Also creates a linked `User` (role `STUDENT`) with a temp password (from the `password?` body field if given, otherwise generated; `mustChangePassword` set), returned once in the response. Body: `firstName, lastName, email, mobile, whatsappNumber?, studentCode, projectId, divisionId, parentMobile, parentEmail, fatherName?, fatherOccupation?, fatherEmployer?, motherName?, motherOccupation?, motherEmployer?` — the father/mother breakdown is optional (bulk imports may carry only a single parent contact); stored as `""` when omitted. |
+| POST | `/api/v1/students` | Create a student. Also creates a linked `User` (role `STUDENT`) with a temp password (from the `password?` body field if given, otherwise generated; `mustChangePassword` set), returned once in the response. Body: `firstName, lastName, email, mobile, whatsappNumber?, studentCode, projectId, divisionId, parentMobile, parentEmail, fatherName?, fatherOccupation?, fatherEmployer?, motherName?, motherOccupation?, motherEmployer?` — the father/mother breakdown is optional (bulk imports may carry only a single parent contact); `fatherOccupation`, `motherName`, `motherOccupation` are stored as `null` when omitted (`fatherName` stored as `""`). |
 | GET | `/api/v1/students` | List students. Query: `projectId?, divisionId?, workflowStatus?`. |
 | GET | `/api/v1/students/{id}` | Get one student (with user, project, division). Includes `workflowStatus`. |
 | PATCH | `/api/v1/students/{id}` | Update a student (partial body; validates `divisionId` still belongs to the student's project institute if changed). |

@@ -279,10 +279,10 @@ model Student {
   parentEmail      String            @unique
   // Student Profile Form, Section B/C — captured separately per parent.
   fatherName       String
-  fatherOccupation String
+  fatherOccupation String?
   fatherEmployer   String?
-  motherName       String
-  motherOccupation String
+  motherName       String?
+  motherOccupation String?
   motherEmployer   String?
   academicYear     String? // e.g. "2025-26"; shown on the Counsellor Chart "Our Champion" panel
   workflowStatus   WorkflowStatus    @default(DRAFT)

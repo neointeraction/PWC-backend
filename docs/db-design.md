@@ -211,9 +211,10 @@ Extends `User` (role=STUDENT).
 | whatsappNumber | String? | optional, only if different from mobile |
 | parentMobile | String | unique, E.164; primary contact for session links/notifications (Student Profile Form, Section A) |
 | parentEmail | String | unique; primary contact, same as above |
-| fatherName, fatherOccupation | String | Student Profile Form, Section B |
+| fatherName | String | Student Profile Form, Section B |
+| fatherOccupation | String? | optional (bulk imports may omit) |
 | fatherEmployer | String? | optional ("if applicable") |
-| motherName, motherOccupation | String | Student Profile Form, Section C |
+| motherName, motherOccupation | String? | Student Profile Form, Section C; optional (bulk imports may omit) |
 | motherEmployer | String? | optional ("if applicable") |
 | workflowStatus | `WorkflowStatus` enum | see lifecycle below |
 
