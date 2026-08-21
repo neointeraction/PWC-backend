@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
-import { requireStaff, requireAdmin } from "../../common/middlewares/auth.js";
+import { requireStaff, requireAdmin, requireStudentOrStaff } from "../../common/middlewares/auth.js";
+import { ownStudentIdParam } from "../../common/middlewares/ownership.js";
 import * as studentsController from "./students.controller.js";
 import {
   createStudentSchema,
@@ -28,6 +29,14 @@ studentsRouter.get(
   asyncHandler(studentsController.listStudents)
 );
 
+// Student self-service: the logged-in student's own record. Declared before "/:id" so
+// "me" isn't parsed as an id. Staff may call it too (they'll just 404 — no Student row).
+studentsRouter.get(
+  "/me",
+  ...requireStudentOrStaff,
+  asyncHandler(studentsController.getMyStudent)
+);
+
 studentsRouter.get(
   "/:id",
   ...requireStaff,
@@ -49,10 +58,13 @@ studentsRouter.delete(
   asyncHandler(studentsController.deleteStudent)
 );
 
+// Student-facing: the student confirms their own profile (or staff on their behalf),
+// advancing the workflow DRAFT -> PROFILE_COMPLETED. Ownership-checked for students.
 studentsRouter.post(
   "/:id/confirm-profile",
-  ...requireStaff,
+  ...requireStudentOrStaff,
   validate({ params: studentIdParamsSchema }),
+  ownStudentIdParam,
   asyncHandler(studentsController.confirmProfile)
 );
 

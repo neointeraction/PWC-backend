@@ -133,7 +133,7 @@ are all scoped to a Project. Reads = staff; writes/management = admin.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/projects` | Create a project. Body: `instituteId, name, fromDate, toDate, status?` (`ACTIVE`\|`CLOSED`, default `ACTIVE`), `languageId?` (from `GET /languages`; **omitted → defaults to English**). 400 if `instituteId`/`languageId` is unknown or `fromDate > toDate`; 409 on a duplicate `name` within the same institute. Responses include `language: { id, code, name }`. |
+| POST | `/api/v1/projects` | Create a project. Body: `instituteId, name, fromDate, toDate, status?` (`ACTIVE`\|`CLOSED`, default `ACTIVE`), `languageId?` (from `GET /languages`; **omitted → defaults to English**). A human-readable `code` (`P0001`, `P0002`, …) is auto-generated and returned. 400 if `instituteId`/`languageId` is unknown or `fromDate > toDate`; 409 on a duplicate `name` within the same institute. Responses include `code` and `language: { id, code, name }`. |
 | GET | `/api/v1/projects` | List projects (with institute + `_count` of students/counsellors/counsellorSlots). Query: `instituteId?, status?`. **No `status` → excludes soft-deleted** (returns `ACTIVE` + `CLOSED`); `status=DELETED` lists only soft-deleted; `status=ACTIVE`/`CLOSED` filter exactly. |
 | GET | `/api/v1/projects/{id}` | Get one project (any status, incl. `DELETED`). 404 if unknown. |
 | PATCH | `/api/v1/projects/{id}` | Update (partial): `name?, fromDate?, toDate?, status?, languageId?` (`status` writable values are `ACTIVE`/`CLOSED` only — use DELETE/restore for `DELETED`). Re-validates the effective date window (400 if merged `fromDate > toDate`); 400 if `languageId` is unknown. `status:CLOSED` is the soft-close — the project-window gate then rejects student/parent submissions. |
@@ -144,13 +144,46 @@ are all scoped to a Project. Reads = staff; writes/management = admin.
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/students` | Create a student. Also creates a linked `User` (role `STUDENT`) with a temp password (from the `password?` body field if given, otherwise generated; `mustChangePassword` set), returned once in the response. Body: `firstName, lastName, email, mobile, whatsappNumber?, studentCode, projectId, divisionId, parentMobile, parentEmail, fatherName?, fatherOccupation?, fatherEmployer?, motherName?, motherOccupation?, motherEmployer?` — the father/mother breakdown is optional (bulk imports may carry only a single parent contact); `fatherOccupation`, `motherName`, `motherOccupation` are stored as `null` when omitted (`fatherName` stored as `""`). |
-| GET | `/api/v1/students` | List students. Query: `projectId?, divisionId?, workflowStatus?`. |
-| GET | `/api/v1/students/{id}` | Get one student (with user, project, division). Includes `workflowStatus`. |
+| POST | `/api/v1/students` | Create a student. Also creates a linked `User` (role `STUDENT`) with a temp password (from the `password?` body field if given, otherwise generated; `mustChangePassword` set), returned once in the response. Body: `firstName, lastName, email, mobile, whatsappNumber?, studentCode?, projectId, divisionId, parentMobile, parentEmail, fatherName?, fatherOccupation?, fatherEmployer?, motherName?, motherOccupation?, motherEmployer?` — `studentCode` is **auto-generated** (`S0001`, `S0002`, …) when omitted (supply it only to carry a legacy/import code); the father/mother breakdown is optional (bulk imports may carry only a single parent contact); `fatherOccupation`, `motherName`, `motherOccupation` are stored as `null` when omitted (`fatherName` stored as `""`). |
+| GET | `/api/v1/students` | List students, each with a computed **`stageInfo`** (see "Student stage & ageing" below). Query: `projectId?, divisionId?, workflowStatus?` plus the derived-stage/ageing filters `stage?` (derived-stage dropdown key) and `flagged?` (`true`/`false` — the 🚩 follow-up toggle). Staff only. |
+| GET | `/api/v1/students/me` | **Student self-service.** The logged-in student's own record (with user, project, division, `studentCode`, `workflowStatus`, contacts, and the active `cohort: { code, name }`). This is the entry point every student-facing page needs — it hands the frontend the `Student.id`, `projectId` and `cohort` that all downstream `:studentId`-keyed routes (forms, assessment, sessions) require. 404 for a non-student account (staff have no `Student` row). |
+| GET | `/api/v1/students/{id}` | Get one student (with user, project, division). Includes `workflowStatus`. Staff only — students read themselves via `/students/me`. |
 | PATCH | `/api/v1/students/{id}` | Update a student (partial body; validates `divisionId` still belongs to the student's project institute if changed). |
 | DELETE | `/api/v1/students/{id}` | Delete a student (deletes the linked `User` too, which cascades). Also releases any `CounsellorSlot` still `BOOKED` by the student's sessions back to `OPEN` before the cascade deletes those `Session` rows — otherwise the slot would be stranded (`ON DELETE SET NULL` clears its `sessionId` but not its `status`), permanently unbookable. |
-| POST | `/api/v1/students/{id}/confirm-profile` | Student confirms their profile data (father/mother details, parent contact) is correct. Advances `workflowStatus` `DRAFT → PROFILE_COMPLETED`. 409 if not currently `DRAFT`. |
+| POST | `/api/v1/students/{id}/confirm-profile` | Student confirms **their own** profile data (father/mother details, parent contact) is correct — or staff on their behalf (a student confirming another student's profile is `403`). Advances `workflowStatus` `DRAFT → PROFILE_COMPLETED`. 409 if not currently `DRAFT`. |
 | PATCH | `/api/v1/students/{id}/workflow-status` | Admin/ops override — sets `workflowStatus` directly (not forward-only, unlike the automatic triggers below). Body: `{ workflowStatus }`. Covers the stages not yet wired to a real trigger (Sessions, Counsellor Chart/Feedback, Reports don't exist as modules yet). |
+
+### Student stage & ageing (`stageInfo`)
+
+`GET /students`, `GET /students/{id}` and `GET /students/me` each attach a computed
+`stageInfo` — the **derived display stage** (finer-grained than `workflowStatus`; it splits
+the "— Student/— Parent" halves) plus **ageing** and the **🚩 follow-up flag**. It is
+computed live from existing data (form/assessment/session timestamps) and **never stored** —
+ageing changes with the clock, so persisting it would go stale. Implemented in
+`src/modules/students/studentStage.ts`.
+
+```jsonc
+"stageInfo": {
+  "stage": "PRE_COUNSELLING_STUDENT",     // derived-stage key (use as the `stage` filter)
+  "stageLabel": "Pre-Counselling — Student",
+  "stageEnteredAt": "2026-08-11T09:00:00.000Z", // the timestamp ageing is measured from
+  "ageDays": 4,                           // calendar days (IST) idle in this stage
+  "flagged": true,
+  "flagReason": "IDLE"                    // "IDLE" | "MISSED_SESSION" | null
+}
+```
+
+- **Idle flag** — set when the stage awaits a student/parent action and `ageDays` **>
+  2** calendar days (`AGEING_FLAG_THRESHOLD_DAYS`). Actionable stages: `LOGIN_ACTIVATED`,
+  `PROFILE_COMPLETED`, `PRE_COUNSELLING_STUDENT/PARENT`, `ASSESSMENT_PENDING`,
+  `ASSESSMENT_COMPLETED`, `FEEDBACK_STUDENT/PARENT`.
+- **Missed-session flag** — set when a booked session's date has passed while still
+  `SCHEDULED`, or the student was marked no-show. This is how the session stages surface a
+  flag; they are **never** ageing-flagged.
+- **Never flagged**: `SESSION_BOOKED` (except missed), `SESSION_1/2_COMPLETED`, the
+  counsellor-feedback stages, and `CLOSED` (staff-side or terminal).
+- **Filters**: `?stage=<key>` matches `stageInfo.stage`; `?flagged=true` returns only
+  flagged students (the admin follow-up list). Both are computed in the service, not SQL.
 
 ## Counsellors
 
@@ -159,7 +192,7 @@ Admin-managed CRUD for counsellor accounts (each backed by a `User` with role
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/counsellors` | Create a counsellor. Also creates a linked `User` (role `COUNSELLOR`) with a temp password (from the `password?` body field if given — e.g. carried in an import sheet — otherwise generated), returned once. `mustChangePassword` is set so it's changed at first login. Body: `firstName, lastName, email, mobile, counsellorCode, password?, instituteId, projectIds?`. 400 if `instituteId` is unknown or any `projectId` isn't under that institute; 409 on duplicate `email`/`mobile`/`counsellorCode`. |
+| POST | `/api/v1/counsellors` | Create a counsellor. Also creates a linked `User` (role `COUNSELLOR`) with a temp password (from the `password?` body field if given — e.g. carried in an import sheet — otherwise generated), returned once. `mustChangePassword` is set so it's changed at first login. Body: `firstName, lastName, email, mobile, counsellorCode?, password?, instituteId, projectIds?` — `counsellorCode` is **auto-generated** (`C0001`, `C0002`, …) when omitted (supply it only to carry a legacy/import code). 400 if `instituteId` is unknown or any `projectId` isn't under that institute; 409 on duplicate `email`/`mobile`/`counsellorCode`. |
 | GET | `/api/v1/counsellors` | List counsellors (with user, institute, assigned projects). Query: `instituteId?, projectId?` (filters to counsellors assigned to that project). |
 | GET | `/api/v1/counsellors/{id}` | Get one counsellor. 404 if unknown. |
 | PATCH | `/api/v1/counsellors/{id}` | Update. Body (partial): `firstName?, lastName?, mobile?, isActive?`. `isActive:false` deactivates the login without deleting. |

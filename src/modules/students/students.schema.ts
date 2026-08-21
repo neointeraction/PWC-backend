@@ -2,6 +2,7 @@ import type { WorkflowStatus } from "@prisma/client";
 import { z } from "zod";
 import { emailSchema, phoneSchema } from "../../common/validators/shared.js";
 import { WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
+import { DERIVED_STAGES } from "./studentStage.js";
 
 export const workflowStatusSchema = z.enum(
   WORKFLOW_STATUS_ORDER as [WorkflowStatus, ...WorkflowStatus[]]
@@ -13,7 +14,9 @@ export const createStudentSchema = z.object({
   email: emailSchema,
   mobile: phoneSchema,
   whatsappNumber: phoneSchema.optional(),
-  studentCode: z.string().trim().min(1), // admin-generated login id, e.g. "CB1"
+  // Auto-generated (S0001, S0002, ...) when omitted. Optional override kept for
+  // migrations/imports carrying a legacy code.
+  studentCode: z.string().trim().min(1).optional(),
   password: z.string().min(1).optional(), // temp password from the import sheet; generated if omitted
   projectId: z.string().cuid(),
   divisionId: z.string().cuid(),
@@ -55,6 +58,14 @@ export const listStudentsQuerySchema = z.object({
   projectId: z.string().cuid().optional(),
   divisionId: z.string().cuid().optional(),
   workflowStatus: workflowStatusSchema.optional(),
+  // Derived-stage dropdown (the "All Stages" filter) — finer-grained than workflowStatus.
+  stage: z.enum(DERIVED_STAGES).optional(),
+  // 🚩 toolbar toggle: `flagged=true` → only students needing follow-up. Query params are
+  // strings, so accept the literal "true"/"false" (z.coerce.boolean treats "false" as true).
+  flagged: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
 });
 export type ListStudentsQuery = z.infer<typeof listStudentsQuerySchema>;
 

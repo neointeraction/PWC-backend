@@ -256,13 +256,42 @@ Base path: `/api/v1/students`
 
 | Method | Path | Body / Query |
 |---|---|---|
-| POST | `/` | see below |
-| GET | `/` | query: `projectId?`, `divisionId?`, `workflowStatus?` |
-| GET | `/{id}` | — |
-| PATCH | `/{id}` | partial body, same fields as create minus `email`/`studentCode`/`projectId` (immutable) |
-| DELETE | `/{id}` | deletes the linked `User` too (cascades) — also releases any `CounsellorSlot` the student's sessions had booked back to `OPEN`, so deleting a student never strands a slot |
-| POST | `/{id}/confirm-profile` | no body — student confirms their profile data is correct |
+| POST | `/` | see below (admin) |
+| GET | `/me` | **student self-service — start here (§6.0)**; no params, resolves the caller from their token |
+| GET | `/` | query: `projectId?`, `divisionId?`, `workflowStatus?` (staff) |
+| GET | `/{id}` | staff only — students use `/me` |
+| PATCH | `/{id}` | partial body, same fields as create minus `email`/`studentCode`/`projectId` (immutable) (admin) |
+| DELETE | `/{id}` | deletes the linked `User` too (cascades) — also releases any `CounsellorSlot` the student's sessions had booked back to `OPEN`, so deleting a student never strands a slot (admin) |
+| POST | `/{id}/confirm-profile` | no body — the student confirms **their own** profile data is correct (or staff on their behalf); a student confirming another student's profile is 403 |
 | PATCH | `/{id}/workflow-status` | `{ workflowStatus }` — admin/ops override, see below |
+
+### 6.0 Student self-service: `GET /students/me` — the entry point for every student page
+
+A student's login (§2) returns only their **User** (`id`, `role`, `email`, name). But
+every student-facing route below — forms (§7), assessment (§8), sessions (§10) — is keyed
+off the **`Student.id`** (and needs `projectId` + `cohort`). `GET /students/me` bridges
+that gap: call it right after login (once `mustChangePassword` is cleared) to get the
+logged-in student's own record.
+
+```
+GET /api/v1/students/me      Authorization: Bearer <accessToken>
+```
+
+Response is the same nested student shape as `GET /{id}`, **plus** an active `cohort`:
+```json
+{
+  "id": "cm...",                     // ← the studentId every downstream route needs
+  "studentCode": "S0001",
+  "workflowStatus": "DRAFT",
+  "project": { "id": "cm...", "name": "...", "instituteId": "cm..." },
+  "division": { "id": "cm...", "name": "A", "class": { "id": "cm...", "name": "Grade 9", "instituteId": "cm..." } },
+  "user": { "id": "cm...", "email": "...", "firstName": "...", "lastName": "...", "isActive": true },
+  "cohort": { "code": "CLASS_9_10", "name": "Class 9 & 10" }
+}
+```
+Cache `id`, `project.id` and `cohort.code` in the client — pass `cohort.code` as the
+`cohort` query/body param wherever the forms and assessment routes ask for it. Called by a
+non-student account (staff) it returns **404** (staff have no `Student` row).
 
 **Create request** — all fields required unless marked optional:
 ```json
@@ -272,7 +301,6 @@ Base path: `/api/v1/students`
   "email": "aditi.rao@example.com",
   "mobile": "+919876500001",
   "whatsappNumber": "+919876500002",
-  "studentCode": "CB1",
   "projectId": "cm...",
   "divisionId": "cm...",
   "parentMobile": "+919876500003",
@@ -285,8 +313,9 @@ Base path: `/api/v1/students`
   "motherEmployer": "City Hospital"
 }
 ```
-`whatsappNumber`, `fatherEmployer`, `motherEmployer` are optional. Everything else is
-required.
+`whatsappNumber`, `fatherEmployer`, `motherEmployer` are optional. `studentCode` is
+**auto-generated** (`S0001`, `S0002`, …) — omit it (pass one only to carry a legacy/import
+code). Everything else is required.
 
 **Create response** — note the shape is `{ student, tempPassword }`, not just the
 student:
@@ -294,7 +323,7 @@ student:
 {
   "student": {
     "id": "cm...",
-    "studentCode": "CB1",
+    "studentCode": "S0001",
     "mobile": "+919876500001",
     "whatsappNumber": "+919876500002",
     "parentMobile": "+919876500003",
@@ -355,6 +384,43 @@ are built, **`PATCH /students/{id}/workflow-status`** (body: `{ "workflowStatus"
 student through them — this is an unrestricted admin/ops override (not forward-only
 like the automatic triggers), meant for manual ops use, not something to wire into a
 normal student/parent-facing UI.
+
+### 6.2 Stage, ageing & the 🚩 follow-up flag (`stageInfo`)
+
+`GET /students` (and `GET /students/{id}`, `GET /students/me`) attaches a computed
+`stageInfo` to each student. This is what backs the **Stage** column, the ageing 🚩, and
+the "All Stages" / flag filters. **Don't compute ageing on the client** — the backend owns
+the rule and returns the result.
+
+```jsonc
+"stageInfo": {
+  "stage": "PRE_COUNSELLING_STUDENT",     // derived-stage key — pass to the `stage` filter
+  "stageLabel": "Pre-Counselling — Student", // ready to render
+  "stageEnteredAt": "2026-08-11T09:00:00.000Z",
+  "ageDays": 4,                           // calendar days idle in this stage
+  "flagged": true,
+  "flagReason": "IDLE"                    // "IDLE" | "MISSED_SESSION" | null
+}
+```
+
+- `stage` is **finer than `workflowStatus`** — it splits `Pre-Counselling`/`Feedback` into
+  `_ — Student` / `_ — Parent` depending on which side has submitted. Render `stageLabel`
+  directly; use `stage` as the dropdown value.
+- Show the 🚩 purely from `flagged`. `flagReason` tells you *why* for the tooltip: `IDLE`
+  (student/parent idle > 2 calendar days on an actionable stage) or `MISSED_SESSION` (a
+  booked session's date passed uncompleted, or a no-show).
+- **Not every row can be flagged.** `SESSION_BOOKED`, `SESSION_1/2_COMPLETED`, the
+  counsellor-feedback stages and `CLOSED` always come back `flagged: false` unless there's
+  a missed session — they're waiting on a scheduled date or on staff, not idle students.
+
+**Filters** (combine with `projectId` / `divisionId`):
+- `GET /students?stage=PRE_COUNSELLING_STUDENT` — the "All Stages" dropdown. Valid keys:
+  `LOGIN_ACTIVATED`, `PROFILE_COMPLETED`, `PRE_COUNSELLING_STUDENT`,
+  `PRE_COUNSELLING_PARENT`, `ASSESSMENT_PENDING`, `ASSESSMENT_COMPLETED`, `SESSION_BOOKED`,
+  `SESSION_1_COMPLETED`, `COUNSELLOR_FEEDBACK_REPORT`, `SESSION_2_COMPLETED`,
+  `COUNSELLOR_FEEDBACK`, `FEEDBACK_STUDENT`, `FEEDBACK_PARENT`, `FEEDBACK_PENDING`,
+  `CLOSED`.
+- `GET /students?flagged=true` — the 🚩 toolbar toggle: only students needing follow-up.
 
 ---
 

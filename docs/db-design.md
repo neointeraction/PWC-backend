@@ -130,6 +130,22 @@ carry a language (see `Project`).
 | isDefault | Boolean | default false; exactly one row (English) is the default used when a project omits `languageId` |
 | displayOrder | Int | default 0; dropdown ordering |
 
+### `CodeSequence`
+Monotonic counters that back the human-readable entity codes: `Student.studentCode`
+(`S0001`), `Counsellor.counsellorCode` (`C0001`), `Project.code` (`P0001`). One row per
+entity type, keyed by `key` (`STUDENT` / `COUNSELLOR` / `PROJECT`); `value` is the last
+number issued. `nextCode()` (`src/common/utils/codeSequence.ts`) does an atomic
+row-locked increment and formats `${prefix}${zero-padded value}`. Callers pull the next
+code **inside the same `$transaction` as the entity create**, so a rolled-back create
+rolls back the increment too, keeping the sequence gap-free. The migration seeds each
+counter at the current row count. Padding is a minimum — numbers grow past it (`S10000`).
+
+| Field | Type | Notes |
+|---|---|---|
+| key | String | PK; `STUDENT` / `COUNSELLOR` / `PROJECT` |
+| value | Int | default 0; last number issued |
+| updatedAt | DateTime | auto |
+
 ### `Institute`
 The tenant. Onboarded by Super Admin.
 
@@ -154,6 +170,7 @@ A counselling cycle/cohort under an institute.
 | Field | Type | Notes |
 |---|---|---|
 | id | String (cuid) | PK |
+| code | String? | unique; auto-generated human-readable id, e.g. `P0001` (see `CodeSequence`). Nullable at the DB level (pre-code backfill / raw test fixtures), but the service always sets it on create, so API-created projects always carry one. |
 | instituteId | String | FK → Institute, cascade delete |
 | name | String | unique per institute |
 | fromDate, toDate | DateTime | cohort duration |
@@ -168,6 +185,7 @@ specific projects via `ProjectCounsellor`.
 |---|---|---|
 | id | String (cuid) | PK |
 | userId | String | FK → User, unique, cascade delete |
+| counsellorCode | String | unique; auto-generated login id, e.g. `C0001` (see `CodeSequence`), or a supplied legacy/import code |
 | instituteId | String | FK → Institute |
 | mobile | String | unique, E.164 |
 
@@ -204,7 +222,7 @@ Extends `User` (role=STUDENT).
 |---|---|---|
 | id | String (cuid) | PK |
 | userId | String | FK → User, unique, cascade delete |
-| studentCode | String | unique; admin-generated login id, e.g. "CB1" |
+| studentCode | String | unique; auto-generated login id, e.g. `S0001` (see `CodeSequence`), or a supplied legacy/import code |
 | projectId | String | FK → Project, cascade delete |
 | divisionId | String | FK → InstituteDivision |
 | mobile | String | unique, E.164 |

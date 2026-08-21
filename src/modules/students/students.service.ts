@@ -4,7 +4,9 @@ import type { WorkflowStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
+import { nextCode } from "../../common/utils/codeSequence.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
+import { computeStageInfo, stageRelationsInclude, type StudentForStage } from "./studentStage.js";
 import type {
   CreateStudentInput,
   ListStudentsQuery,
@@ -23,6 +25,17 @@ const studentInclude = {
 
 function generateTempPassword(): string {
   return crypto.randomBytes(12).toString("base64url");
+}
+
+// Attaches the derived stage + ageing/flag (computeStageInfo) to a student loaded with
+// `stageRelationsInclude`, and strips the raw child rows the resolver read — the response
+// carries the display relations (user/project/division) plus `stageInfo`, nothing heavier.
+function attachStageInfo<T extends StudentForStage>(student: T, now: Date) {
+  const { formSubmissions, assessmentAttempts, sessions, ...rest } = student;
+  void formSubmissions;
+  void assessmentAttempts;
+  void sessions;
+  return { ...rest, stageInfo: computeStageInfo(student, now) };
 }
 
 async function assertDivisionBelongsToProject(divisionId: string, projectId: string) {
@@ -61,10 +74,14 @@ export async function createStudent(input: CreateStudentInput) {
         },
       });
 
+      // Auto-generate the login code (S0001, S0002, ...) unless one is supplied
+      // explicitly (kept as an override for migrations/imports carrying legacy codes).
+      const studentCode = input.studentCode ?? (await nextCode(tx, "STUDENT"));
+
       return tx.student.create({
         data: {
           userId: user.id,
-          studentCode: input.studentCode,
+          studentCode,
           projectId: input.projectId,
           divisionId: input.divisionId,
           mobile: input.mobile,
@@ -90,26 +107,62 @@ export async function createStudent(input: CreateStudentInput) {
 }
 
 export async function listStudents(query: ListStudentsQuery) {
-  return prisma.student.findMany({
+  const students = await prisma.student.findMany({
     where: {
       projectId: query.projectId,
       divisionId: query.divisionId,
       workflowStatus: query.workflowStatus,
     },
-    include: studentInclude,
+    include: { ...studentInclude, ...stageRelationsInclude },
     orderBy: { createdAt: "desc" },
+  });
+
+  const now = new Date();
+  const enriched = students.map((s) => attachStageInfo(s, now));
+
+  // The derived-stage dropdown (`stage`) and the 🚩 toggle (`flagged`) filter on computed
+  // values, so they run here rather than in the SQL WHERE. `workflowStatus` (raw enum)
+  // stays in the query above for callers that still filter by it.
+  return enriched.filter((s) => {
+    if (query.stage && s.stageInfo.stage !== query.stage) return false;
+    if (query.flagged !== undefined && s.stageInfo.flagged !== query.flagged) return false;
+    return true;
   });
 }
 
 export async function getStudentById(id: string) {
   const student = await prisma.student.findUnique({
     where: { id },
-    include: studentInclude,
+    include: { ...studentInclude, ...stageRelationsInclude },
   });
   if (!student) {
     throw new NotFoundError("Student not found");
   }
-  return student;
+  return attachStageInfo(student, new Date());
+}
+
+// Student self-service: resolve the logged-in user's own Student record from their
+// User.id (the access token's `sub`). This is the entry point every student-facing page
+// needs — it hands the frontend the Student.id, project, division, cohort and workflow
+// stage that all the downstream `:studentId`-keyed routes (forms, assessment, sessions)
+// require. 404s for a non-student user (staff have no Student row).
+export async function getStudentByUserId(userId: string) {
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    include: { ...studentInclude, ...stageRelationsInclude },
+  });
+  if (!student) {
+    throw new NotFoundError("No student profile is linked to this account");
+  }
+  const withStage = attachStageInfo(student, new Date());
+  // Cohort isn't stored per-student yet (single active cohort today); surface the active
+  // cohort code so the frontend can request the right form/assessment bank.
+  const cohort = await prisma.cohort.findFirst({
+    where: { isActive: true },
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+    select: { code: true, name: true },
+  });
+  return { ...withStage, cohort };
 }
 
 export async function updateStudent(id: string, input: UpdateStudentInput) {

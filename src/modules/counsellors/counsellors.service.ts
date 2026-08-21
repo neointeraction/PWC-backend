@@ -3,6 +3,7 @@ import argon2 from "argon2";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
+import { nextCode } from "../../common/utils/codeSequence.js";
 import type {
   AssignProjectBody,
   CreateCounsellorInput,
@@ -64,10 +65,13 @@ export async function createCounsellor(input: CreateCounsellorInput) {
         },
       });
 
+      // Auto-generate the code (C0001, C0002, ...) unless one is supplied explicitly.
+      const counsellorCode = input.counsellorCode ?? (await nextCode(tx, "COUNSELLOR"));
+
       return tx.counsellor.create({
         data: {
           userId: user.id,
-          counsellorCode: input.counsellorCode,
+          counsellorCode,
           instituteId: input.instituteId,
           mobile: input.mobile,
           projects: projectIds.length > 0 ? { create: projectIds.map((projectId) => ({ projectId })) } : undefined,

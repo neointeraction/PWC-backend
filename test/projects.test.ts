@@ -49,6 +49,7 @@ describe("Projects API", () => {
     });
     expect(res.status).toBe(201);
     expect(res.body.name).toBe("Test Project CRUD A");
+    expect(res.body.code).toMatch(/^P\d{4,}$/);
     expect(res.body.status).toBe("ACTIVE");
     expect(res.body.institute.id).toBe(instituteId);
     expect(res.body._count.students).toBe(0);

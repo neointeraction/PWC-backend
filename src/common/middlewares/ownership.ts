@@ -50,6 +50,9 @@ async function studentUserId(studentId: string): Promise<string | null> {
 // `:studentId` route param (forms status, session booking).
 export const ownStudentParam = selfOrStaff((req) => studentUserId(String(req.params.studentId)));
 
+// `:id` route param that IS a Student.id (students module self-service, e.g. confirm-profile).
+export const ownStudentIdParam = selfOrStaff((req) => studentUserId(String(req.params.id)));
+
 // `studentId` in the request body (assessment attempt creation).
 export const ownStudentBody = selfOrStaff((req) => studentUserId(String((req.body as { studentId?: string }).studentId ?? "")));
 

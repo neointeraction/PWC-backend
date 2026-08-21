@@ -1,6 +1,7 @@
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
+import { nextCode } from "../../common/utils/codeSequence.js";
 import type { CreateProjectInput, ListProjectsQuery, UpdateProjectInput } from "./projects.schema.js";
 
 const projectInclude = {
@@ -35,16 +36,22 @@ export async function createProject(input: CreateProjectInput) {
   const languageId = await resolveLanguageId(input.languageId);
 
   try {
-    return await prisma.project.create({
-      data: {
-        instituteId: input.instituteId,
-        name: input.name,
-        fromDate: input.fromDate,
-        toDate: input.toDate,
-        status: input.status,
-        languageId,
-      },
-      include: projectInclude,
+    // Code generation and create share a transaction so a failed create (e.g. duplicate
+    // name) rolls back the counter increment, leaving the P-sequence gap-free.
+    return await prisma.$transaction(async (tx) => {
+      const code = await nextCode(tx, "PROJECT");
+      return tx.project.create({
+        data: {
+          code,
+          instituteId: input.instituteId,
+          name: input.name,
+          fromDate: input.fromDate,
+          toDate: input.toDate,
+          status: input.status,
+          languageId,
+        },
+        include: projectInclude,
+      });
     });
   } catch (err) {
     handlePrismaError(err); // P2002 on [instituteId, name] → 409

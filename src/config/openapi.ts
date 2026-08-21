@@ -348,7 +348,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/students",
   tags: ["Students"],
-  summary: "Create a student (also creates a linked User with role STUDENT)",
+  summary: "Create a student (also creates a linked User with role STUDENT). studentCode is auto-generated (S0001, S0002, ...) unless supplied. Admin only.",
   request: { body: { content: { "application/json": { schema: createStudentSchema } } } },
   responses: {
     201: {
@@ -363,10 +363,22 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/students",
   tags: ["Students"],
-  summary: "List students",
+  summary:
+    "List students. Each row includes a computed `stageInfo` { stage, stageLabel, stageEnteredAt, ageDays, flagged, flagReason } — the derived stage and ageing/🚩-flag (idle > 2 calendar days on an actionable stage, or a missed session). Filter with `stage` (derived-stage dropdown) and `flagged=true` (follow-up toggle). Ageing is computed live, never stored. Staff only.",
   request: { query: listStudentsQuerySchema },
   responses: {
-    200: { description: "List of students", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+    200: { description: "List of students, each with stageInfo", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/students/me",
+  tags: ["Students"],
+  summary: "Student self-service: the logged-in student's own record (id, studentCode, project, division, workflowStatus, contacts, active cohort). The entry point for every student-facing page. 404 for a non-student account.",
+  responses: {
+    200: { description: "The caller's own student record", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
   },
 });
 
@@ -413,7 +425,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/students/{id}/confirm-profile",
   tags: ["Students"],
-  summary: "Student confirms their profile data is correct. Advances workflowStatus DRAFT -> PROFILE_COMPLETED. 409 if not currently DRAFT.",
+  summary: "Student confirms their own profile data is correct (or staff on their behalf). Advances workflowStatus DRAFT -> PROFILE_COMPLETED. 409 if not currently DRAFT.",
   request: { params: studentIdParamsSchema },
   responses: {
     200: { description: "Updated student", content: { "application/json": { schema: genericObjectSchema } } },
@@ -890,7 +902,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/counsellors",
   tags: ["Counsellors"],
-  summary: "Create a counsellor (creates a linked User with role COUNSELLOR + temp password). Optionally assign to projects. Admin only.",
+  summary: "Create a counsellor (creates a linked User with role COUNSELLOR + temp password). counsellorCode is auto-generated (C0001, C0002, ...) unless supplied. Optionally assign to projects. Admin only.",
   request: { body: { content: { "application/json": { schema: createCounsellorSchema } } } },
   responses: {
     201: { description: "Counsellor created (+ tempPassword)", content: { "application/json": { schema: genericObjectSchema } } },
@@ -976,7 +988,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/projects",
   tags: ["Projects"],
-  summary: "Create a project (counselling cycle for an institute). Admin only.",
+  summary: "Create a project (counselling cycle for an institute). code is auto-generated (P0001, P0002, ...). Admin only.",
   request: { body: { content: { "application/json": { schema: createProjectSchema } } } },
   responses: {
     201: { description: "Project created", content: { "application/json": { schema: genericObjectSchema } } },

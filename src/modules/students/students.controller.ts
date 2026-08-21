@@ -12,6 +12,11 @@ export async function listStudents(req: Request, res: Response): Promise<void> {
   res.status(200).json(students);
 }
 
+export async function getMyStudent(req: Request, res: Response): Promise<void> {
+  const student = await studentsService.getStudentByUserId(req.user!.sub);
+  res.status(200).json(student);
+}
+
 export async function getStudent(req: Request, res: Response): Promise<void> {
   const student = await studentsService.getStudentById(req.params.id as string);
   res.status(200).json(student);

@@ -1,6 +1,7 @@
 import argon2 from "argon2";
 import { PrismaClient } from "@prisma/client";
 import { env } from "../src/config/env.js";
+import { nextCode } from "../src/common/utils/codeSequence.js";
 import { class9to10AssessmentQuestions } from "./seed-data/assessment/class9to10.js";
 import { seedCareerLibraryData } from "./seed-data/career-library/index.js";
 import { seedCareerLibraryNormalization } from "./seed-data/career-library/normalize.js";
@@ -204,6 +205,9 @@ async function seedDemoAccounts(): Promise<void> {
   if (!project) {
     project = await prisma.project.create({
       data: {
+        // Pull from the shared counter so the demo project's code stays in sequence with
+        // API-created ones (no collision with a later P000x).
+        code: await nextCode(prisma, "PROJECT"),
         instituteId: institute.id,
         name: "Demo Project",
         fromDate: new Date("2025-01-01"),
