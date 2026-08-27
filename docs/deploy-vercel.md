@@ -8,8 +8,13 @@ Render run it almost as-is (`pnpm build` → `node dist/src/server.js`).
 ## What's already configured in the repo
 
 - **`api/index.ts`** — exports the Express app as the serverless handler (no `app.listen`).
-- **`vercel.json`** — installs, runs `prisma generate && pnpm build`, and rewrites every
-  path to the function so Express does its own routing.
+  It imports the app **from source** (`../src/app.js`) and lets Vercel's `@vercel/node`
+  builder compile the TypeScript; it does **not** import the tsc `dist/*` output (that file
+  has no default export, and the runtime was loading it directly and failing with
+  "The default export must be a function or server").
+- **`vercel.json`** — installs, runs `prisma generate` (the function itself is compiled by
+  `@vercel/node`, so no separate `pnpm build` is needed), and rewrites every path to the
+  function so Express does its own routing.
 - **`prisma/schema.prisma`** — `binaryTargets = ["native", "rhel-openssl-3.0.x"]` so the
   query engine works on Vercel's runtime.
 - **`src/app.ts`** — helmet import hardened against a NodeNext type-resolution quirk.

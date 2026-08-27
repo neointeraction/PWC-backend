@@ -6,9 +6,12 @@
 // as the request handler; vercel.json rewrites every path to this function so Express
 // does all of its own routing (/health, /docs, /api/v1/*).
 //
-// It imports the COMPILED app produced by vercel.json's buildCommand. The output lives
-// under dist/src/* because tsconfig's `include` spans both src and prisma, so tsc's
-// rootDir is the project root.
-import { createApp } from "../dist/src/app.js";
+// It imports the app FROM SOURCE and lets Vercel's @vercel/node builder compile the
+// TypeScript itself. We deliberately do NOT import the tsc `dist/*` output: the compiled
+// app.js has only a named `createApp` export (no default), and the serverless runtime was
+// resolving the function to that file and rejecting it ("The default export must be a
+// function or server"). Importing source keeps the whole function in one bundle whose
+// default export is unambiguously the Express app.
+import { createApp } from "../src/app.js";
 
 export default createApp();
