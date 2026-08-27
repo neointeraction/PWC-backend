@@ -55,6 +55,9 @@ export async function login(input: LoginBody) {
 
   const accessToken = signAccessToken(user);
   const refreshToken = await issueRefreshToken(user.id);
+  // Login timestamp for the admin "Last Active" column. Only a real password login
+  // updates it — token refreshes don't, so it reflects deliberate sign-ins.
+  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
 
   return { accessToken, refreshToken, user: toPublicUser(user) };
 }

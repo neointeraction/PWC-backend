@@ -82,6 +82,11 @@ counsellors, or super admins, and can't create/escalate to `SUPER_ADMIN`. The `r
 field on create/update is the **view-only toggle** (`VIEW_ONLY_ADMIN` = read-only admin,
 enforced by `blockViewOnlyWrites`).
 
+Every admin object returned here carries `id, email, role, firstName, lastName,
+isActive, mustChangePassword, lastLoginAt, createdAt, updatedAt`. `lastLoginAt` is
+`null` until the admin's first successful login and is refreshed on each
+`POST /auth/login` — render it as the "Last Active" column (`N/A` when `null`).
+
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/v1/admins` | Create an App Admin. Body: `firstName, lastName, email, role?` (`ADMIN` \| `VIEW_ONLY_ADMIN`, default `ADMIN`). Returns the admin + one-time `tempPassword`. 400 if `role` isn't one of the two; 409 on duplicate email. |

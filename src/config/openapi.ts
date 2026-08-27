@@ -868,7 +868,7 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/admins",
   tags: ["Admins"],
-  summary: "List App Admins (ADMIN + VIEW_ONLY_ADMIN). Query: role?. SUPER_ADMIN only.",
+  summary: "List App Admins (ADMIN + VIEW_ONLY_ADMIN), each with lastLoginAt (null until first login) for the \"Last Active\" column. Query: role?. SUPER_ADMIN only.",
   request: { query: listAdminsQuerySchema },
   responses: {
     200: { description: "List of app admins", content: { "application/json": { schema: z.array(genericObjectSchema) } } },

@@ -64,6 +64,7 @@ the base user yet).
 | firstName, lastName | String | |
 | isActive | Boolean | default true |
 | mustChangePassword | Boolean | default true; forces reset on first login (Student and Counsellor both get admin-generated temp passwords) |
+| lastLoginAt | DateTime? | null until the first successful password login; set on every `POST /auth/login` (token refreshes don't touch it). Backs the admin list's "Last Active" column |
 | createdAt, updatedAt | DateTime | |
 
 ### `RefreshToken`

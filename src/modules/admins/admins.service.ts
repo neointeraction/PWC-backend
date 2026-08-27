@@ -18,6 +18,7 @@ const adminSelect = {
   lastName: true,
   isActive: true,
   mustChangePassword: true,
+  lastLoginAt: true,
   createdAt: true,
   updatedAt: true,
 } as const;
