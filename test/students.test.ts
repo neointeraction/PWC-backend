@@ -142,6 +142,53 @@ describe("Students API", () => {
     expect(confirm.body.workflowStatus).toBe("PROFILE_COMPLETED");
   });
 
+  it("lets a student edit their own parent/contact details via PATCH /students/me, ignoring locked fields", async () => {
+    const created = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Edit",
+      lastName: "Me",
+      email: "editme@test-student.example",
+      mobile: "+919876500091",
+      projectId,
+      divisionId,
+      parentMobile: "+919876500092",
+      parentEmail: "parent-editme@test-student.example",
+      fatherName: "Old Father",
+    });
+    expect(created.status).toBe(201);
+    const studentId: string = created.body.student.id;
+    const userId: string = created.body.student.user.id;
+
+    const asStudent = authRequest(app, "STUDENT", { userId });
+
+    const res = await asStudent.patch("/api/v1/students/me").send({
+      fatherName: "New Father",
+      motherName: "New Mother",
+      parentEmail: "updated-parent@test-student.example",
+      // Locked identity/enrolment fields are stripped by validation, not applied.
+      firstName: "Hacked",
+      email: "hacked@test-student.example",
+      studentCode: "HACK1",
+      workflowStatus: "CLOSED",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(studentId);
+    expect(res.body.user.firstName).toBe("Edit"); // unchanged
+    expect(res.body.user.email).toBe("editme@test-student.example"); // unchanged
+    expect(res.body.workflowStatus).toBe("DRAFT"); // unchanged
+
+    const persisted = await prisma.student.findUnique({ where: { id: studentId } });
+    expect(persisted?.fatherName).toBe("New Father");
+    expect(persisted?.motherName).toBe("New Mother");
+    expect(persisted?.parentEmail).toBe("updated-parent@test-student.example");
+  });
+
+  it("404s PATCH /students/me for a non-student account", async () => {
+    const res = await authRequest(app, "COUNSELLOR", { userId: "staff-no-student-patch" })
+      .patch("/api/v1/students/me")
+      .send({ fatherName: "X" });
+    expect(res.status).toBe(404);
+  });
+
   it("stops a student from confirming another student's profile", async () => {
     const created = await authRequest(app).post("/api/v1/students").send({
       firstName: "Victim",

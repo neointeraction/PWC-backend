@@ -71,6 +71,40 @@ describe("App Admins API (SUPER_ADMIN only)", () => {
     expect(del.status).toBe(404);
   });
 
+  it("regenerates a temp password (returned once) and flags mustChangePassword; 404 for a non-admin id", async () => {
+    const created = await request(app).post("/api/v1/admins").set("Authorization", superAdmin).send({
+      firstName: "Reg", lastName: "Enerate", email: "regen@test-admins.example",
+    });
+    const id = created.body.admin.id;
+    const originalTemp = created.body.tempPassword;
+
+    const regen = await request(app).post(`/api/v1/admins/${id}/regenerate-password`).set("Authorization", superAdmin);
+    expect(regen.status).toBe(200);
+    expect(regen.body.tempPassword).toBeTypeOf("string");
+    expect(regen.body.tempPassword).not.toBe(originalTemp); // a fresh credential
+    expect(regen.body.admin.mustChangePassword).toBe(true);
+
+    // Scoped to App Admins — regenerating for a non-admin id 404s.
+    const student = await prisma.user.create({
+      data: { email: "regen-stud@test-admins.example", passwordHash: await argon2.hash("x"), role: "STUDENT", firstName: "S", lastName: "T" },
+    });
+    const notFound = await request(app).post(`/api/v1/admins/${student.id}/regenerate-password`).set("Authorization", superAdmin);
+    expect(notFound.status).toBe(404);
+  });
+
+  it("enforces SUPER_ADMIN only on regenerate-password: 403 for a plain ADMIN, 401 without a token", async () => {
+    const created = await request(app).post("/api/v1/admins").set("Authorization", superAdmin).send({
+      firstName: "Guard", lastName: "Regen", email: "guard-regen@test-admins.example",
+    });
+    const id = created.body.admin.id;
+
+    const asAdmin = await request(app).post(`/api/v1/admins/${id}/regenerate-password`).set("Authorization", bearer("ADMIN"));
+    expect(asAdmin.status).toBe(403);
+
+    const noToken = await request(app).post(`/api/v1/admins/${id}/regenerate-password`);
+    expect(noToken.status).toBe(401);
+  });
+
   it("deletes an admin", async () => {
     const created = await request(app).post("/api/v1/admins").set("Authorization", superAdmin).send({
       firstName: "Del", lastName: "Ete", email: "delete@test-admins.example",

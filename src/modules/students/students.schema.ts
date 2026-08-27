@@ -50,6 +50,24 @@ export const updateStudentSchema = z.object({
 });
 export type UpdateStudentInput = z.infer<typeof updateStudentSchema>;
 
+// Student self-service edit (PATCH /students/me). Deliberately a narrower field set than
+// the admin `updateStudentSchema`: identity/enrolment fields a student must NOT change —
+// name, primary mobile, email, studentCode, division, project, workflowStatus — are
+// omitted. What's left is the parent/guardian block plus the student's own WhatsApp
+// number, i.e. the "extra details" a student fills in and keeps up to date themselves.
+export const updateMyStudentSchema = z.object({
+  whatsappNumber: phoneSchema.optional(),
+  parentMobile: phoneSchema.optional(),
+  parentEmail: emailSchema.optional(),
+  fatherName: z.string().trim().min(1).optional(),
+  fatherOccupation: z.string().trim().min(1).optional(),
+  fatherEmployer: z.string().trim().min(1).optional(),
+  motherName: z.string().trim().min(1).optional(),
+  motherOccupation: z.string().trim().min(1).optional(),
+  motherEmployer: z.string().trim().min(1).optional(),
+});
+export type UpdateMyStudentInput = z.infer<typeof updateMyStudentSchema>;
+
 export const studentIdParamsSchema = z.object({
   id: z.string().cuid(),
 });

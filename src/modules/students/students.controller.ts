@@ -17,6 +17,11 @@ export async function getMyStudent(req: Request, res: Response): Promise<void> {
   res.status(200).json(student);
 }
 
+export async function updateMyStudent(req: Request, res: Response): Promise<void> {
+  const student = await studentsService.updateMyStudent(req.user!.sub, req.body);
+  res.status(200).json(student);
+}
+
 export async function getStudent(req: Request, res: Response): Promise<void> {
   const student = await studentsService.getStudentById(req.params.id as string);
   res.status(200).json(student);

@@ -302,6 +302,9 @@ model Student {
   motherEmployer   String?
   academicYear     String? // e.g. "2025-26"; shown on the Counsellor Chart "Our Champion" panel
   workflowStatus   WorkflowStatus    @default(DRAFT)
+  // Last time the scheduler sent this student a follow-up nudge (idle/missed-session).
+  // Drives the IDLE_NUDGE_COOLDOWN_DAYS throttle; null = never nudged.
+  lastNudgeAt      DateTime?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -361,6 +364,9 @@ model Session {
   cancellationNotes    String?
   rescheduledFromDate  DateTime?           @db.Date
   rescheduledFromStart String?
+  // Set by the scheduler when the same-day reminder for this session has been sent, so a
+  // repeated daily run never double-sends. Null = not yet reminded.
+  dayReminderSentAt    DateTime?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 

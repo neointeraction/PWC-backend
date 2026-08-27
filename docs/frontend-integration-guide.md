@@ -258,6 +258,7 @@ Base path: `/api/v1/students`
 |---|---|---|
 | POST | `/` | see below (admin) |
 | GET | `/me` | **student self-service — start here (§6.0)**; no params, resolves the caller from their token |
+| PATCH | `/me` | **student self-service edit (§6.0.1)** — partial body, contact/parent fields only; resolves the caller from their token |
 | GET | `/` | query: `projectId?`, `divisionId?`, `workflowStatus?` (staff) |
 | GET | `/{id}` | staff only — students use `/me` |
 | PATCH | `/{id}` | partial body, same fields as create minus `email`/`studentCode`/`projectId` (immutable) (admin) |
@@ -292,6 +293,41 @@ Response is the same nested student shape as `GET /{id}`, **plus** an active `co
 Cache `id`, `project.id` and `cohort.code` in the client — pass `cohort.code` as the
 `cohort` query/body param wherever the forms and assessment routes ask for it. Called by a
 non-student account (staff) it returns **404** (staff have no `Student` row).
+
+### 6.0.1 Student self-service edit: `PATCH /students/me`
+
+The student profile edit-and-save screen posts here. Like `GET /me`, it resolves the
+Student row from the caller's token — **no id in the path, no ownership check needed**.
+The body is a **partial** update (send only the changed fields) and is restricted to
+contact/parent details:
+
+```
+PATCH /api/v1/students/me     Authorization: Bearer <accessToken>
+```
+```json
+{
+  "whatsappNumber": "+919876500002",
+  "parentMobile": "+919876500003",
+  "parentEmail": "parent-aditi@example.com",
+  "fatherName": "Ramesh Rao",
+  "fatherOccupation": "Engineer",
+  "fatherEmployer": "Acme Corp",
+  "motherName": "Sunita Rao",
+  "motherOccupation": "Doctor",
+  "motherEmployer": "City Hospital"
+}
+```
+
+Those nine fields are the **only** ones a student may change. Identity/enrolment fields —
+`firstName`/`lastName`, `email`, primary `mobile`, `studentCode`, `divisionId`,
+`projectId`, `workflowStatus` — are **not accepted here** (unknown keys are stripped by
+validation); they remain admin-only via `PATCH /students/{id}`. Render those as read-only
+on the student screen. Editing is allowed at **any** workflow stage (it's independent of
+the separate `POST /{id}/confirm-profile` gate).
+
+The response is the same enriched shape as `GET /students/me` (nested student + `cohort`),
+so the client can refresh its cached copy from the response directly. **404** for a
+non-student account.
 
 **Create request** — all fields required unless marked optional:
 ```json

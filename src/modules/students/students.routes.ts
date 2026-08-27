@@ -8,6 +8,7 @@ import {
   createStudentSchema,
   listStudentsQuerySchema,
   studentIdParamsSchema,
+  updateMyStudentSchema,
   updateStudentSchema,
   updateWorkflowStatusBodySchema,
 } from "./students.schema.js";
@@ -35,6 +36,16 @@ studentsRouter.get(
   "/me",
   ...requireStudentOrStaff,
   asyncHandler(studentsController.getMyStudent)
+);
+
+// Student self-service edit: the logged-in student updates their own parent/guardian
+// details + WhatsApp number (narrow field set — identity/enrolment stays admin-only).
+// Resolves the Student row from the token, so no id param or ownership guard is needed.
+studentsRouter.patch(
+  "/me",
+  ...requireStudentOrStaff,
+  validate({ body: updateMyStudentSchema }),
+  asyncHandler(studentsController.updateMyStudent)
 );
 
 studentsRouter.get(

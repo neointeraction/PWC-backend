@@ -16,6 +16,7 @@
 // (accurate unless an admin edits the row while it sits idle).
 
 import type { WorkflowStatus } from "@prisma/client";
+import { calendarDaysBetween, istDayNumber } from "../../common/utils/istDate.js";
 
 // "Beyond 2 days idle" → flag once strictly more than 2 calendar days have elapsed (i.e.
 // on day 3). Change this single constant to retune, or flip `>` to `>=` in `isFlagged`.
@@ -98,14 +99,8 @@ export const stageRelationsInclude = {
   sessions: { select: { status: true, scheduledDate: true, studentNoShow: true } },
 } as const;
 
-// IST is a fixed +5:30 offset (no DST), so a calendar-day number is exact.
-const IST_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
-const DAY_MS = 24 * 60 * 60 * 1000;
-function istDayNumber(d: Date): number {
-  return Math.floor((d.getTime() + IST_OFFSET_MS) / DAY_MS);
-}
 function calendarDaysSince(from: Date, now: Date): number {
-  return Math.max(0, istDayNumber(now) - istDayNumber(from));
+  return Math.max(0, calendarDaysBetween(from, now));
 }
 
 function firstSubmittedAt(forms: SubmittedForm[], formType: string): Date | null {

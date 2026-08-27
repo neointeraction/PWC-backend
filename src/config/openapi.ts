@@ -16,6 +16,7 @@ import {
   createStudentSchema,
   listStudentsQuerySchema,
   studentIdParamsSchema,
+  updateMyStudentSchema,
   updateStudentSchema,
   updateWorkflowStatusBodySchema,
 } from "../modules/students/students.schema.js";
@@ -378,6 +379,20 @@ registry.registerPath({
   summary: "Student self-service: the logged-in student's own record (id, studentCode, project, division, workflowStatus, contacts, active cohort). The entry point for every student-facing page. 404 for a non-student account.",
   responses: {
     200: { description: "The caller's own student record", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/students/me",
+  tags: ["Students"],
+  summary: "Student self-service edit: the logged-in student updates their own contact/parent details (whatsappNumber, parentMobile/Email, father/mother name/occupation/employer). Identity/enrolment fields stay admin-only. 404 for a non-student account.",
+  request: {
+    body: { content: { "application/json": { schema: updateMyStudentSchema } } },
+  },
+  responses: {
+    200: { description: "The caller's updated student record", content: { "application/json": { schema: genericObjectSchema } } },
     ...errorResponses,
   },
 });
@@ -881,6 +896,18 @@ registry.registerPath({
   responses: {
     200: { description: "Updated app admin", content: { "application/json": { schema: genericObjectSchema } } },
     ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/admins/{id}/regenerate-password",
+  tags: ["Admins"],
+  summary: "Mint a fresh temporary password for an App Admin — returns { admin, tempPassword } once (plaintext never stored) and sets mustChangePassword. 404 for a non-admin id. SUPER_ADMIN only.",
+  request: { params: adminIdParamsSchema },
+  responses: {
+    200: { description: "New temp password minted (+ tempPassword)", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
   },
 });
 

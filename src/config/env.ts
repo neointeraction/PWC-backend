@@ -32,6 +32,22 @@ const envSchema = z.object({
   MAILGUN_DOMAIN: z.string().optional(),
   // "us" (Mailgun's American endpoint, api.mailgun.net) or "eu" (api.eu.mailgun.net).
   MAILGUN_REGION: z.enum(["us", "eu"]).default("us"),
+
+  // In-process reminder/nudge scheduler (src/scheduler). Off by default so it never runs
+  // in tests or serverless invocations; enable it only where the app runs as a single
+  // long-lived process. Query-param-style boolean: only the literal "true" enables it
+  // (z.coerce.boolean would treat "false" as true).
+  SCHEDULER_ENABLED: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .default("false"),
+  // Daily run time, cron format, in SCHEDULER_TIMEZONE. Default 08:00 — sends same-day
+  // session reminders and idle/missed follow-up nudges each morning.
+  SCHEDULER_CRON: z.string().default("0 8 * * *"),
+  SCHEDULER_TIMEZONE: z.string().default("Asia/Kolkata"),
+  // Don't re-nudge the same student more often than this many days (avoids daily spam
+  // while they stay idle).
+  IDLE_NUDGE_COOLDOWN_DAYS: z.coerce.number().int().positive().default(2),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -10,6 +10,7 @@ import { computeStageInfo, stageRelationsInclude, type StudentForStage } from ".
 import type {
   CreateStudentInput,
   ListStudentsQuery,
+  UpdateMyStudentInput,
   UpdateStudentInput,
 } from "./students.schema.js";
 
@@ -191,6 +192,30 @@ export async function updateStudent(id: string, input: UpdateStudentInput) {
   } catch (err) {
     handlePrismaError(err);
   }
+}
+
+// Student self-service edit: the logged-in student updates their own parent/guardian
+// details and WhatsApp number. Resolves the Student row from the token's User.id and only
+// touches the whitelisted fields in `updateMyStudentSchema` — identity/enrolment fields
+// stay admin-only. Allowed at any workflow stage (contact details can change over time).
+export async function updateMyStudent(userId: string, input: UpdateMyStudentInput) {
+  const student = await prisma.student.findUnique({
+    where: { userId },
+    select: { id: true },
+  });
+  if (!student) {
+    throw new NotFoundError("No student profile is linked to this account");
+  }
+  try {
+    await prisma.student.update({
+      where: { id: student.id },
+      data: input,
+    });
+  } catch (err) {
+    handlePrismaError(err);
+  }
+  // Return the same enriched shape (stage + cohort) the student page already consumes.
+  return getStudentByUserId(userId);
 }
 
 export async function deleteStudent(id: string) {
