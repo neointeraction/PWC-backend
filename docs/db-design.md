@@ -300,7 +300,7 @@ workbook's distinct values (13 clusters / 43 industries / 571 domains) and edita
 |---|---|---|
 | `CareerCluster` | `name`, `deletedAt?` | top level; `name` unique among live rows |
 | `CareerIndustry` | `clusterId` (FK), `name`, `deletedAt?` | belongs to one cluster; `(clusterId, name)` unique among live rows |
-| `CareerDomain` | `industryId` (FK), `name`, `deletedAt?` | belongs to one industry; `(industryId, name)` unique among live rows. Domain **names repeat across industries** (e.g. "Academia" under several), so uniqueness is per-industry |
+| `CareerDomain` | `industryId` (FK), `name`, `deletedAt?` | belongs to one industry; `(industryId, name)` unique among live rows. Domain **names repeat across industries** (e.g. "Academia" under several), so uniqueness is per-industry. Also owns the domain's Education Path (`DomainEducationEntry`, below) |
 
 - **Soft delete**: `deletedAt` (null = live). Deleting hides a node from the pickers/tree but keeps
   its FK intact, so job roles that still reference it keep resolving; restorable via
@@ -425,6 +425,42 @@ normalize.ts`, run after the import in `prisma/seed.ts`): exams/courses from eac
 `String[]` columns, colleges from the entry's industry match. The old `String[]` columns
 (`entranceExams`, `entranceExamsPG`, `topCourses`) are kept and **dual-written** during
 the transition, to be dropped in a later migration.
+
+Each canonical lookup also carries the detail an admin's "add new" form collects, so a
+hand-added row is as complete as an imported one (columns mirror the raw `Ug*` tables):
+
+| Model | Detail columns (all nullable) |
+|---|---|
+| `EntranceExam` | `fullForm`, `conductingBody`, `officialWebsite`, `examMode`, `frequency`, `applicableFor`, `subjectRequirements12th`, `applicationWindow` |
+| `Course` | `fullForm`, `durationYears`, `stream12thRequirements`, `relevantEntranceExams`, `programmesOffered`, `topColleges`, `furtherStudyOptions` |
+| `Institution` | `shortName`, `city`, `state`, `type`, `website`, `entranceExamsRequired`, `programmesOffered`, `ranking` |
+
+A course's "relevant entrance exams" / "top colleges" stay **free text**, deliberately: a
+course is reference data, not a second place to curate per-career links. When an inline
+"add new" names a row that already exists, only **blank** columns are filled — canonical
+rows are shared across job roles, so linking one must never overwrite another role's data.
+
+### `DomainEducationEntry` / `CareerEducationEntry` — Education Path
+
+The qualifications/programmes that lead into a career domain. Held at the **domain** level,
+not per job role, so every role in a domain shows the same tick-list and a programme added
+while creating one role is inherited by every future role there.
+
+| Model | Key fields | Notes |
+|---|---|---|
+| `DomainEducationEntry` | `domainId` (FK), `level` (`EducationPathLevel`), `programme`, `description?`, `deletedAt?` | `(domainId, level, programme)` unique among live rows, enforced in the service (same reason as the taxonomy) |
+| `CareerEducationEntry` | `careerEntryId` + `educationEntryId` (composite PK, cascade) | many-to-many; which of the domain's path entries this job role uses |
+
+`EducationPathLevel` = `CLASS_10_PLUS_2` \| `GRADUATE` \| `POST_GRADUATE` \|
+`CERTIFICATION_STUDENT` \| `CERTIFICATION_UG`.
+
+- **Soft delete**, like the taxonomy: a deleted entry leaves the domain's picker but stays
+  linked, so job roles already using it keep rendering it.
+- The flat `qualification10th12th` / `qualificationGraduation` / `qualificationPG` /
+  `certificationsStudent` / `certificationsUG` fields on `CareerLibraryEntry` are **not**
+  dual-written from this table, unlike the exam/course normalization. They hold descriptive
+  prose from the source workbook rather than a list, so there is nothing to derive — the two
+  layers coexist until the workbook prose is retired.
 
 ### Forms — `FormTemplate` / `FormQuestion` / `FormSubmission` / `FormAnswer`
 

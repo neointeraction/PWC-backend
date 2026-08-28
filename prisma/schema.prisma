@@ -460,6 +460,7 @@ model CareerLibraryEntry {
   entranceExamLinks CareerEntranceExam[]
   courseLinks       CareerCourse[]
   institutionLinks  CareerInstitution[]
+  educationLinks    CareerEducationEntry[]
 
   @@index([domainId])
   @@map("career_library_entries")
@@ -506,8 +507,55 @@ model CareerDomain {
   updatedAt  DateTime             @updatedAt
   entries    CareerLibraryEntry[]
 
+  educationEntries DomainEducationEntry[]
+
   @@index([industryId])
   @@map("career_domains")
+}
+
+// --- Education Path: the qualifications/programmes that lead into a domain. Held at the
+// DOMAIN level (not per job role) so every role in the domain inherits the same tick-list,
+// and a new entry added while creating one role is available to every future role there.
+// Soft-deleted like the taxonomy (null = live): a deleted row leaves the pickers but keeps
+// its links resolving. Name uniqueness among live siblings is enforced in the service.
+// The flat qualification*/certifications* strings on CareerLibraryEntry are the older,
+// free-text layer and are intentionally left untouched — they carry descriptive prose from
+// the source workbook, not a list, so there is nothing to dual-write. ---
+enum EducationPathLevel {
+  CLASS_10_PLUS_2
+  GRADUATE
+  POST_GRADUATE
+  CERTIFICATION_STUDENT
+  CERTIFICATION_UG
+}
+
+model DomainEducationEntry {
+  id          String             @id @default(cuid())
+  domainId    String
+  domain      CareerDomain       @relation(fields: [domainId], references: [id])
+  level       EducationPathLevel
+  programme   String // e.g. "B.Tech Computer Science"
+  description String?
+  deletedAt   DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  careerLinks CareerEducationEntry[]
+
+  @@index([domainId])
+  @@map("domain_education_entries")
+}
+
+model CareerEducationEntry {
+  careerEntryId    String
+  educationEntryId String
+  careerEntry      CareerLibraryEntry   @relation(fields: [careerEntryId], references: [id], onDelete: Cascade)
+  educationEntry   DomainEducationEntry @relation(fields: [educationEntryId], references: [id], onDelete: Cascade)
+  createdAt        DateTime             @default(now())
+
+  @@id([careerEntryId, educationEntryId])
+  @@index([educationEntryId])
+  @@map("career_education_entries")
 }
 
 // --- UG/PG reference data, imported from the Career Library workbook. Each model
@@ -647,14 +695,21 @@ model PgEntranceExam {
 // below. See docs/career-library-normalization-spec.md.
 
 model EntranceExam {
-  id              String             @id @default(cuid())
-  name            String
-  level           QualificationLevel
-  fullForm        String?
-  conductingBody  String?
-  officialWebsite String?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  id                      String             @id @default(cuid())
+  name                    String
+  level                   QualificationLevel
+  fullForm                String?
+  conductingBody          String?
+  officialWebsite         String?
+  // Curated detail captured by the admin "add exam" form (mirrors UgEntranceExam's
+  // columns, which only ever existed on the raw import dump).
+  examMode                String? // e.g. "Computer-based (CBT)"
+  frequency               String? // e.g. "Twice a year"
+  applicableFor           String? // which courses/streams the exam gates
+  subjectRequirements12th String?
+  applicationWindow       String?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
 
   careerLinks CareerEntranceExam[]
 
@@ -664,14 +719,19 @@ model EntranceExam {
 }
 
 model Institution {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  city      String?
-  state     String?
-  type      String?
-  website   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  name                  String   @unique
+  shortName             String? // abbreviation, e.g. "IIT-B"
+  city                  String?
+  state                 String?
+  type                  String?
+  website               String?
+  // Curated detail from the admin "add institution" form (mirrors UgInstitution).
+  entranceExamsRequired String?
+  programmesOffered     String?
+  ranking               String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   careerLinks CareerInstitution[]
 
@@ -680,13 +740,21 @@ model Institution {
 }
 
 model Course {
-  id            String             @id @default(cuid())
-  name          String
-  level         QualificationLevel
-  fullForm      String?
-  durationYears String?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  id                     String             @id @default(cuid())
+  name                   String
+  level                  QualificationLevel
+  fullForm               String?
+  durationYears          String?
+  // Curated detail from the admin "add course" form (mirrors UgCourse). These stay free
+  // text rather than FKs to EntranceExam/Institution — a course is reference data, not a
+  // second place to curate the per-career links.
+  stream12thRequirements String?
+  relevantEntranceExams  String?
+  programmesOffered      String?
+  topColleges            String?
+  furtherStudyOptions    String?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   careerLinks CareerCourse[]
 

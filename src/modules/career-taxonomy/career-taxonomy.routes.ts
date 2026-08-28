@@ -5,13 +5,17 @@ import { requireAuth, requireAdmin } from "../../common/middlewares/auth.js";
 import * as controller from "./career-taxonomy.controller.js";
 import {
   createClusterSchema,
+  createDomainEducationSchema,
   createDomainSchema,
   createIndustrySchema,
+  educationEntryIdParamsSchema,
   listClustersQuerySchema,
+  listDomainEducationQuerySchema,
   listDomainsQuerySchema,
   listIndustriesQuerySchema,
   taxonomyIdParamsSchema,
   updateClusterSchema,
+  updateDomainEducationSchema,
   updateDomainSchema,
   updateIndustrySchema,
 } from "./career-taxonomy.schema.js";
@@ -119,4 +123,39 @@ careerTaxonomyRouter.post(
   ...requireAdmin,
   validate({ params: taxonomyIdParamsSchema }),
   asyncHandler(controller.restoreDomain)
+);
+
+// --- Education Path (domain-level) ---
+// Listed/created under their domain; updated/deleted by their own id. Reads follow the rest
+// of the taxonomy (any authenticated user, so the "add job role" form can render the
+// tick-list); writes are Admin.
+careerTaxonomyRouter.get(
+  "/domains/:id/education",
+  ...requireAuth,
+  validate({ params: taxonomyIdParamsSchema, query: listDomainEducationQuerySchema }),
+  asyncHandler(controller.listDomainEducation)
+);
+careerTaxonomyRouter.post(
+  "/domains/:id/education",
+  ...requireAdmin,
+  validate({ params: taxonomyIdParamsSchema, body: createDomainEducationSchema }),
+  asyncHandler(controller.createDomainEducation)
+);
+careerTaxonomyRouter.patch(
+  "/education/:entryId",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema, body: updateDomainEducationSchema }),
+  asyncHandler(controller.updateDomainEducation)
+);
+careerTaxonomyRouter.delete(
+  "/education/:entryId",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema }),
+  asyncHandler(controller.deleteDomainEducation)
+);
+careerTaxonomyRouter.post(
+  "/education/:entryId/restore",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema }),
+  asyncHandler(controller.restoreDomainEducation)
 );

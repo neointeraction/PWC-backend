@@ -130,7 +130,12 @@ assign/unassign) and Project CRUD (`src/modules/projects/` — create/list/get/u
 delete; `status:CLOSED` is the soft-close, delete is blocked when students exist) exist.
 Career Library now has writes (`src/modules/career-library/` — admin create/update/delete
 with a `DRAFT`→`ACTIVE` publish step) plus the counsellor ratification-request flow
-(submit → admin approve/reject). The student assessment **Report** is built
+(submit → admin approve/reject). Its normalized links (exams/courses/colleges) take the full
+canonical field set on an inline "add new" and **blank-fill** rather than overwrite a row that
+already exists; there is deliberately no endpoint yet for editing a canonical lookup row.
+**Education Path** is modelled at the domain level (`DomainEducationEntry`, CRUD under
+`/api/v1/career-taxonomy/domains/:id/education`) and linked per job role — it is not
+dual-written back to the flat `qualification*`/`certifications*` strings. The student assessment **Report** is built
 (`src/modules/reports/` — `GET /reports/students/:id/assessment` assembles the full report
 as JSON for the frontend to render/print) and a dev scoring tester is served at
 `/dev/assessment` (non-prod, `public/assessment-tester.html`, backed by

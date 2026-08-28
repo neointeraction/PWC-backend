@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { UserRole } from "@prisma/client";
+import type { EducationPathLevel, UserRole } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
@@ -9,6 +9,7 @@ import type {
   CourseLinkItem,
   CreateCareerEntryInput,
   CreateCareerRequestInput,
+  EducationLinkItem,
   ExamLinkItem,
   InstitutionLinkItem,
   ListCareerLibraryQuery,
@@ -139,6 +140,12 @@ const entryLinkInclude = {
     select: { institution: { select: { id: true, name: true, city: true, state: true } } },
     orderBy: { institution: { name: "asc" } },
   },
+  educationLinks: {
+    select: {
+      educationEntry: { select: { id: true, level: true, programme: true, description: true, deletedAt: true } },
+    },
+    orderBy: { educationEntry: { programme: "asc" } },
+  },
 } satisfies Prisma.CareerLibraryEntryInclude;
 
 export async function getCareerLibraryEntryById(id: string) {
@@ -149,7 +156,7 @@ export async function getCareerLibraryEntryById(id: string) {
   if (!entry) {
     throw new NotFoundError("Career library entry not found");
   }
-  const { entranceExamLinks, courseLinks, institutionLinks, ...rest } = entry;
+  const { entranceExamLinks, courseLinks, institutionLinks, educationLinks, ...rest } = entry;
 
   const [relatedInstitutions, relatedCourses, relatedEntranceExams] = await Promise.all([
     prisma.ugInstitution.findMany({
@@ -174,6 +181,9 @@ export async function getCareerLibraryEntryById(id: string) {
     linkedEntranceExams: entranceExamLinks.map((l) => l.entranceExam),
     linkedCourses: courseLinks.map((l) => l.course),
     linkedInstitutions: institutionLinks.map((l) => l.institution),
+    // Domain-level Education Path. A soft-deleted path entry stays linked (so an existing
+    // role keeps rendering) but is filtered out of the domain's picker — see career-taxonomy.
+    linkedEducationEntries: educationLinks.map((l) => l.educationEntry),
     // Legacy broad value-match view (industry/cluster) — kept during the transition.
     relatedInstitutions,
     relatedCourses,
@@ -189,19 +199,39 @@ export async function getCareerLibraryEntryById(id: string) {
 type ResolvedExam = { id: string; name: string; level: "UG" | "PG" };
 type ResolvedCourse = { id: string; name: string; level: "UG" | "PG" };
 type ResolvedInstitution = { id: string; name: string };
+type ResolvedEducationEntry = { id: string; level: EducationPathLevel; programme: string };
+
+// Detail fields on a `{ name, ... }` item fill only columns that are still blank on a row
+// that already exists. Canonical rows are shared across job roles, so an inline add while
+// editing one role must not clobber another's reference data; correcting a wrong value is
+// a deliberate edit of the canonical row, not a side effect of linking it.
+async function fillBlanks<T extends Record<string, unknown>>(
+  existing: T,
+  detail: Record<string, unknown>,
+  update: (data: Record<string, unknown>) => Promise<T>
+): Promise<T> {
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(detail)) {
+    if (value !== undefined && existing[key] == null) patch[key] = value;
+  }
+  return Object.keys(patch).length > 0 ? update(patch) : existing;
+}
 
 async function resolveEntranceExams(items: ExamLinkItem[]): Promise<ResolvedExam[]> {
   const ids = items.flatMap((i) => (i.id ? [i.id] : []));
   const resolved = new Map<string, ResolvedExam>();
   for (const it of items) {
     if (it.id) continue;
-    const row = await prisma.entranceExam.upsert({
-      where: { name_level: { name: it.name!, level: it.level! } },
-      update: {},
-      create: { name: it.name!, level: it.level! },
-      select: { id: true, name: true, level: true },
+    const { id: _id, name, level, ...detail } = it;
+    const existing = await prisma.entranceExam.findUnique({
+      where: { name_level: { name: name!, level: level! } },
     });
-    resolved.set(row.id, row);
+    const row = existing
+      ? await fillBlanks(existing, detail, (data) =>
+          prisma.entranceExam.update({ where: { id: existing.id }, data })
+        )
+      : await prisma.entranceExam.create({ data: { name: name!, level: level!, ...detail } });
+    resolved.set(row.id, { id: row.id, name: row.name, level: row.level });
   }
   if (ids.length) {
     const existing = await prisma.entranceExam.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, level: true } });
@@ -216,14 +246,13 @@ async function resolveCourses(items: CourseLinkItem[]): Promise<ResolvedCourse[]
   const resolved = new Map<string, ResolvedCourse>();
   for (const it of items) {
     if (it.id) continue;
-    const level = it.level ?? "UG";
-    const row = await prisma.course.upsert({
-      where: { name_level: { name: it.name!, level } },
-      update: {},
-      create: { name: it.name!, level },
-      select: { id: true, name: true, level: true },
-    });
-    resolved.set(row.id, row);
+    const { id: _id, name, level: rawLevel, ...detail } = it;
+    const level = rawLevel ?? "UG";
+    const existing = await prisma.course.findUnique({ where: { name_level: { name: name!, level } } });
+    const row = existing
+      ? await fillBlanks(existing, detail, (data) => prisma.course.update({ where: { id: existing.id }, data }))
+      : await prisma.course.create({ data: { name: name!, level, ...detail } });
+    resolved.set(row.id, { id: row.id, name: row.name, level: row.level });
   }
   if (ids.length) {
     const existing = await prisma.course.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, level: true } });
@@ -238,13 +267,12 @@ async function resolveInstitutions(items: InstitutionLinkItem[]): Promise<Resolv
   const resolved = new Map<string, ResolvedInstitution>();
   for (const it of items) {
     if (it.id) continue;
-    const row = await prisma.institution.upsert({
-      where: { name: it.name! },
-      update: {},
-      create: { name: it.name!, city: it.city, state: it.state },
-      select: { id: true, name: true },
-    });
-    resolved.set(row.id, row);
+    const { id: _id, name, ...detail } = it;
+    const existing = await prisma.institution.findUnique({ where: { name: name! } });
+    const row = existing
+      ? await fillBlanks(existing, detail, (data) => prisma.institution.update({ where: { id: existing.id }, data }))
+      : await prisma.institution.create({ data: { name: name!, ...detail } });
+    resolved.set(row.id, { id: row.id, name: row.name });
   }
   if (ids.length) {
     const existing = await prisma.institution.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
@@ -254,13 +282,56 @@ async function resolveInstitutions(items: InstitutionLinkItem[]): Promise<Resolv
   return [...resolved.values()];
 }
 
+// Education Path items are scoped to the entry's own domain: a new `{ level, programme }`
+// is written back to that domain (so every future role there inherits it), and an existing
+// `{ id }` must already belong to it — linking another domain's path would silently break
+// the "shown as a tick-list of what THIS domain has" contract.
+async function resolveEducationEntries(
+  items: EducationLinkItem[],
+  domainId: string
+): Promise<ResolvedEducationEntry[]> {
+  const ids = items.flatMap((i) => (i.id ? [i.id] : []));
+  const resolved = new Map<string, ResolvedEducationEntry>();
+  for (const it of items) {
+    if (it.id) continue;
+    const existing = await prisma.domainEducationEntry.findFirst({
+      where: { domainId, level: it.level!, programme: it.programme!, deletedAt: null },
+    });
+    const row = existing
+      ? await fillBlanks(existing, { description: it.description }, (data) =>
+          prisma.domainEducationEntry.update({ where: { id: existing.id }, data })
+        )
+      : await prisma.domainEducationEntry.create({
+          data: { domainId, level: it.level!, programme: it.programme!, description: it.description },
+        });
+    resolved.set(row.id, { id: row.id, level: row.level, programme: row.programme });
+  }
+  if (ids.length) {
+    const existing = await prisma.domainEducationEntry.findMany({
+      where: { id: { in: ids }, deletedAt: null },
+      select: { id: true, level: true, programme: true, domainId: true },
+    });
+    if (existing.length !== new Set(ids).size) {
+      throw new BadRequestError("One or more educationEntries ids are invalid or deleted");
+    }
+    for (const r of existing) {
+      if (r.domainId !== domainId) {
+        throw new BadRequestError("An educationEntries id belongs to a different career domain");
+      }
+      resolved.set(r.id, { id: r.id, level: r.level, programme: r.programme });
+    }
+  }
+  return [...resolved.values()];
+}
+
 export async function createCareerEntry(input: CreateCareerEntryInput, actor: Actor) {
-  const { entranceExams = [], courses = [], institutions = [], ...scalar } = input;
+  const { entranceExams = [], courses = [], institutions = [], educationEntries = [], ...scalar } = input;
   await assertLiveDomain(scalar.domainId); // 400 if domainId isn't a live taxonomy leaf
-  const [exams, crs, insts] = await Promise.all([
+  const [exams, crs, insts, edu] = await Promise.all([
     resolveEntranceExams(entranceExams),
     resolveCourses(courses),
     resolveInstitutions(institutions),
+    resolveEducationEntries(educationEntries, scalar.domainId),
   ]);
   try {
     const created = await prisma.careerLibraryEntry.create({
@@ -274,6 +345,7 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
         entranceExamLinks: { create: exams.map((e) => ({ entranceExamId: e.id })) },
         courseLinks: { create: crs.map((c) => ({ courseId: c.id })) },
         institutionLinks: { create: insts.map((i) => ({ institutionId: i.id })) },
+        educationLinks: { create: edu.map((e) => ({ educationEntryId: e.id })) },
       },
       select: { id: true },
     });
@@ -284,13 +356,19 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
 }
 
 export async function updateCareerEntry(id: string, input: UpdateCareerEntryInput, actor: Actor) {
-  await getCareerLibraryEntryById(id); // 404 if missing
-  const { entranceExams, courses, institutions, ...scalar } = input;
+  const current = await getCareerLibraryEntryById(id); // 404 if missing
+  const { entranceExams, courses, institutions, educationEntries, ...scalar } = input;
   if (scalar.domainId !== undefined) await assertLiveDomain(scalar.domainId); // 400 if invalid/deleted
   // Resolve only the link arrays that were provided (undefined = leave unchanged).
   const exams = entranceExams !== undefined ? await resolveEntranceExams(entranceExams) : undefined;
   const crs = courses !== undefined ? await resolveCourses(courses) : undefined;
   const insts = institutions !== undefined ? await resolveInstitutions(institutions) : undefined;
+  // Education entries hang off the domain, so they resolve against the domain this update
+  // leaves the entry in — the new one when the update also re-parents it.
+  const edu =
+    educationEntries !== undefined
+      ? await resolveEducationEntries(educationEntries, scalar.domainId ?? current.domainId)
+      : undefined;
   try {
     await prisma.$transaction(async (tx) => {
       await tx.careerLibraryEntry.update({
@@ -318,6 +396,10 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
       if (insts) {
         await tx.careerInstitution.deleteMany({ where: { careerEntryId: id } });
         await tx.careerInstitution.createMany({ data: insts.map((i) => ({ careerEntryId: id, institutionId: i.id })), skipDuplicates: true });
+      }
+      if (edu) {
+        await tx.careerEducationEntry.deleteMany({ where: { careerEntryId: id } });
+        await tx.careerEducationEntry.createMany({ data: edu.map((e) => ({ careerEntryId: id, educationEntryId: e.id })), skipDuplicates: true });
       }
     });
   } catch (err) {

@@ -2,12 +2,15 @@ import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import type {
   CreateClusterInput,
+  CreateDomainEducationInput,
   CreateDomainInput,
   CreateIndustryInput,
   ListClustersQuery,
+  ListDomainEducationQuery,
   ListDomainsQuery,
   ListIndustriesQuery,
   UpdateClusterInput,
+  UpdateDomainEducationInput,
   UpdateDomainInput,
   UpdateIndustryInput,
 } from "./career-taxonomy.schema.js";
@@ -251,4 +254,86 @@ export async function assertLiveDomain(domainId: string) {
     throw new BadRequestError("domainId does not reference a live career domain");
   }
   return domain;
+}
+
+// ======================= Education Path (domain-level) =======================
+
+// Ordered by level then programme so the picker groups naturally (10+2 → Graduate → PG →
+// certifications), matching the enum's declaration order.
+const educationOrder = [{ level: "asc" }, { programme: "asc" }] as const;
+
+export async function listDomainEducation(domainId: string, query: ListDomainEducationQuery) {
+  await getLiveDomain(domainId); // 404 if the domain is missing/deleted
+  return prisma.domainEducationEntry.findMany({
+    where: {
+      domainId,
+      level: query.level,
+      ...(query.includeDeleted ? {} : { deletedAt: null }),
+    },
+    orderBy: [...educationOrder],
+  });
+}
+
+async function getLiveEducationEntry(entryId: string) {
+  const entry = await prisma.domainEducationEntry.findUnique({ where: { id: entryId } });
+  if (!entry || entry.deletedAt) throw new NotFoundError("Education path entry not found");
+  return entry;
+}
+
+// Unique among *live* siblings only (same rule as the taxonomy levels), so a soft-deleted
+// programme name can be reused. Same level + same programme in one domain is the clash.
+async function assertEducationProgrammeFree(
+  domainId: string,
+  level: CreateDomainEducationInput["level"],
+  programme: string,
+  excludeId?: string
+) {
+  const clash = await prisma.domainEducationEntry.findFirst({
+    where: { domainId, level, programme, deletedAt: null, ...(excludeId ? { id: { not: excludeId } } : {}) },
+  });
+  if (clash) throw new ConflictError("This programme already exists at that level for this domain");
+}
+
+export async function createDomainEducation(domainId: string, input: CreateDomainEducationInput) {
+  await getLiveDomain(domainId);
+  await assertEducationProgrammeFree(domainId, input.level, input.programme);
+  return prisma.domainEducationEntry.create({
+    data: {
+      domainId,
+      level: input.level,
+      programme: input.programme,
+      description: input.description,
+    },
+  });
+}
+
+export async function updateDomainEducation(entryId: string, input: UpdateDomainEducationInput) {
+  const existing = await getLiveEducationEntry(entryId);
+  const level = input.level ?? existing.level;
+  const programme = input.programme ?? existing.programme;
+  if (input.level !== undefined || input.programme !== undefined) {
+    await assertEducationProgrammeFree(existing.domainId, level, programme, entryId);
+  }
+  return prisma.domainEducationEntry.update({
+    where: { id: entryId },
+    data: { level: input.level, programme: input.programme, description: input.description },
+  });
+}
+
+// Soft delete, for the same reason the taxonomy levels are: the row leaves the domain's
+// picker, but job roles already linked to it keep resolving and still render it.
+export async function deleteDomainEducation(entryId: string) {
+  await getLiveEducationEntry(entryId);
+  return prisma.domainEducationEntry.update({
+    where: { id: entryId },
+    data: { deletedAt: new Date() },
+  });
+}
+
+export async function restoreDomainEducation(entryId: string) {
+  const entry = await prisma.domainEducationEntry.findUnique({ where: { id: entryId } });
+  if (!entry) throw new NotFoundError("Education path entry not found");
+  if (!entry.deletedAt) return entry;
+  await assertEducationProgrammeFree(entry.domainId, entry.level, entry.programme, entryId);
+  return prisma.domainEducationEntry.update({ where: { id: entryId }, data: { deletedAt: null } });
 }

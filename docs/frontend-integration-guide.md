@@ -946,6 +946,21 @@ from `GET /career-taxonomy/tree`); writes are **Admin**.
 (the leaf), not cluster/industry/domain strings — resolve it from the cascading picker. An
 unknown or soft-deleted `domainId` returns 400.
 
+**Education Path** hangs off a domain, so every job role in that domain shares one tick-list
+and anything added there is inherited by future roles:
+
+- `GET /domains/{id}/education?level=&includeDeleted=` → the domain's entries, ordered by
+  level then programme. This is what pre-populates the tick-list on the "add job role" form.
+- `POST /domains/{id}/education` `{ level, programme, description? }` (**Admin**) — 409 if
+  that programme already exists at that level in the domain.
+- `PATCH /education/{entryId}` `{ level?, programme?, description? }` (**Admin**) —
+  `description: null` clears it.
+- `DELETE /education/{entryId}` — **soft delete**: it leaves the picker, but job roles
+  already linked keep rendering it. `POST /education/{entryId}/restore` reverses it.
+
+`level` is `CLASS_10_PLUS_2` | `GRADUATE` | `POST_GRADUATE` | `CERTIFICATION_STUDENT` |
+`CERTIFICATION_UG`.
+
 ### 9.5 Entry writes: exams / courses / colleges, and clearing values
 
 **Select existing or add new.** `entranceExams`, `courses` and `institutions` on
@@ -954,26 +969,50 @@ existing canonical row **or** a new one to find-or-create:
 
 ```jsonc
 {
-  "entranceExams": [{ "id": "cm..." }, { "name": "New Exam", "level": "UG" }],
-  "courses":       [{ "id": "cm..." }, { "name": "B.Tech Robotics", "level": "UG" }],
-  "institutions":  [{ "id": "cm..." }, { "name": "New College", "city": "Pune", "state": "MH" }]
+  "entranceExams": [{ "id": "cm..." }, { "name": "New Exam", "level": "UG", "conductingBody": "NTA" }],
+  "courses":       [{ "id": "cm..." }, { "name": "B.Tech Robotics", "level": "UG", "durationYears": "4" }],
+  "institutions":  [{ "id": "cm..." }, { "name": "New College", "city": "Pune", "state": "MH" }],
+  "educationEntries": [{ "id": "cm..." }, { "level": "GRADUATE", "programme": "B.Tech CSE" }]
 }
 ```
 
-Exactly one of `id`/`name` per item. `level` is required when adding an **exam** by name
-(courses default to `UG`). An unknown `id` returns 400. On `PATCH`, a provided array
-**replaces** that entry's links; omitting it leaves them unchanged.
+Exactly one of `id`/`name` per item (`id`/`programme` for education entries). `level` is
+required when adding an **exam** or an **education entry** by name; courses default to `UG`.
+An unknown `id` returns 400. On `PATCH`, a provided array **replaces** that entry's links;
+omitting it leaves them unchanged.
 
-> ⚠️ Only the fields shown above are accepted on a `{ name, … }` item. Anything else you
-> send is **silently dropped** (the request still returns 201/200), and on an item whose
-> name already exists even `city`/`state` are ignored. Widening this to the full exam /
-> course / institution field set is tracked separately.
+**A `{ name, … }` item takes the full field set** — send everything your form collects:
+
+| List | Fields accepted alongside `name` |
+|---|---|
+| `entranceExams` | `level` (required), `fullForm`, `conductingBody`, `officialWebsite`, `examMode`, `frequency`, `applicableFor`, `subjectRequirements12th`, `applicationWindow` |
+| `courses` | `level`, `fullForm`, `durationYears`, `stream12thRequirements`, `relevantEntranceExams`, `programmesOffered`, `topColleges`, `furtherStudyOptions` |
+| `institutions` | `shortName`, `city`, `state`, `type`, `website`, `entranceExamsRequired`, `programmesOffered`, `ranking` |
+| `educationEntries` | `level` (required), `programme` (in place of `name`), `description` |
+
+Websites are plain strings, not validated URLs — `"www.nta.ac.in"` is accepted.
+
+> ⚠️ Two things to know. **(1)** Fields outside those lists are still **silently dropped**
+> (Zod strips unknown keys), so a typo'd field name fails quietly — the request returns
+> 201/200. **(2)** When the name **already exists**, these fields fill only columns that are
+> still blank; they never overwrite an existing value, because canonical rows are shared
+> across job roles. There is no endpoint yet for editing a canonical row outright, so a
+> value that was entered wrong the first time currently needs a DB fix.
+
+**Education entries are domain-scoped.** A `{ level, programme }` item is created under the
+job role's own domain and immediately appears in that domain's tick-list (§9.4) for every
+future role. An `{ id }` that belongs to a *different* domain is a **400** — read ids from
+`GET /career-taxonomy/domains/{domainId}/education`, not from another domain's list.
 
 **Typeahead endpoints** feeding those pickers — any authenticated user:
 
 - `GET /api/v1/career-library/entrance-exams?search=&level=&domainId=&limit=`
 - `GET /api/v1/career-library/institutions?search=&domainId=&limit=`
 - `GET /api/v1/career-library/courses?search=&level=&domainId=&limit=`
+
+These three cover exams/courses/colleges; the Education Path picker is fed by
+`GET /career-taxonomy/domains/{id}/education` instead (§9.4), since it's domain-owned rather
+than global.
 
 `domainId` scopes the result to rows **already linked to job roles in that domain** — the
 "existing entries pulled from this Domain" tick-list. Omit it for the global list. Entry
@@ -991,6 +1030,11 @@ clears it. `null` is accepted for every nullable column:
 
 Empty strings are **not** a way to clear — `""` fails validation. Send `null`. Clear a
 list field (`keySkills`, `topCompanies`, `certifications*`) by sending `[]`.
+
+`GET /career-library/{id}` returns the curated links flattened as `linkedEntranceExams`,
+`linkedCourses`, `linkedInstitutions` and `linkedEducationEntries`. A soft-deleted education
+entry stays in `linkedEducationEntries` (with `deletedAt` set) so an existing role keeps
+rendering it — grey it out rather than dropping it.
 
 This is what makes an edited salary range actually take effect: null out
 `salaryIndiaMinLPA`/`MaxLPA` alongside the new `salaryIndiaRangeText`, and the display

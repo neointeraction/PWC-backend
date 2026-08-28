@@ -292,7 +292,15 @@ from the default (ACTIVE-only) list until an admin publishes them by `PATCH`-ing
 are **canonical lookup tables** linked to each career (many-to-many). On create/update,
 `entranceExams` / `courses` / `institutions` each take an array where every item is
 **either** an existing row `{ id }` **or** a new one `{ name, … }` (find-or-create). Feed
-the dropdowns from the typeahead endpoints below. (`topCompanies` and `certifications*`
+the dropdowns from the typeahead endpoints below. A `{ name, … }` item accepts the **full**
+canonical field set — exams take `fullForm, conductingBody, officialWebsite, examMode,
+frequency, applicableFor, subjectRequirements12th, applicationWindow`; courses take
+`fullForm, durationYears, stream12thRequirements, relevantEntranceExams, programmesOffered,
+topColleges, furtherStudyOptions`; institutions take `shortName, city, state, type, website,
+entranceExamsRequired, programmesOffered, ranking`. On a name that **already exists** those
+fields fill only columns that are still blank — an inline add while editing one job role never
+overwrites reference data another role shares. (Editing a canonical row outright isn't exposed
+yet; see the note in `docs/career-library-normalization-spec.md`.) (`topCompanies` and `certifications*`
 remain free-text arrays for now; the old `String[]` exam/course columns are still
 dual-written during the transition — see `docs/career-library-normalization-spec.md`.)
 
@@ -303,10 +311,10 @@ dual-written during the transition — see `docs/career-library-normalization-sp
 | GET | `/api/v1/career-library/entrance-exams` | **Typeahead dropdown.** Canonical entrance exams. Query: `search?`, `level?` (`UG`\|`PG`), `domainId?`, `limit?` (default 50). `domainId` scopes the list to exams already linked to job roles in that domain ("what this domain already has"); 400 if it isn't a live domain. Omit it for the global list. |
 | GET | `/api/v1/career-library/institutions` | **Typeahead dropdown.** Canonical institutions/colleges. Query: `search?`, `domainId?`, `limit?`. `domainId` scopes to institutions already linked to job roles in that domain; 400 if it isn't a live domain. |
 | GET | `/api/v1/career-library/courses` | **Typeahead dropdown.** Canonical courses. Query: `search?`, `level?`, `domainId?`, `limit?`. `domainId` scopes to courses already linked to job roles in that domain; 400 if it isn't a live domain. |
-| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `domainId` (a live `CareerDomain` leaf — cluster/industry are derived from it; 400 if unknown or soft-deleted), `jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields (incl. `qualification10th12thExplanation`, `qualificationGraduationDefined`, `qualificationPGDefined`), `roleOverview`, `keySkills` (string list), `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name). Returns the assembled entry. `createdBy` = calling admin. |
-| PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` toggle). A provided link array **replaces** that entry's links; omitting it leaves them unchanged. **Clearing a value:** omitting a scalar leaves it unchanged, sending `null` clears it — accepted for every nullable column (`salaryIndia*`/`salaryGlobal*` text **and** numeric, `roleOverview`, `qualification10th12thExplanation`, `qualificationGraduation(Defined)`, `qualificationPG(Defined)`, `entranceExamsUGDescription`). Empty strings are still rejected; clear with `null`. `jobRole`, `domainId`, `aiResilienceGrade`, `aiResilienceComment`, `oneLineDescription` and `qualification10th12th` are NOT NULL and reject `null`. Clear a list by sending `[]`. 400 on an unknown link `id`. Sets `updatedBy`. 404 if not found. |
+| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `domainId` (a live `CareerDomain` leaf — cluster/industry are derived from it; 400 if unknown or soft-deleted), `jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields (incl. `qualification10th12thExplanation`, `qualificationGraduationDefined`, `qualificationPGDefined`), `roleOverview`, `keySkills` (string list), `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` / `educationEntries` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name, education items are `[{ id } \| { level, programme, description? }]`). Returns the assembled entry. `createdBy` = calling admin. |
+| PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` toggle). A provided link array (`entranceExams`/`courses`/`institutions`/`educationEntries`) **replaces** that entry's links; omitting it leaves them unchanged. **Clearing a value:** omitting a scalar leaves it unchanged, sending `null` clears it — accepted for every nullable column (`salaryIndia*`/`salaryGlobal*` text **and** numeric, `roleOverview`, `qualification10th12thExplanation`, `qualificationGraduation(Defined)`, `qualificationPG(Defined)`, `entranceExamsUGDescription`). Empty strings are still rejected; clear with `null`. `jobRole`, `domainId`, `aiResilienceGrade`, `aiResilienceComment`, `oneLineDescription` and `qualification10th12th` are NOT NULL and reject `null`. Clear a list by sending `[]`. 400 on an unknown link `id`. Sets `updatedBy`. 404 if not found. |
 | DELETE | `/api/v1/career-library/{id}` | **Admin.** Delete an entry (cascades its links; first detaches any request's `resultingEntryId`). 404 if not found. |
-| GET | `/api/v1/career-library/{id}` | Get one entry. Includes the `domain` chain (`domain.industry.cluster`), the curated normalized links `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions`, plus the legacy broad value-match view `relatedInstitutions` (by `domain.industry.name`) / `relatedCourses` (by `domain.industry.cluster.name`) / `relatedEntranceExams` (kept during transition). 404 if not found. |
+| GET | `/api/v1/career-library/{id}` | Get one entry. Includes the `domain` chain (`domain.industry.cluster`), the curated normalized links `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions` / `linkedEducationEntries`, plus the legacy broad value-match view `relatedInstitutions` (by `domain.industry.name`) / `relatedCourses` (by `domain.industry.cluster.name`) / `relatedEntranceExams` (kept during transition). 404 if not found. |
 
 ### Ratification requests
 
@@ -349,6 +357,25 @@ makes restoring the original **409**). Ids may be cuid or uuid (backfilled rows)
 | PATCH | `/api/v1/career-taxonomy/domains/{id}` | **Admin.** Rename and/or re-parent (`{ industryId?, name? }`). 409 on clash within the target industry. |
 | DELETE | `/api/v1/career-taxonomy/domains/{id}` | **Admin.** Soft-delete. |
 | POST | `/api/v1/career-taxonomy/domains/{id}/restore` | **Admin.** Restore. 409 on name clash. |
+
+### Education Path (domain-level)
+
+The qualifications/programmes that lead into a domain, held **per domain** rather than per job
+role — so the "add job role" form shows a tick-list of what the domain already has, and anything
+added there is inherited by every future role in that domain. `level` is one of
+`CLASS_10_PLUS_2` \| `GRADUATE` \| `POST_GRADUATE` \| `CERTIFICATION_STUDENT` \| `CERTIFICATION_UG`.
+Soft-deleted like the taxonomy nodes: a deleted entry leaves the picker but job roles already
+linked to it keep resolving and still render it. Uniqueness is per `(domain, level, programme)`
+among live rows. The flat `qualification*` / `certifications*` strings on a career entry are the
+older free-text layer and are left untouched — they hold descriptive prose, not a list.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/career-taxonomy/domains/{id}/education` | List a domain's education path. Query: `level?`, `includeDeleted?`. Ordered by level then programme. 404 if the domain is missing/deleted. |
+| POST | `/api/v1/career-taxonomy/domains/{id}/education` | **Admin.** Create. Body: `{ level, programme, description? }`. 409 if that programme already exists at that level in the domain. |
+| PATCH | `/api/v1/career-taxonomy/education/{entryId}` | **Admin.** Update `{ level?, programme?, description? }`. `description: null` clears it. 409 on a clash within the domain, 404 if missing/deleted. |
+| DELETE | `/api/v1/career-taxonomy/education/{entryId}` | **Admin.** Soft-delete. Returns the row with `deletedAt` set. |
+| POST | `/api/v1/career-taxonomy/education/{entryId}/restore` | **Admin.** Clear `deletedAt`. 409 if a live row now holds that level+programme. |
 
 ## Sessions
 

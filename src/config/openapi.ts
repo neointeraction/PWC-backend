@@ -47,13 +47,17 @@ import {
 } from "../modules/career-library/career-library.schema.js";
 import {
   createClusterSchema,
+  createDomainEducationSchema,
   createDomainSchema,
   createIndustrySchema,
+  educationEntryIdParamsSchema,
   listClustersQuerySchema,
+  listDomainEducationQuerySchema,
   listDomainsQuerySchema,
   listIndustriesQuerySchema,
   taxonomyIdParamsSchema,
   updateClusterSchema,
+  updateDomainEducationSchema,
   updateDomainSchema,
   updateIndustrySchema,
 } from "../modules/career-taxonomy/career-taxonomy.schema.js";
@@ -1411,6 +1415,49 @@ registry.registerPath({
   summary: "Restore a soft-deleted domain (admin). 409 on name clash.",
   request: { params: taxonomyIdParamsSchema },
   responses: { 200: { description: "Restored domain", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+// Education Path (domain-level)
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-taxonomy/domains/{id}/education",
+  tags: taxTag,
+  summary:
+    "List a domain's Education Path entries — the tick-list of qualifications/programmes every job role in the domain inherits (?level to scope; ?includeDeleted=true). Any authenticated user.",
+  request: { params: taxonomyIdParamsSchema, query: listDomainEducationQuerySchema },
+  responses: taxListResponses,
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/domains/{id}/education",
+  tags: taxTag,
+  summary: "Add an Education Path entry to a domain (admin). 409 if that programme already exists at that level.",
+  request: { params: taxonomyIdParamsSchema, body: { content: { "application/json": { schema: createDomainEducationSchema } } } },
+  responses: { 201: { description: "Created education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-taxonomy/education/{entryId}",
+  tags: taxTag,
+  summary: "Update an Education Path entry (admin). Send description: null to clear it. 409 on a clash within the domain.",
+  request: { params: educationEntryIdParamsSchema, body: { content: { "application/json": { schema: updateDomainEducationSchema } } } },
+  responses: { 200: { description: "Updated education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/career-taxonomy/education/{entryId}",
+  tags: taxTag,
+  summary: "Soft-delete an Education Path entry (admin). Job roles already linked keep resolving it.",
+  request: { params: educationEntryIdParamsSchema },
+  responses: { 200: { description: "Soft-deleted education path entry", content: { "application/json": { schema: genericObjectSchema } } }, 404: errorResponses[404] },
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/education/{entryId}/restore",
+  tags: taxTag,
+  summary: "Restore a soft-deleted Education Path entry (admin). 409 on a clash within the domain.",
+  request: { params: educationEntryIdParamsSchema },
+  responses: { 200: { description: "Restored education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 
 export function generateOpenApiDocument() {

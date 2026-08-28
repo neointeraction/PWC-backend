@@ -26,14 +26,40 @@ export type CareerLibraryIdParams = z.infer<typeof careerLibraryIdParamsSchema>;
 // --- Entry writes (admin/super admin) ---
 
 const QUALIFICATION_LEVELS = ["UG", "PG"] as const;
+// Mirrors the prisma `EducationPathLevel` enum (10+2 / Graduate / Post-Graduate /
+// Certification-Student / Certification-UG).
+const EDUCATION_PATH_LEVELS = [
+  "CLASS_10_PLUS_2",
+  "GRADUATE",
+  "POST_GRADUATE",
+  "CERTIFICATION_STUDENT",
+  "CERTIFICATION_UG",
+] as const;
 
 // A normalized link item is EITHER an existing lookup row (`{ id }`) OR a new one to
 // find-or-create (`{ name, ... }`) — "select existing or add new". Exactly one of id/name.
+//
+// The detail fields below carry the rest of the admin "add new" form so a hand-added
+// canonical row lands as complete as an imported one. They apply only to a `{ name, ... }`
+// item, and only to columns that are still BLANK on a row that already exists — an inline
+// add while editing one job role must never overwrite reference data other roles share.
+// Websites are plain strings, not `.url()`: the source data holds bare hosts like
+// "www.nta.ac.in" and rejecting those would be worse than storing them.
+const detail = z.string().trim().min(1).optional();
+
 export const examLinkItemSchema = z
   .object({
     id: z.string().cuid().optional(),
     name: z.string().trim().min(1).optional(),
     level: z.enum(QUALIFICATION_LEVELS).optional(),
+    fullForm: detail,
+    conductingBody: detail,
+    officialWebsite: detail,
+    examMode: detail,
+    frequency: detail,
+    applicableFor: detail,
+    subjectRequirements12th: detail,
+    applicationWindow: detail,
   })
   .refine((v) => Boolean(v.id) !== Boolean(v.name), { message: "Provide exactly one of id or name" })
   .refine((v) => !v.name || v.level, { message: "level (UG|PG) is required when adding an exam by name" });
@@ -43,6 +69,13 @@ export const courseLinkItemSchema = z
     id: z.string().cuid().optional(),
     name: z.string().trim().min(1).optional(),
     level: z.enum(QUALIFICATION_LEVELS).optional(), // defaults to UG in the service
+    fullForm: detail,
+    durationYears: detail,
+    stream12thRequirements: detail,
+    relevantEntranceExams: detail,
+    programmesOffered: detail,
+    topColleges: detail,
+    furtherStudyOptions: detail,
   })
   .refine((v) => Boolean(v.id) !== Boolean(v.name), { message: "Provide exactly one of id or name" });
 
@@ -50,14 +83,38 @@ export const institutionLinkItemSchema = z
   .object({
     id: z.string().cuid().optional(),
     name: z.string().trim().min(1).optional(),
-    city: z.string().trim().min(1).optional(),
-    state: z.string().trim().min(1).optional(),
+    shortName: detail,
+    city: detail,
+    state: detail,
+    type: detail,
+    website: detail,
+    entranceExamsRequired: detail,
+    programmesOffered: detail,
+    ranking: detail,
   })
   .refine((v) => Boolean(v.id) !== Boolean(v.name), { message: "Provide exactly one of id or name" });
+
+// Education Path items live at the DOMAIN level (see prisma `DomainEducationEntry`), so a
+// `{ level, programme }` item is find-or-created under the entry's own domain and becomes
+// available to every future job role there. An `{ id }` must already belong to that domain.
+export const educationLinkItemSchema = z
+  .object({
+    id: z.string().cuid().optional(),
+    level: z.enum(EDUCATION_PATH_LEVELS).optional(),
+    programme: z.string().trim().min(1).optional(),
+    description: detail,
+  })
+  .refine((v) => Boolean(v.id) !== Boolean(v.programme), {
+    message: "Provide exactly one of id or programme",
+  })
+  .refine((v) => !v.programme || v.level, {
+    message: "level is required when adding an education entry by programme",
+  });
 
 export type ExamLinkItem = z.infer<typeof examLinkItemSchema>;
 export type CourseLinkItem = z.infer<typeof courseLinkItemSchema>;
 export type InstitutionLinkItem = z.infer<typeof institutionLinkItemSchema>;
+export type EducationLinkItem = z.infer<typeof educationLinkItemSchema>;
 
 export const createCareerEntrySchema = z.object({
   // Leaf of the Cluster → Industry → Domain taxonomy; must reference a live CareerDomain
@@ -92,6 +149,8 @@ export const createCareerEntrySchema = z.object({
   entranceExams: z.array(examLinkItemSchema).default([]),
   courses: z.array(courseLinkItemSchema).default([]),
   institutions: z.array(institutionLinkItemSchema).default([]),
+  // Domain-level Education Path (see `educationLinkItemSchema`).
+  educationEntries: z.array(educationLinkItemSchema).default([]),
   // New entries default to DRAFT — an admin flips them to ACTIVE (the "ratify"/publish
   // step) once reviewed. ACTIVE-on-create is allowed for trusted bulk additions.
   status: z.enum(CAREER_LIBRARY_STATUSES).default("DRAFT"),

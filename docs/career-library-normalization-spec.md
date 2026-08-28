@@ -173,4 +173,28 @@ dropdowns:
 - **D4 — UG/PG.** ✅ One lookup table per type with a `level` (`QualificationLevel`) field.
 - **D5 — Old columns.** ✅ Keep the `String[]` columns through one transitional release,
   drop in a follow-up migration once verified.
+
+## 8. Follow-ups shipped after §7 (2026-08-28)
+
+- **Full detail on inline "add new".** The canonical lookups gained the columns the admin
+  form actually collects (`EntranceExam`: `examMode`, `frequency`, `applicableFor`,
+  `subjectRequirements12th`, `applicationWindow`; `Course`: `stream12thRequirements`,
+  `relevantEntranceExams`, `programmesOffered`, `topColleges`, `furtherStudyOptions`;
+  `Institution`: `shortName`, `entranceExamsRequired`, `programmesOffered`, `ranking`), and
+  the `{ name, … }` link items accept them. A course's exam/college fields stay **free text**
+  — a course is reference data, not a second place to curate per-career links.
+- **Blank-fill, not overwrite.** Linking a name that already exists fills only columns that
+  are still null. Canonical rows are shared across job roles, so an inline add while editing
+  one role must not clobber another's data.
+- **Domain-scoped typeahead.** `?domainId=` on the three dropdown endpoints answers "what
+  does this domain already have", derived from the join tables — no extra schema.
+- **Education Path** (`DomainEducationEntry` + `CareerEducationEntry`) is normalized at the
+  **domain** level, managed under `/api/v1/career-taxonomy/`. Unlike exams/courses it is
+  **not** dual-written back to the flat `qualification*`/`certifications*` strings: those
+  hold workbook prose, not lists.
+
+**Still open:** there is no endpoint to *edit* a canonical `EntranceExam`/`Course`/
+`Institution` row. Blank-fill means a value entered wrong on first creation can only be
+corrected in the database. Admin CRUD for the three lookup tables is the natural next step —
+it also gives the "manage reference data" screen a home, separate from the job-role form.
 ```

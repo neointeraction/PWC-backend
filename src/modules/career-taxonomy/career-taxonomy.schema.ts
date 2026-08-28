@@ -49,3 +49,39 @@ export const updateDomainSchema = z.object({
   name: z.string().trim().min(1).optional(),
 });
 export type UpdateDomainInput = z.infer<typeof updateDomainSchema>;
+
+// --- Education Path (domain-level) ---
+// The qualifications/programmes that lead into a domain. Held per-domain rather than per
+// job role so the "add job role" form can show a tick-list of what the domain already has,
+// and anything added there is inherited by every future role in that domain.
+export const EDUCATION_PATH_LEVELS = [
+  "CLASS_10_PLUS_2",
+  "GRADUATE",
+  "POST_GRADUATE",
+  "CERTIFICATION_STUDENT",
+  "CERTIFICATION_UG",
+] as const;
+
+// Nested under a domain for list/create; addressed directly by its own id for update/delete.
+export const educationEntryIdParamsSchema = z.object({ entryId: id });
+export type EducationEntryIdParams = z.infer<typeof educationEntryIdParamsSchema>;
+
+export const listDomainEducationQuerySchema = z.object({
+  level: z.enum(EDUCATION_PATH_LEVELS).optional(),
+  includeDeleted,
+});
+export type ListDomainEducationQuery = z.infer<typeof listDomainEducationQuerySchema>;
+
+export const createDomainEducationSchema = z.object({
+  level: z.enum(EDUCATION_PATH_LEVELS),
+  programme: z.string().trim().min(1),
+  description: z.string().trim().min(1).nullish(),
+});
+export type CreateDomainEducationInput = z.infer<typeof createDomainEducationSchema>;
+
+export const updateDomainEducationSchema = z.object({
+  level: z.enum(EDUCATION_PATH_LEVELS).optional(),
+  programme: z.string().trim().min(1).optional(),
+  description: z.string().trim().min(1).nullish(), // null clears it
+});
+export type UpdateDomainEducationInput = z.infer<typeof updateDomainEducationSchema>;

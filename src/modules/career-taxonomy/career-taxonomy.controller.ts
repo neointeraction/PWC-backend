@@ -56,3 +56,20 @@ export async function restoreDomain(req: Request, res: Response): Promise<void> 
 export async function getTree(_req: Request, res: Response): Promise<void> {
   res.status(200).json(await service.getTaxonomyTree());
 }
+
+// ---- Education Path (domain-level) ----
+export async function listDomainEducation(req: Request, res: Response): Promise<void> {
+  res.status(200).json(await service.listDomainEducation(req.params.id as string, req.query as never));
+}
+export async function createDomainEducation(req: Request, res: Response): Promise<void> {
+  res.status(201).json(await service.createDomainEducation(req.params.id as string, req.body));
+}
+export async function updateDomainEducation(req: Request, res: Response): Promise<void> {
+  res.status(200).json(await service.updateDomainEducation(req.params.entryId as string, req.body));
+}
+export async function deleteDomainEducation(req: Request, res: Response): Promise<void> {
+  res.status(200).json(await service.deleteDomainEducation(req.params.entryId as string));
+}
+export async function restoreDomainEducation(req: Request, res: Response): Promise<void> {
+  res.status(200).json(await service.restoreDomainEducation(req.params.entryId as string));
+}
