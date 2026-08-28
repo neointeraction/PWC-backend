@@ -1100,7 +1100,8 @@ registry.registerPath({
   method: "patch",
   path: "/api/v1/career-library/{id}",
   tags: ["Career Library"],
-  summary: "Update a career library entry (incl. status publish/unpublish). Admin only.",
+  summary:
+    "Update a career library entry (incl. status publish/unpublish). Admin only. Omitting a scalar leaves it unchanged; sending null clears it (nullable columns only — empty strings are rejected).",
   request: { params: careerLibraryIdParamsSchema, body: { content: { "application/json": { schema: updateCareerEntrySchema } } } },
   responses: {
     200: { description: "Updated entry", content: { "application/json": { schema: genericObjectSchema } } },
@@ -1186,7 +1187,8 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/career-library/entrance-exams",
   tags: ["Career Library"],
-  summary: "Typeahead list of canonical entrance exams (for the select-or-add dropdown). Any authenticated user.",
+  summary:
+    "Typeahead list of canonical entrance exams (for the select-or-add dropdown). Pass domainId to scope to exams already used by job roles in that domain. Any authenticated user.",
   request: { query: listEntranceExamsQuerySchema },
   responses: {
     200: { description: "Entrance exams", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
@@ -1197,7 +1199,8 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/career-library/institutions",
   tags: ["Career Library"],
-  summary: "Typeahead list of canonical institutions/colleges (for the select-or-add dropdown). Any authenticated user.",
+  summary:
+    "Typeahead list of canonical institutions/colleges (for the select-or-add dropdown). Pass domainId to scope to institutions already used by job roles in that domain. Any authenticated user.",
   request: { query: listInstitutionsQuerySchema },
   responses: {
     200: { description: "Institutions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
@@ -1208,7 +1211,8 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/career-library/courses",
   tags: ["Career Library"],
-  summary: "Typeahead list of canonical courses (for the select-or-add dropdown). Any authenticated user.",
+  summary:
+    "Typeahead list of canonical courses (for the select-or-add dropdown). Pass domainId to scope to courses already used by job roles in that domain. Any authenticated user.",
   request: { query: listCoursesQuerySchema },
   responses: {
     200: { description: "Courses", content: { "application/json": { schema: z.array(genericObjectSchema) } } },

@@ -328,9 +328,23 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
 
 // --- Dropdown / typeahead lookups ---
 
+// Optional domain scoping: "what does this Domain already have?" — i.e. the lookup rows
+// already linked to job roles whose leaf domain is `domainId`, via the join tables. Entry
+// status is deliberately ignored (a draft role's exams are still the domain's data, and
+// every canonical row is listable globally anyway, so this exposes nothing new).
+// Omitting `domainId` keeps the global list.
+function domainScope(domainId?: string) {
+  return domainId ? { careerLinks: { some: { careerEntry: { domainId } } } } : {};
+}
+
 export async function listEntranceExams(query: ListEntranceExamsQuery) {
+  if (query.domainId) await assertLiveDomain(query.domainId); // 400 rather than a silently empty list
   return prisma.entranceExam.findMany({
-    where: { level: query.level, name: query.search ? { contains: query.search, mode: "insensitive" } : undefined },
+    where: {
+      level: query.level,
+      name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
+      ...domainScope(query.domainId),
+    },
     orderBy: { name: "asc" },
     take: query.limit,
     select: { id: true, name: true, level: true, fullForm: true, conductingBody: true },
@@ -338,8 +352,12 @@ export async function listEntranceExams(query: ListEntranceExamsQuery) {
 }
 
 export async function listInstitutions(query: ListInstitutionsQuery) {
+  if (query.domainId) await assertLiveDomain(query.domainId);
   return prisma.institution.findMany({
-    where: { name: query.search ? { contains: query.search, mode: "insensitive" } : undefined },
+    where: {
+      name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
+      ...domainScope(query.domainId),
+    },
     orderBy: { name: "asc" },
     take: query.limit,
     select: { id: true, name: true, city: true, state: true, type: true },
@@ -347,8 +365,13 @@ export async function listInstitutions(query: ListInstitutionsQuery) {
 }
 
 export async function listCourses(query: ListCoursesQuery) {
+  if (query.domainId) await assertLiveDomain(query.domainId);
   return prisma.course.findMany({
-    where: { level: query.level, name: query.search ? { contains: query.search, mode: "insensitive" } : undefined },
+    where: {
+      level: query.level,
+      name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
+      ...domainScope(query.domainId),
+    },
     orderBy: { name: "asc" },
     take: query.limit,
     select: { id: true, name: true, level: true, fullForm: true },

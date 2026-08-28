@@ -68,22 +68,22 @@ export const createCareerEntrySchema = z.object({
   aiResilienceComment: z.string().trim().min(1),
   oneLineDescription: z.string().trim().min(1),
   // Longer-form editorial fields (yellow workbook columns).
-  roleOverview: z.string().trim().min(1).optional(),
+  roleOverview: z.string().trim().min(1).nullish(),
   keySkills: z.array(z.string().trim().min(1)).default([]),
   topCompanies: z.array(z.string().trim().min(1)).default([]),
-  salaryIndiaRangeText: z.string().trim().min(1).optional(),
-  salaryIndiaMinLPA: z.number().optional(),
-  salaryIndiaMaxLPA: z.number().optional(),
-  salaryGlobalRangeText: z.string().trim().min(1).optional(),
-  salaryGlobalMinUSD: z.number().optional(),
-  salaryGlobalMaxUSD: z.number().optional(),
+  salaryIndiaRangeText: z.string().trim().min(1).nullish(),
+  salaryIndiaMinLPA: z.number().nullish(),
+  salaryIndiaMaxLPA: z.number().nullish(),
+  salaryGlobalRangeText: z.string().trim().min(1).nullish(),
+  salaryGlobalMinUSD: z.number().nullish(),
+  salaryGlobalMaxUSD: z.number().nullish(),
   qualification10th12th: z.string().trim().min(1),
-  qualification10th12thExplanation: z.string().trim().min(1).optional(),
-  qualificationGraduation: z.string().trim().min(1).optional(),
-  qualificationGraduationDefined: z.string().trim().min(1).optional(),
-  qualificationPG: z.string().trim().min(1).optional(),
-  qualificationPGDefined: z.string().trim().min(1).optional(),
-  entranceExamsUGDescription: z.string().trim().min(1).optional(),
+  qualification10th12thExplanation: z.string().trim().min(1).nullish(),
+  qualificationGraduation: z.string().trim().min(1).nullish(),
+  qualificationGraduationDefined: z.string().trim().min(1).nullish(),
+  qualificationPG: z.string().trim().min(1).nullish(),
+  qualificationPGDefined: z.string().trim().min(1).nullish(),
+  entranceExamsUGDescription: z.string().trim().min(1).nullish(),
   certificationsStudent: z.array(z.string().trim().min(1)).default([]),
   certificationsUG: z.array(z.string().trim().min(1)).default([]),
   // Normalized "select existing or add new" links (each item is { id } or { name, ... }).
@@ -100,6 +100,8 @@ export type CreateCareerEntryInput = z.infer<typeof createCareerEntrySchema>;
 
 // All fields optional for a partial update; `status` here is the publish/unpublish toggle.
 // A provided link array REPLACES that entry's links; omitting it leaves them unchanged.
+// Omitting a scalar leaves it unchanged; sending `null` CLEARS it (nullable columns only —
+// see `.nullish()` above). Empty strings stay rejected: clear with null, not an empty string.
 export const updateCareerEntrySchema = createCareerEntrySchema.partial();
 export type UpdateCareerEntryInput = z.infer<typeof updateCareerEntrySchema>;
 
@@ -108,12 +110,18 @@ export type UpdateCareerEntryInput = z.infer<typeof updateCareerEntrySchema>;
 export const listEntranceExamsQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
   level: z.enum(QUALIFICATION_LEVELS).optional(),
+  // Scope to exams/courses/institutions already linked to job roles in this domain
+  // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
+  domainId: z.string().min(1).optional(),
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
 export type ListEntranceExamsQuery = z.infer<typeof listEntranceExamsQuerySchema>;
 
 export const listInstitutionsQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
+  // Scope to exams/courses/institutions already linked to job roles in this domain
+  // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
+  domainId: z.string().min(1).optional(),
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
 export type ListInstitutionsQuery = z.infer<typeof listInstitutionsQuerySchema>;
@@ -121,6 +129,9 @@ export type ListInstitutionsQuery = z.infer<typeof listInstitutionsQuerySchema>;
 export const listCoursesQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
   level: z.enum(QUALIFICATION_LEVELS).optional(),
+  // Scope to exams/courses/institutions already linked to job roles in this domain
+  // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
+  domainId: z.string().min(1).optional(),
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
 export type ListCoursesQuery = z.infer<typeof listCoursesQuerySchema>;

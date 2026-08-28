@@ -7,6 +7,7 @@ import { authRequest, bearer } from "./helpers/http.js";
 const app = createApp();
 
 let testDomainId: string; // live taxonomy leaf the created entries point at
+let scopedDomainId: string; // second leaf, kept clean so domainId scoping is exactly assertable
 
 function entryBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -30,11 +31,15 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
       data: { industryId: industry.id, name: "Test Norm Domain" },
     });
     testDomainId = domain.id;
+    const scopedDomain = await prisma.careerDomain.create({
+      data: { industryId: industry.id, name: "Test Norm Domain Scoped" },
+    });
+    scopedDomainId = scopedDomain.id;
   });
 
   afterAll(async () => {
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test Norm Role" } } });
-    await prisma.careerDomain.deleteMany({ where: { name: "Test Norm Domain" } });
+    await prisma.careerDomain.deleteMany({ where: { name: { startsWith: "Test Norm Domain" } } });
     await prisma.careerIndustry.deleteMany({ where: { name: "Test Norm Industry" } });
     await prisma.careerCluster.deleteMany({ where: { name: "Test Norm Cluster" } });
     await prisma.entranceExam.deleteMany({ where: { name: { startsWith: "Test Norm " } } });
@@ -146,5 +151,101 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
       .get("/api/v1/career-library/courses")
       .set("Authorization", bearer("COUNSELLOR"));
     expect(dropdown.status).toBe(200);
+  });
+
+  it("scopes the typeahead lists to one domain via domainId", async () => {
+    const created = await authRequest(app).post("/api/v1/career-library").send(
+      entryBody({
+        domainId: scopedDomainId,
+        jobRole: "Test Norm Role Scoped",
+        entranceExams: [{ name: "Test Norm Scoped Exam", level: "UG" }],
+        courses: [{ name: "Test Norm Scoped Course" }],
+        institutions: [{ name: "Test Norm Scoped College" }],
+      })
+    );
+    expect(created.status).toBe(201);
+
+    // This domain has exactly one job role, so its scoped lists are exactly its links.
+    const exams = await authRequest(app).get("/api/v1/career-library/entrance-exams").query({ domainId: scopedDomainId });
+    expect(exams.status).toBe(200);
+    expect(exams.body.map((e: { name: string }) => e.name)).toEqual(["Test Norm Scoped Exam"]);
+
+    const courses = await authRequest(app).get("/api/v1/career-library/courses").query({ domainId: scopedDomainId });
+    expect(courses.body.map((c: { name: string }) => c.name)).toEqual(["Test Norm Scoped Course"]);
+
+    const insts = await authRequest(app).get("/api/v1/career-library/institutions").query({ domainId: scopedDomainId });
+    expect(insts.body.map((i: { name: string }) => i.name)).toEqual(["Test Norm Scoped College"]);
+
+    // The canonical row is still globally findable (scoping filters the list, not the table)...
+    const global = await authRequest(app)
+      .get("/api/v1/career-library/entrance-exams")
+      .query({ search: "Test Norm Scoped Exam" });
+    expect(global.body).toHaveLength(1);
+
+    // ...but it's excluded from a domain that doesn't link it.
+    const otherDomain = await authRequest(app)
+      .get("/api/v1/career-library/entrance-exams")
+      .query({ domainId: testDomainId, search: "Test Norm Scoped Exam" });
+    expect(otherDomain.body).toHaveLength(0);
+
+    // Search/level still compose with the scope.
+    const scopedPg = await authRequest(app)
+      .get("/api/v1/career-library/entrance-exams")
+      .query({ domainId: scopedDomainId, level: "PG" });
+    expect(scopedPg.body).toHaveLength(0);
+
+    // A domainId that isn't a live domain is a 400, not a silently empty list.
+    const bad = await authRequest(app)
+      .get("/api/v1/career-library/entrance-exams")
+      .query({ domainId: "clzzzzzzzzzzzzzzzzzzzzzzzz" });
+    expect(bad.status).toBe(400);
+  });
+
+  it("PATCH clears nullable scalars with null and rejects null on NOT NULL columns", async () => {
+    const created = await authRequest(app).post("/api/v1/career-library").send(
+      entryBody({
+        jobRole: "Test Norm Role Nulls",
+        salaryIndiaRangeText: "INR 6-25 LPA",
+        salaryIndiaMinLPA: 6,
+        salaryIndiaMaxLPA: 25,
+        roleOverview: "Original overview",
+        qualificationPG: "M.Tech",
+      })
+    );
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+    expect(created.body.salaryIndiaMinLPA).toBe(6);
+
+    // The real case: a re-typed text range plus nulled numerics, so the stale parsed
+    // figures stop winning in the UI.
+    const updated = await authRequest(app).patch(`/api/v1/career-library/${id}`).send({
+      salaryIndiaRangeText: "INR 8-30 LPA",
+      salaryIndiaMinLPA: null,
+      salaryIndiaMaxLPA: null,
+      roleOverview: null,
+      qualificationPG: null,
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.salaryIndiaRangeText).toBe("INR 8-30 LPA");
+    expect(updated.body.salaryIndiaMinLPA).toBeNull();
+    expect(updated.body.salaryIndiaMaxLPA).toBeNull();
+    expect(updated.body.roleOverview).toBeNull();
+    expect(updated.body.qualificationPG).toBeNull();
+
+    // Omitting is still "leave unchanged" — only an explicit null clears.
+    const untouched = await authRequest(app)
+      .patch(`/api/v1/career-library/${id}`)
+      .send({ jobRole: "Test Norm Role Nulls" });
+    expect(untouched.body.salaryIndiaRangeText).toBe("INR 8-30 LPA");
+
+    // Empty string stays rejected; clear with null instead.
+    const emptyString = await authRequest(app).patch(`/api/v1/career-library/${id}`).send({ roleOverview: "" });
+    expect(emptyString.status).toBe(400);
+
+    // NOT NULL columns reject null.
+    const notNull = await authRequest(app)
+      .patch(`/api/v1/career-library/${id}`)
+      .send({ qualification10th12th: null });
+    expect(notNull.status).toBe(400);
   });
 });

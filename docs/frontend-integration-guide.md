@@ -946,6 +946,56 @@ from `GET /career-taxonomy/tree`); writes are **Admin**.
 (the leaf), not cluster/industry/domain strings — resolve it from the cascading picker. An
 unknown or soft-deleted `domainId` returns 400.
 
+### 9.5 Entry writes: exams / courses / colleges, and clearing values
+
+**Select existing or add new.** `entranceExams`, `courses` and `institutions` on
+`POST`/`PATCH /api/v1/career-library` each take a list where every item is **either** an
+existing canonical row **or** a new one to find-or-create:
+
+```jsonc
+{
+  "entranceExams": [{ "id": "cm..." }, { "name": "New Exam", "level": "UG" }],
+  "courses":       [{ "id": "cm..." }, { "name": "B.Tech Robotics", "level": "UG" }],
+  "institutions":  [{ "id": "cm..." }, { "name": "New College", "city": "Pune", "state": "MH" }]
+}
+```
+
+Exactly one of `id`/`name` per item. `level` is required when adding an **exam** by name
+(courses default to `UG`). An unknown `id` returns 400. On `PATCH`, a provided array
+**replaces** that entry's links; omitting it leaves them unchanged.
+
+> ⚠️ Only the fields shown above are accepted on a `{ name, … }` item. Anything else you
+> send is **silently dropped** (the request still returns 201/200), and on an item whose
+> name already exists even `city`/`state` are ignored. Widening this to the full exam /
+> course / institution field set is tracked separately.
+
+**Typeahead endpoints** feeding those pickers — any authenticated user:
+
+- `GET /api/v1/career-library/entrance-exams?search=&level=&domainId=&limit=`
+- `GET /api/v1/career-library/institutions?search=&domainId=&limit=`
+- `GET /api/v1/career-library/courses?search=&level=&domainId=&limit=`
+
+`domainId` scopes the result to rows **already linked to job roles in that domain** — the
+"existing entries pulled from this Domain" tick-list. Omit it for the global list. Entry
+status is ignored (a draft role's exams still count as the domain's data). 400 if the
+domain doesn't exist or is soft-deleted. Use it to pre-populate the picker, and let the
+user fall back to the global (un-scoped) search to add something the domain hasn't used
+yet.
+
+**Clearing a value on `PATCH`.** Omitting a field leaves it unchanged; sending `null`
+clears it. `null` is accepted for every nullable column:
+
+| Clearable with `null` | Rejects `null` (NOT NULL) |
+|---|---|
+| `roleOverview`, `salaryIndiaRangeText`, `salaryIndiaMinLPA`, `salaryIndiaMaxLPA`, `salaryGlobalRangeText`, `salaryGlobalMinUSD`, `salaryGlobalMaxUSD`, `qualification10th12thExplanation`, `qualificationGraduation(Defined)`, `qualificationPG(Defined)`, `entranceExamsUGDescription` | `domainId`, `jobRole`, `aiResilienceGrade`, `aiResilienceComment`, `oneLineDescription`, `qualification10th12th` |
+
+Empty strings are **not** a way to clear — `""` fails validation. Send `null`. Clear a
+list field (`keySkills`, `topCompanies`, `certifications*`) by sending `[]`.
+
+This is what makes an edited salary range actually take effect: null out
+`salaryIndiaMinLPA`/`MaxLPA` alongside the new `salaryIndiaRangeText`, and the display
+falls back to the text per §9.1.
+
 ---
 
 ## 10. Sessions
