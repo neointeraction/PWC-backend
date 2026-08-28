@@ -59,18 +59,15 @@ pnpm db:seed
 
 The seed is idempotent and non-destructive — safe to re-run. It creates the SUPER_ADMIN
 (from `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`), the cohorts and languages,
-all four form templates, the Class 9–10 assessment question bank, the career library, and
-one demo login per role:
+all four form templates, the Class 9–10 assessment question bank, and the career library.
 
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@kreate.local` | `Admin@123` |
-| Counsellor | `counsellor@kreate.local` | `Counsellor@123` |
-| Student | `student@kreate.local` | `Student@123` |
+It seeds **no demo accounts or demo project** — a freshly seeded database contains the
+SUPER_ADMIN and reference data only. There is no self-register endpoint — every real
+account is created by an admin, so the seeded SUPER_ADMIN is the only way to bootstrap a
+fresh environment.
 
-These are local-dev conveniences seeded with `mustChangePassword: false`. There is no
-self-register endpoint — every real account is created by an admin, so the seeded
-SUPER_ADMIN is the only way to bootstrap a fresh environment.
+Databases seeded before the demo data was removed still carry those rows; clear them once
+with `pnpm tsx prisma/cleanup-demo.ts` (add `--yes` to apply — it dry-runs by default).
 
 ## Running
 
@@ -90,10 +87,11 @@ Once it's up:
 | `http://localhost:4000/api/v1/...` | the API itself |
 | `http://localhost:4000/dev/assessment` | assessment scoring tester (non-production only) |
 
-Quick smoke test — log in as the demo admin:
+Quick smoke test — log in as the seeded SUPER_ADMIN (substitute your own
+`SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_PASSWORD`):
 
 ```bash
-curl -s -X POST http://localhost:4000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"email":"admin@kreate.local","password":"Admin@123"}'
+curl -s -X POST http://localhost:4000/api/v1/auth/login -H 'Content-Type: application/json' -d '{"email":"superadmin@kreate.local","password":"ChangeMe123!"}'
 ```
 
 The access token comes back in the JSON body; the refresh token is set as an httpOnly
