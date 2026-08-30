@@ -1394,11 +1394,13 @@ before building UI that depends on any of them:
   than the normal path.
 - **Real meeting-link generation** — Sessions' `meetingLink` (§10.6) is a manually
   pasted plain string; no Calendly/Google Meet integration.
-- **Automatic email/reminder triggers** — the Email module (§12) can send any
-  template, and a few Sessions actions (§10.4, §10.10) trigger one automatically, but
-  there's no scheduler/cron — same-day reminders (§10.11), "+2 days if incomplete"
-  nudges, and no-show emails all need something external calling the API at the right
-  moment; nothing fires them on its own yet.
+- **Automatic email/reminder triggers — built, but off by default.** The Email module
+  (§12) can send any template, a few Sessions actions (§10.4, §10.10) trigger one
+  automatically, and an in-process daily job (`src/scheduler/`) sends same-day session
+  reminders (§10.11) and idle follow-up nudges. It runs only when `SCHEDULER_ENABLED=true`
+  (default `false`, and it must stay off on a serverless/multi-instance deploy, where an
+  external cron should drive the batch instead), so don't assume reminders are firing in
+  a given environment without checking. There is no manual trigger endpoint yet.
 
 If you need to demo or test flows that depend on these, ask the backend team what's
 next in the build queue rather than guessing at a shape.

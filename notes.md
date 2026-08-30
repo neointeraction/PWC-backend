@@ -1,11 +1,16 @@
 ## Pending items
 
-Server-side PDF rendering — the report is delivered as JSON; PDF is client-side for now. A backend PDF (puppeteer/pdfkit) is optional.
-Parent / institution report variants — only the student assessment report is built.
-Auto-generating the Swagger spec — it's hand-maintained (I just brought it up to date); a refactor to generate it from the routes would stop it drifting, but isn't required.
+The tracked list now lives in `docs/pending-items.md` — it has the evidence (file:line),
+what "done" looks like for each item, and what's already landed. Short version of what's
+still open:
 
-Reminder scheduler (cron)	The 41 email templates all work (you just previewed them), but nothing auto-fires the same-day / nudge reminders — every send is still a manual POST /email/send (or the booking/reschedule/cancel auto-triggers). Needs a scheduler + a decision on how it runs in this environment (node-cron in-process, an external cron hitting an endpoint, etc.).
+- Server-side PDF rendering, parent/institution report variants, and the unused `Report`
+  model. Blocked on a rendering/storage decision.
+- Deliberate deferrals: no canonical-lookup-row edit endpoint in Career Library; no
+  `Project`↔`Cohort` link and no `Student.cohort` (the real multi-cohort work); cohort
+  columns stay plain strings with no FKs; the OpenAPI spec stays hand-maintained.
 
-
-No FKs — FormTemplate.cohort / AssessmentQuestion.cohort / AssessmentAttempt.cohort stay plain strings matching Cohort.code. The table is a decoupled source of truth; converting those columns to relations is deferred.
-No Project↔Cohort link and no Student.cohort — that's the real multi-cohort work (students need to carry their cohort since forms/assessments are cohort-specific), deferred until you actually onboard a second cohort. Both the db-design doc and the schema comment record this decision so the next person knows why it's decoupled.
+Done since this file was first written: the reminder scheduler (`src/scheduler/`, node-cron
+behind `SCHEDULER_ENABLED`), per-question `timeTakenMs` → composite ARI, and automatic
+advancement for the last four workflow stages (chart save, chart `/finalize`, feedback
+pair, report delivery → `CLOSED`).

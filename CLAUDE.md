@@ -152,9 +152,16 @@ tables — not a separate ticket like `CareerLibraryRequest` (job roles), which 
 (`src/modules/reports/` — `GET /reports/students/:id/assessment` assembles the full report
 as JSON for the frontend to render/print) and a dev scoring tester is served at
 `/dev/assessment` (non-prod, `public/assessment-tester.html`, backed by
-`POST /assessment/score-preview`). **Not yet implemented**: server-side PDF rendering and
-parent/institution report variants, a scheduler/cron for automatic same-day/nudge
-reminders, and the composite ARI (needs per-question `timeTakenMs` from the frontend).
+`POST /assessment/score-preview`). **Counsellor Chart** (`src/modules/counsellor-chart/`
+— chart assembly, counsellor content save, mirror-pair amendments, `/finalize`) and
+**Feedback** scoring (`src/modules/feedback/`) are built. The **reminder scheduler** is
+built too (`src/scheduler/` — node-cron, same-day session reminders + idle nudges) but
+is **off unless `SCHEDULER_ENABLED=true`**, and must stay off on serverless/multi-instance
+deploys (drive `runDailyBatch` from an external cron there instead; there's no trigger
+endpoint yet). **Not yet implemented**: server-side PDF rendering and parent/institution
+report variants. The composite ARI now computes whenever the frontend sends per-question
+`timeTakenMs` on the aptitude answers (accepted and stored since 2026-08-30); without
+timing it stays `null` and is listed in the report's `meta.pending`.
 Note the OpenAPI/Swagger spec (`src/config/openapi.ts`) is **hand-maintained** — add a
 `registry.registerPath(...)` there when you add a route. Don't assume any of these exist — check `src/modules/` before
 referencing an endpoint, and see `docs/frontend-integration-guide.md` §13 for the full
