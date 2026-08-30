@@ -1158,12 +1158,19 @@ enum AlignmentRating {
   NOT_YET_ASSESSED
 }
 
+// Only STUDENT_CAREER_PATH is produced today; the other two are reserved for the
+// parent/institution report variants, which are not built (see docs/pending-items.md).
 enum ReportType {
   STUDENT_CAREER_PATH
   PARENT_SUMMARY
   INSTITUTION_SUMMARY
 }
 
+// RESERVED — nothing reads or writes this table today. PDF rendering is deliberately
+// client-side: GET /reports/students/:id/assessment returns the report as JSON and the
+// frontend renders/prints it, so there is no generated file to record. Kept (rather than
+// dropped) because it is the shape a server-side renderer would persist if that decision
+// is ever revisited. Don't infer from its existence that report files are stored.
 model Report {
   id                      String     @id @default(cuid())
   studentId               String

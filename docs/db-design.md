@@ -624,8 +624,12 @@ whole engine and updates the `AssessmentResult` — the counsellor's change affe
 actual results, not just RVS.
 
 ### `Report`
-Generated PDF outputs. One student can have multiple report rows (different
-audiences).
+**Reserved — currently unused.** No code reads or writes this table. PDF rendering is
+deliberately client-side (`GET /reports/students/{id}/assessment` returns the report as
+JSON; the frontend renders/prints it), so there is no stored file to point at. The table
+is kept as the shape a server-side renderer would persist, and only
+`ReportType.STUDENT_CAREER_PATH` has an assembler at all — the parent and institution
+variants aren't built. See `docs/pending-items.md` §1.3.
 
 | Field | Type | Notes |
 |---|---|---|

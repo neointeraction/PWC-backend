@@ -1379,9 +1379,10 @@ before building UI that depends on any of them:
 - **Reports** — the **student assessment report is built**: `GET
   /api/v1/reports/students/{id}/assessment` returns the whole report as structured JSON
   (student, championProfile, traitMap, careerCompass, streamFit, graduationPathways,
-  reliability, counsellorNarrative, feedback, meta) for the frontend to render/print. Still
-  not built: server-side **PDF** rendering (do it client-side for now) and the **parent /
-  institution summary** variants. Counsellor Chart is built too — `GET`/`PUT
+  reliability, counsellorNarrative, feedback, meta) for the frontend to render/print.
+  **PDF rendering is client-side by decision** — the backend will not add a render
+  endpoint, so own the print/PDF view on your side. The **parent / institution summary**
+  variants aren't built (student report only). Counsellor Chart is built too — `GET`/`PUT
   /api/v1/counsellor-chart/students/{id}` assemble the chart and save notes/SCRI/ratings,
   and `POST`/`DELETE …/mirror-pair-amendments` let the counsellor amend a flagged answer,
   which re-runs the full scoring engine, plus `POST …/finalize` to close the chart.

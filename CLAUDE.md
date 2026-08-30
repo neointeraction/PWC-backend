@@ -158,8 +158,9 @@ as JSON for the frontend to render/print) and a dev scoring tester is served at
 built too (`src/scheduler/` — node-cron, same-day session reminders + idle nudges) but
 is **off unless `SCHEDULER_ENABLED=true`**, and must stay off on serverless/multi-instance
 deploys (drive `runDailyBatch` from an external cron there instead; there's no trigger
-endpoint yet). **Not yet implemented**: server-side PDF rendering and parent/institution
-report variants. The composite ARI now computes whenever the frontend sends per-question
+endpoint yet). **Decided, not gaps**: PDF rendering stays **client-side** (no server-side
+render endpoint; the `Report` model + `PARENT_SUMMARY`/`INSTITUTION_SUMMARY` enum values
+are reserved and deliberately unused), and only the student report variant is built. The composite ARI now computes whenever the frontend sends per-question
 `timeTakenMs` on the aptitude answers (accepted and stored since 2026-08-30); without
 timing it stays `null` and is listed in the report's `meta.pending`.
 Note the OpenAPI/Swagger spec (`src/config/openapi.ts`) is **hand-maintained** — add a
