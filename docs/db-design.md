@@ -310,7 +310,7 @@ workbook's distinct values (13 clusters / 43 industries / 571 domains) and edita
 |---|---|---|
 | `CareerCluster` | `name`, `deletedAt?` | top level; `name` unique among live rows |
 | `CareerIndustry` | `clusterId` (FK), `name`, `deletedAt?` | belongs to one cluster; `(clusterId, name)` unique among live rows |
-| `CareerDomain` | `industryId` (FK), `name`, `deletedAt?` | belongs to one industry; `(industryId, name)` unique among live rows. Domain **names repeat across industries** (e.g. "Academia" under several), so uniqueness is per-industry. Also owns the domain's Education Path (`DomainEducationEntry`, below) |
+| `CareerDomain` | `industryId` (FK), `name`, `deletedAt?` | belongs to one industry; `(industryId, name)` unique among live rows. Domain **names repeat across industries** (e.g. "Academia" under several), so uniqueness is per-industry. Education Path entries are **not** owned by a domain — see `EducationEntry` below |
 
 - **Soft delete**: `deletedAt` (null = live). Deleting hides a node from the pickers/tree but keeps
   its FK intact, so job roles that still reference it keep resolving; restorable via
@@ -452,7 +452,7 @@ rows are shared across job roles, so linking one must never overwrite another ro
 
 ### Reference-data review — `ReviewStatus`
 
-`EntranceExam`, `Course`, `Institution` and `DomainEducationEntry` each carry the same five
+`EntranceExam`, `Course`, `Institution` and `EducationEntry` each carry the same five
 review columns: `status` (`ReviewStatus` = `PENDING`/`APPROVED`/`REJECTED`, **default
 `APPROVED`**), `submittedBy`, `reviewedBy`, `reviewedAt`, `rejectionReason`, plus an index on
 `status`.
@@ -472,22 +472,28 @@ justify a second table and a retype.
 - Pickers filter to `APPROVED`; a linked row's `status` is exposed on the career entry's
   `linked*` arrays so the UI can flag a pending/rejected link rather than silently dropping it.
 
-### `DomainEducationEntry` / `CareerEducationEntry` — Education Path
+### `EducationEntry` / `CareerEducationEntry` — Education Path
 
-The qualifications/programmes that lead into a career domain. Held at the **domain** level,
-not per job role, so every role in a domain shows the same tick-list and a programme added
-while creating one role is inherited by every future role there.
+The qualifications/programmes that lead into a career. A **global canonical lookup**, on the
+same footing as `EntranceExam` / `Course` / `Institution`: one row per `(level, programme)`,
+reused by every job role that needs it, with **no taxonomy FK**. It was originally
+`DomainEducationEntry`, owned by a `CareerDomain`; that was the odd one out among the four
+reference types and meant the same programme was duplicated (and separately review-approved)
+once per domain.
 
 | Model | Key fields | Notes |
 |---|---|---|
-| `DomainEducationEntry` | `domainId` (FK), `level` (`EducationPathLevel`), `programme`, `description?`, `deletedAt?` | `(domainId, level, programme)` unique among live rows, enforced in the service (same reason as the taxonomy) |
-| `CareerEducationEntry` | `careerEntryId` + `educationEntryId` (composite PK, cascade) | many-to-many; which of the domain's path entries this job role uses |
+| `EducationEntry` | `level` (`EducationPathLevel`), `programme`, `description?`, `deletedAt?` | `(level, programme)` unique among live rows, enforced in the service — not a DB constraint, because soft-deleted rows must leave the name reusable. Indexed on `programme` (typeahead) and `status` |
+| `CareerEducationEntry` | `careerEntryId` + `educationEntryId` (composite PK, cascade) | many-to-many; which entries this job role uses. **The only link between an education entry and the taxonomy** — a domain relates to entries transitively, through its roles |
 
 `EducationPathLevel` = `CLASS_10_PLUS_2` \| `GRADUATE` \| `POST_GRADUATE` \|
 `CERTIFICATION_STUDENT` \| `CERTIFICATION_UG`.
 
-- **Soft delete**, like the taxonomy: a deleted entry leaves the domain's picker but stays
-  linked, so job roles already using it keep rendering it.
+- **Soft delete**: a deleted entry leaves the pickers but stays linked, so job roles already
+  using it keep rendering it.
+- **Domain-scoped pickers still work**, via usage rather than ownership:
+  `GET /career-library/education?domainId=` returns entries already linked to job roles in
+  that domain — the same `domainScope()` filter the exam/course/institution lookups use.
 - The flat `qualification10th12th` / `qualificationGraduation` / `qualificationPG` /
   `certificationsStudent` / `certificationsUG` fields on `CareerLibraryEntry` are **not**
   dual-written from this table, unlike the exam/course normalization. They hold descriptive

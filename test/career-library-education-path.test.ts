@@ -21,7 +21,7 @@ function entryBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("Education Path (domain-level) + full-detail link items", () => {
+describe("Education Path (global lookup) + full-detail link items", () => {
   beforeAll(async () => {
     const cluster = await prisma.careerCluster.create({ data: { name: "Test Edu Cluster" } });
     const industry = await prisma.careerIndustry.create({
@@ -37,7 +37,7 @@ describe("Education Path (domain-level) + full-detail link items", () => {
 
   afterAll(async () => {
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test Edu Role" } } });
-    await prisma.domainEducationEntry.deleteMany({ where: { domain: { name: { startsWith: "Test Edu Domain" } } } });
+    await prisma.educationEntry.deleteMany({ where: { programme: { startsWith: "Test Edu " } } });
     await prisma.careerDomain.deleteMany({ where: { name: { startsWith: "Test Edu Domain" } } });
     await prisma.careerIndustry.deleteMany({ where: { name: "Test Edu Industry" } });
     await prisma.careerCluster.deleteMany({ where: { name: "Test Edu Cluster" } });
@@ -49,130 +49,149 @@ describe("Education Path (domain-level) + full-detail link items", () => {
 
   // --- #3: Education Path CRUD ---
 
-  it("CRUDs a domain's education path and enforces per-domain uniqueness", async () => {
+  it("CRUDs education entries and enforces uniqueness globally, not per domain", async () => {
     const created = await authRequest(app)
-      .post(`/api/v1/career-taxonomy/domains/${domainId}/education`)
-      .send({ level: "GRADUATE", programme: "B.Tech CSE", description: "4-year engineering degree" });
+      .post("/api/v1/career-library/education")
+      .send({ level: "GRADUATE", programme: "Test Edu B.Tech CSE", description: "4-year engineering degree" });
     expect(created.status).toBe(201);
-    expect(created.body.domainId).toBe(domainId);
+    expect(created.body).not.toHaveProperty("domainId"); // entries are global now
     const entryId = created.body.id;
 
-    // Same programme at the same level in the same domain clashes...
+    // Same programme at the same level clashes — anywhere, not just within one domain.
     const dupe = await authRequest(app)
-      .post(`/api/v1/career-taxonomy/domains/${domainId}/education`)
-      .send({ level: "GRADUATE", programme: "B.Tech CSE" });
+      .post("/api/v1/career-library/education")
+      .send({ level: "GRADUATE", programme: "Test Edu B.Tech CSE" });
     expect(dupe.status).toBe(409);
 
-    // ...but the same programme at a different level, or in another domain, is fine.
+    // The same programme at a different level is still a distinct row.
     const otherLevel = await authRequest(app)
-      .post(`/api/v1/career-taxonomy/domains/${domainId}/education`)
-      .send({ level: "POST_GRADUATE", programme: "B.Tech CSE" });
+      .post("/api/v1/career-library/education")
+      .send({ level: "POST_GRADUATE", programme: "Test Edu B.Tech CSE" });
     expect(otherLevel.status).toBe(201);
-    const otherDomain = await authRequest(app)
-      .post(`/api/v1/career-taxonomy/domains/${otherDomainId}/education`)
-      .send({ level: "GRADUATE", programme: "B.Tech CSE" });
-    expect(otherDomain.status).toBe(201);
 
     // description: null clears it.
     const cleared = await authRequest(app)
-      .patch(`/api/v1/career-taxonomy/education/${entryId}`)
+      .patch(`/api/v1/career-library/education/${entryId}`)
       .send({ description: null });
     expect(cleared.status).toBe(200);
     expect(cleared.body.description).toBeNull();
 
-    // Listing is scoped to the domain and filterable by level.
-    const list = await authRequest(app).get(`/api/v1/career-taxonomy/domains/${domainId}/education`);
+    // Listing is global, searchable and filterable by level.
+    const list = await authRequest(app)
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu B.Tech CSE" });
     expect(list.status).toBe(200);
     expect(list.body).toHaveLength(2);
     const graduateOnly = await authRequest(app)
-      .get(`/api/v1/career-taxonomy/domains/${domainId}/education`)
-      .query({ level: "GRADUATE" });
-    expect(graduateOnly.body.map((e: { programme: string }) => e.programme)).toEqual(["B.Tech CSE"]);
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu B.Tech CSE", level: "GRADUATE" });
+    expect(graduateOnly.body.map((e: { programme: string }) => e.programme)).toEqual(["Test Edu B.Tech CSE"]);
 
     // Soft delete drops it from the picker; restore brings it back.
-    const deleted = await authRequest(app).delete(`/api/v1/career-taxonomy/education/${entryId}`);
+    const deleted = await authRequest(app).delete(`/api/v1/career-library/education/${entryId}`);
     expect(deleted.status).toBe(200);
     expect(deleted.body.deletedAt).not.toBeNull();
-    const afterDelete = await authRequest(app).get(`/api/v1/career-taxonomy/domains/${domainId}/education`);
+    const afterDelete = await authRequest(app)
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu B.Tech CSE" });
     expect(afterDelete.body).toHaveLength(1);
     const withDeleted = await authRequest(app)
-      .get(`/api/v1/career-taxonomy/domains/${domainId}/education`)
-      .query({ includeDeleted: "true" });
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu B.Tech CSE", includeDeleted: "true" });
     expect(withDeleted.body).toHaveLength(2);
 
-    const restored = await authRequest(app).post(`/api/v1/career-taxonomy/education/${entryId}/restore`);
+    const restored = await authRequest(app).post(`/api/v1/career-library/education/${entryId}/restore`);
     expect(restored.status).toBe(200);
     expect(restored.body.deletedAt).toBeNull();
 
-    // 404 on an unknown domain / entry; 403 for a counsellor on the write path.
-    expect((await authRequest(app).get("/api/v1/career-taxonomy/domains/nope/education")).status).toBe(404);
-    expect((await authRequest(app).patch("/api/v1/career-taxonomy/education/nope").send({ programme: "x" })).status).toBe(404);
-    // A counsellor may now propose an entry, but it lands PENDING and stays out of the
-    // default tick-list until an admin approves it.
+    // 404 on an unknown entry; 400 on a domainId filter that isn't a live domain.
+    expect((await authRequest(app).patch("/api/v1/career-library/education/nope").send({ programme: "x" })).status).toBe(404);
+    expect((await authRequest(app).get("/api/v1/career-library/education").query({ domainId: "nope" })).status).toBe(400);
+
+    // A counsellor may propose an entry, but it lands PENDING and stays out of the
+    // default picker until an admin approves it.
     const counsellorWrite = await request(app)
-      .post(`/api/v1/career-taxonomy/domains/${domainId}/education`)
+      .post("/api/v1/career-library/education")
       .set("Authorization", bearer("COUNSELLOR", { userId: "counsellor-user-1" }))
       .send({ level: "GRADUATE", programme: "Test Edu Proposed" });
     expect(counsellorWrite.status).toBe(201);
     expect(counsellorWrite.body.status).toBe("PENDING");
     expect(counsellorWrite.body.submittedBy).toBe("counsellor-user-1");
 
-    const pickerAfterProposal = await authRequest(app).get(`/api/v1/career-taxonomy/domains/${domainId}/education`);
-    expect(pickerAfterProposal.body.map((e: { programme: string }) => e.programme)).not.toContain("Test Edu Proposed");
+    const pickerAfterProposal = await authRequest(app)
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu Proposed" });
+    expect(pickerAfterProposal.body).toHaveLength(0);
 
     // Reviewing it is admin-only.
     const counsellorApprove = await request(app)
-      .post(`/api/v1/career-taxonomy/education/${counsellorWrite.body.id}/approve`)
+      .post(`/api/v1/career-library/education/${counsellorWrite.body.id}/approve`)
       .set("Authorization", bearer("COUNSELLOR"));
     expect(counsellorApprove.status).toBe(403);
   });
 
-  it("links education entries to a job role, writing new ones back to the domain", async () => {
+  it("links education entries to a job role and reuses one global row across roles", async () => {
     const existing = await authRequest(app)
-      .post(`/api/v1/career-taxonomy/domains/${domainId}/education`)
-      .send({ level: "CLASS_10_PLUS_2", programme: "PCM with Computer Science" });
+      .post("/api/v1/career-library/education")
+      .send({ level: "CLASS_10_PLUS_2", programme: "Test Edu PCM with Computer Science" });
 
     const created = await authRequest(app).post("/api/v1/career-library").send(
       entryBody({
         jobRole: "Test Edu Role Links",
         educationEntries: [
           { id: existing.body.id },
-          { level: "CERTIFICATION_UG", programme: "AWS Cloud Practitioner", description: "Entry-level cloud cert" },
+          { level: "CERTIFICATION_UG", programme: "Test Edu AWS Cloud Practitioner", description: "Entry-level cloud cert" },
         ],
       })
     );
     expect(created.status).toBe(201);
     const programmes = created.body.linkedEducationEntries.map((e: { programme: string }) => e.programme);
-    expect(programmes).toContain("PCM with Computer Science");
-    expect(programmes).toContain("AWS Cloud Practitioner");
+    expect(programmes).toContain("Test Edu PCM with Computer Science");
+    expect(programmes).toContain("Test Edu AWS Cloud Practitioner");
 
-    // The by-name entry was written back to the DOMAIN — a future role inherits it.
-    const domainPath = await authRequest(app).get(`/api/v1/career-taxonomy/domains/${domainId}/education`);
-    expect(domainPath.body.map((e: { programme: string }) => e.programme)).toContain("AWS Cloud Practitioner");
+    // The picker can still be scoped to a domain — by USAGE (entries linked to roles in
+    // that domain), not ownership. The entry now shows for domain A and not for domain B.
+    const inDomainA = await authRequest(app)
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu AWS", domainId });
+    expect(inDomainA.body.map((e: { programme: string }) => e.programme)).toContain("Test Edu AWS Cloud Practitioner");
+    const inDomainB = await authRequest(app)
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu AWS", domainId: otherDomainId });
+    expect(inDomainB.body).toHaveLength(0);
 
-    // Re-using the same programme links the same row rather than duplicating it.
+    // A role in a DIFFERENT domain reuses the same row rather than duplicating it —
+    // this is the whole point of unlinking entries from the taxonomy.
     await authRequest(app).post("/api/v1/career-library").send(
       entryBody({
         jobRole: "Test Edu Role Links Two",
-        educationEntries: [{ level: "CERTIFICATION_UG", programme: "AWS Cloud Practitioner" }],
+        domainId: otherDomainId,
+        educationEntries: [{ level: "CERTIFICATION_UG", programme: "Test Edu AWS Cloud Practitioner" }],
       })
     );
-    const rows = await prisma.domainEducationEntry.findMany({
-      where: { domainId, programme: "AWS Cloud Practitioner" },
+    const rows = await prisma.educationEntry.findMany({
+      where: { programme: "Test Edu AWS Cloud Practitioner" },
     });
     expect(rows).toHaveLength(1);
   });
 
-  it("rejects an education entry belonging to a different domain", async () => {
-    const foreign = await authRequest(app)
-      .post(`/api/v1/career-taxonomy/domains/${otherDomainId}/education`)
-      .send({ level: "GRADUATE", programme: "Test Edu Foreign Programme" });
+  it("links an entry to a job role in any domain", async () => {
+    const entry = await authRequest(app)
+      .post("/api/v1/career-library/education")
+      .send({ level: "GRADUATE", programme: "Test Edu Cross Domain Programme" });
 
+    // Created independently of any domain, then attached to a role in domain B.
     const res = await authRequest(app).post("/api/v1/career-library").send(
-      entryBody({ jobRole: "Test Edu Role Foreign", educationEntries: [{ id: foreign.body.id }] })
+      entryBody({
+        jobRole: "Test Edu Role Cross",
+        domainId: otherDomainId,
+        educationEntries: [{ id: entry.body.id }],
+      })
     );
-    expect(res.status).toBe(400);
-    expect(res.body.error.message).toMatch(/different career domain/i);
+    expect(res.status).toBe(201);
+    expect(res.body.linkedEducationEntries.map((e: { programme: string }) => e.programme)).toContain(
+      "Test Edu Cross Domain Programme"
+    );
   });
 
   // --- #1: full field set on inline "add new" link items ---

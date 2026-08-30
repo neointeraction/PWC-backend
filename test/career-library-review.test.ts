@@ -19,7 +19,7 @@ describe("Reference data review (counsellor proposes, admin approves/rejects)", 
 
   afterAll(async () => {
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test Rev Role" } } });
-    await prisma.domainEducationEntry.deleteMany({ where: { domain: { name: "Test Rev Domain" } } });
+    await prisma.educationEntry.deleteMany({ where: { programme: { startsWith: "Test Rev " } } });
     await prisma.careerDomain.deleteMany({ where: { name: "Test Rev Domain" } });
     await prisma.careerIndustry.deleteMany({ where: { name: "Test Rev Industry" } });
     await prisma.careerCluster.deleteMany({ where: { name: "Test Rev Cluster" } });

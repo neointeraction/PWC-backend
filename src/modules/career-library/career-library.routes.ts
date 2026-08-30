@@ -12,6 +12,11 @@ import {
   listCareerLibraryQuerySchema,
   listCareerRequestsQuerySchema,
   listCoursesQuerySchema,
+  createEducationEntrySchema,
+  educationEntryIdParamsSchema,
+  listEducationEntriesQuerySchema,
+  rejectEducationEntrySchema,
+  updateEducationEntrySchema,
   listEntranceExamsQuerySchema,
   listInstitutionsQuerySchema,
   lookupIdParamsSchema,
@@ -54,6 +59,52 @@ careerLibraryRouter.get(
   ...requireAuth,
   validate({ query: listCoursesQuerySchema }),
   asyncHandler(careerLibraryController.listCourses)
+);
+careerLibraryRouter.get(
+  "/education",
+  ...requireAuth,
+  validate({ query: listEducationEntriesQuerySchema }),
+  asyncHandler(careerLibraryController.listEducationEntries)
+);
+
+// --- Education Path entries (global canonical lookup) ---
+// Staff (counsellors included) may propose an entry; a counsellor's lands PENDING and only
+// an admin can approve it into the pickers. Editing/removing a row is Admin.
+careerLibraryRouter.post(
+  "/education",
+  ...requireStaff,
+  validate({ body: createEducationEntrySchema }),
+  asyncHandler(careerLibraryController.createEducationEntry)
+);
+careerLibraryRouter.post(
+  "/education/:entryId/approve",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema }),
+  asyncHandler(careerLibraryController.approveEducationEntry)
+);
+careerLibraryRouter.post(
+  "/education/:entryId/reject",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema, body: rejectEducationEntrySchema }),
+  asyncHandler(careerLibraryController.rejectEducationEntry)
+);
+careerLibraryRouter.post(
+  "/education/:entryId/restore",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema }),
+  asyncHandler(careerLibraryController.restoreEducationEntry)
+);
+careerLibraryRouter.patch(
+  "/education/:entryId",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema, body: updateEducationEntrySchema }),
+  asyncHandler(careerLibraryController.updateEducationEntry)
+);
+careerLibraryRouter.delete(
+  "/education/:entryId",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema }),
+  asyncHandler(careerLibraryController.deleteEducationEntry)
 );
 
 // Create a library entry (admin). New entries default to DRAFT; publish by setting ACTIVE.

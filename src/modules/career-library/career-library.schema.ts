@@ -97,9 +97,9 @@ export const institutionLinkItemSchema = z
   })
   .refine((v) => Boolean(v.id) !== Boolean(v.name), { message: "Provide exactly one of id or name" });
 
-// Education Path items live at the DOMAIN level (see prisma `DomainEducationEntry`), so a
-// `{ level, programme }` item is find-or-created under the entry's own domain and becomes
-// available to every future job role there. An `{ id }` must already belong to that domain.
+// Education Path items are global canonical rows (see prisma `EducationEntry`), like exams /
+// courses / institutions: a `{ level, programme }` item is find-or-created once and reused by
+// every job role that names it, and an `{ id }` may be any live entry regardless of domain.
 export const educationLinkItemSchema = z
   .object({
     id: z.string().cuid().optional(),
@@ -203,6 +203,46 @@ export const listCoursesQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
 export type ListCoursesQuery = z.infer<typeof listCoursesQuerySchema>;
+
+// --- Education Path (global canonical lookup) ---
+// The qualifications/programmes that lead into a career. Like exams/courses/institutions
+// these are global rows attached to job roles through a join table — `domainId` here
+// scopes the picker by *usage* (entries already linked to roles in that domain), not by
+// ownership.
+export const educationEntryIdParamsSchema = z.object({ entryId: z.string().min(1) });
+export type EducationEntryIdParams = z.infer<typeof educationEntryIdParamsSchema>;
+
+export const listEducationEntriesQuerySchema = z.object({
+  search: z.string().trim().min(1).optional(),
+  level: z.enum(EDUCATION_PATH_LEVELS).optional(),
+  // Pickers show APPROVED rows only; an admin review queue passes PENDING/REJECTED.
+  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
+  // Scope to entries already linked to job roles in this domain. Omit for the global list.
+  domainId: z.string().min(1).optional(),
+  includeDeleted: z.coerce.boolean().default(false),
+  limit: z.coerce.number().int().positive().max(100).default(50),
+});
+export type ListEducationEntriesQuery = z.infer<typeof listEducationEntriesQuerySchema>;
+
+export const createEducationEntrySchema = z.object({
+  level: z.enum(EDUCATION_PATH_LEVELS),
+  programme: z.string().trim().min(1),
+  description: z.string().trim().min(1).nullish(),
+});
+export type CreateEducationEntryInput = z.infer<typeof createEducationEntrySchema>;
+
+export const updateEducationEntrySchema = z.object({
+  level: z.enum(EDUCATION_PATH_LEVELS).optional(),
+  programme: z.string().trim().min(1).optional(),
+  description: z.string().trim().min(1).nullish(), // null clears it
+});
+export type UpdateEducationEntryInput = z.infer<typeof updateEducationEntrySchema>;
+
+// Reject carries an optional reason back to the submitting counsellor; approve takes no body.
+export const rejectEducationEntrySchema = z.object({
+  rejectionReason: z.string().trim().min(1).optional(),
+});
+export type RejectEducationEntryInput = z.infer<typeof rejectEducationEntrySchema>;
 
 // --- Ratification requests (counsellor-submitted, admin-reviewed) ---
 

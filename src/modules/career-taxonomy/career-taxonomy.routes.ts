@@ -5,18 +5,13 @@ import { requireAuth, requireStaff, requireAdmin } from "../../common/middleware
 import * as controller from "./career-taxonomy.controller.js";
 import {
   createClusterSchema,
-  createDomainEducationSchema,
   createDomainSchema,
   createIndustrySchema,
-  educationEntryIdParamsSchema,
   listClustersQuerySchema,
-  listDomainEducationQuerySchema,
-  rejectDomainEducationSchema,
   listDomainsQuerySchema,
   listIndustriesQuerySchema,
   taxonomyIdParamsSchema,
   updateClusterSchema,
-  updateDomainEducationSchema,
   updateDomainSchema,
   updateIndustrySchema,
 } from "./career-taxonomy.schema.js";
@@ -124,53 +119,4 @@ careerTaxonomyRouter.post(
   ...requireAdmin,
   validate({ params: taxonomyIdParamsSchema }),
   asyncHandler(controller.restoreDomain)
-);
-
-// --- Education Path (domain-level) ---
-// Listed/created under their domain; updated/deleted by their own id. Reads follow the rest
-// of the taxonomy (any authenticated user, so the "add job role" form can render the
-// tick-list); writes are Admin.
-careerTaxonomyRouter.get(
-  "/domains/:id/education",
-  ...requireAuth,
-  validate({ params: taxonomyIdParamsSchema, query: listDomainEducationQuerySchema }),
-  asyncHandler(controller.listDomainEducation)
-);
-// Staff (counsellors included) may propose an entry; a counsellor's lands PENDING and only
-// an admin can approve it into the domain's tick-list.
-careerTaxonomyRouter.post(
-  "/domains/:id/education",
-  ...requireStaff,
-  validate({ params: taxonomyIdParamsSchema, body: createDomainEducationSchema }),
-  asyncHandler(controller.createDomainEducation)
-);
-careerTaxonomyRouter.post(
-  "/education/:entryId/approve",
-  ...requireAdmin,
-  validate({ params: educationEntryIdParamsSchema }),
-  asyncHandler(controller.approveDomainEducation)
-);
-careerTaxonomyRouter.post(
-  "/education/:entryId/reject",
-  ...requireAdmin,
-  validate({ params: educationEntryIdParamsSchema, body: rejectDomainEducationSchema }),
-  asyncHandler(controller.rejectDomainEducation)
-);
-careerTaxonomyRouter.patch(
-  "/education/:entryId",
-  ...requireAdmin,
-  validate({ params: educationEntryIdParamsSchema, body: updateDomainEducationSchema }),
-  asyncHandler(controller.updateDomainEducation)
-);
-careerTaxonomyRouter.delete(
-  "/education/:entryId",
-  ...requireAdmin,
-  validate({ params: educationEntryIdParamsSchema }),
-  asyncHandler(controller.deleteDomainEducation)
-);
-careerTaxonomyRouter.post(
-  "/education/:entryId/restore",
-  ...requireAdmin,
-  validate({ params: educationEntryIdParamsSchema }),
-  asyncHandler(controller.restoreDomainEducation)
 );

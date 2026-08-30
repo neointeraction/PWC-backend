@@ -52,18 +52,13 @@ import {
 } from "../modules/career-library/career-library.schema.js";
 import {
   createClusterSchema,
-  createDomainEducationSchema,
   createDomainSchema,
   createIndustrySchema,
-  educationEntryIdParamsSchema,
   listClustersQuerySchema,
-  listDomainEducationQuerySchema,
   listDomainsQuerySchema,
-  rejectDomainEducationSchema,
   listIndustriesQuerySchema,
   taxonomyIdParamsSchema,
   updateClusterSchema,
-  updateDomainEducationSchema,
   updateDomainSchema,
   updateIndustrySchema,
 } from "../modules/career-taxonomy/career-taxonomy.schema.js";
@@ -88,6 +83,13 @@ import {
   projectIdParamsSchema,
   updateProjectSchema,
 } from "../modules/projects/projects.schema.js";
+import {
+  createEducationEntrySchema,
+  educationEntryIdParamsSchema,
+  listEducationEntriesQuerySchema,
+  rejectEducationEntrySchema,
+  updateEducationEntrySchema,
+} from "../modules/career-library/career-library.schema.js";
 import { previewScoreBodySchema } from "../modules/assessment/assessment.schema.js";
 import { reportStudentParamsSchema } from "../modules/reports/reports.schema.js";
 import {
@@ -1643,62 +1645,66 @@ registry.registerPath({
   responses: { 200: { description: "Restored domain", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 
-// Education Path (domain-level)
+// Education Path (global canonical lookup, like exams/courses/institutions)
+const eduTag = ["Career Library"];
 registry.registerPath({
   method: "get",
-  path: "/api/v1/career-taxonomy/domains/{id}/education",
-  tags: taxTag,
+  path: "/api/v1/career-library/education",
+  tags: eduTag,
   summary:
-    "List a domain's Education Path entries — the tick-list of qualifications/programmes every job role in the domain inherits (?level to scope; ?includeDeleted=true). Any authenticated user.",
-  request: { params: taxonomyIdParamsSchema, query: listDomainEducationQuerySchema },
-  responses: taxListResponses,
+    "List Education Path entries — the qualifications/programmes a job role can be linked to (?search, ?level, ?status, ?includeDeleted=true; ?domainId scopes to entries already used by roles in that domain). Any authenticated user.",
+  request: { query: listEducationEntriesQuerySchema },
+  responses: {
+    200: { description: "Education path entries", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+    ...errorResponses,
+  },
 });
 registry.registerPath({
   method: "post",
-  path: "/api/v1/career-taxonomy/domains/{id}/education",
-  tags: taxTag,
+  path: "/api/v1/career-library/education",
+  tags: eduTag,
   summary:
-    "Propose an Education Path entry for a domain. Staff — a counsellor's lands PENDING and stays out of the tick-list until approved; an admin's is APPROVED immediately. 409 if that programme already exists at that level.",
-  request: { params: taxonomyIdParamsSchema, body: { content: { "application/json": { schema: createDomainEducationSchema } } } },
+    "Propose an Education Path entry. Staff — a counsellor's lands PENDING and stays out of the pickers until approved; an admin's is APPROVED immediately. 409 if that programme already exists at that level.",
+  request: { body: { content: { "application/json": { schema: createEducationEntrySchema } } } },
   responses: { 201: { description: "Created education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 registry.registerPath({
   method: "patch",
-  path: "/api/v1/career-taxonomy/education/{entryId}",
-  tags: taxTag,
-  summary: "Update an Education Path entry (admin). Send description: null to clear it. 409 on a clash within the domain.",
-  request: { params: educationEntryIdParamsSchema, body: { content: { "application/json": { schema: updateDomainEducationSchema } } } },
+  path: "/api/v1/career-library/education/{entryId}",
+  tags: eduTag,
+  summary: "Update an Education Path entry (admin). Send description: null to clear it. 409 on a clash with another live entry at that level.",
+  request: { params: educationEntryIdParamsSchema, body: { content: { "application/json": { schema: updateEducationEntrySchema } } } },
   responses: { 200: { description: "Updated education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 registry.registerPath({
   method: "delete",
-  path: "/api/v1/career-taxonomy/education/{entryId}",
-  tags: taxTag,
+  path: "/api/v1/career-library/education/{entryId}",
+  tags: eduTag,
   summary: "Soft-delete an Education Path entry (admin). Job roles already linked keep resolving it.",
   request: { params: educationEntryIdParamsSchema },
   responses: { 200: { description: "Soft-deleted education path entry", content: { "application/json": { schema: genericObjectSchema } } }, 404: errorResponses[404] },
 });
 registry.registerPath({
   method: "post",
-  path: "/api/v1/career-taxonomy/education/{entryId}/approve",
-  tags: taxTag,
+  path: "/api/v1/career-library/education/{entryId}/approve",
+  tags: eduTag,
   summary: "Approve a pending Education Path entry (admin). 409 if it was already approved or rejected.",
   request: { params: educationEntryIdParamsSchema },
   responses: { 200: { description: "Approved education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 registry.registerPath({
   method: "post",
-  path: "/api/v1/career-taxonomy/education/{entryId}/reject",
-  tags: taxTag,
+  path: "/api/v1/career-library/education/{entryId}/reject",
+  tags: eduTag,
   summary: "Reject a pending Education Path entry (admin), optionally with a reason. 409 if it was already decided.",
-  request: { params: educationEntryIdParamsSchema, body: { content: { "application/json": { schema: rejectDomainEducationSchema } } } },
+  request: { params: educationEntryIdParamsSchema, body: { content: { "application/json": { schema: rejectEducationEntrySchema } } } },
   responses: { 200: { description: "Rejected education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 registry.registerPath({
   method: "post",
-  path: "/api/v1/career-taxonomy/education/{entryId}/restore",
-  tags: taxTag,
-  summary: "Restore a soft-deleted Education Path entry (admin). 409 on a clash within the domain.",
+  path: "/api/v1/career-library/education/{entryId}/restore",
+  tags: eduTag,
+  summary: "Restore a soft-deleted Education Path entry (admin). 409 if a live entry now holds that programme at that level.",
   request: { params: educationEntryIdParamsSchema },
   responses: { 200: { description: "Restored education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });

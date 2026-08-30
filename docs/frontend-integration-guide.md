@@ -957,17 +957,27 @@ from `GET /career-taxonomy/tree`); writes are **Admin**.
 (the leaf), not cluster/industry/domain strings — resolve it from the cascading picker. An
 unknown or soft-deleted `domainId` returns 400.
 
-**Education Path** hangs off a domain, so every job role in that domain shares one tick-list
-and anything added there is inherited by future roles:
+**Education Path** is a **global lookup** (⚠️ **changed** — it used to hang off a domain, and
+the endpoints have moved from `career-taxonomy` to `career-library`). One row per
+`(level, programme)`, shared by every job role that uses it, exactly like exams/courses/colleges:
 
-- `GET /domains/{id}/education?level=&includeDeleted=` → the domain's entries, ordered by
-  level then programme. This is what pre-populates the tick-list on the "add job role" form.
-- `POST /domains/{id}/education` `{ level, programme, description? }` (**Admin**) — 409 if
-  that programme already exists at that level in the domain.
-- `PATCH /education/{entryId}` `{ level?, programme?, description? }` (**Admin**) —
-  `description: null` clears it.
-- `DELETE /education/{entryId}` — **soft delete**: it leaves the picker, but job roles
-  already linked keep rendering it. `POST /education/{entryId}/restore` reverses it.
+- `GET /api/v1/career-library/education?search=&level=&status=&includeDeleted=&domainId=&limit=`
+  → entries ordered by level then programme. Pass `domainId` to pre-populate the "add job role"
+  tick-list with what roles in that domain already use; omit it for the full list. An unknown
+  `domainId` returns 400.
+- `POST /api/v1/career-library/education` `{ level, programme, description? }` (**Staff**) —
+  a counsellor's lands `PENDING` and stays out of the picker until an admin approves it; an
+  admin's is live immediately. 409 if that programme already exists at that level.
+- `POST /api/v1/career-library/education/{entryId}/approve` \| `/reject` `{ rejectionReason? }`
+  (**Admin**) — 409 if the entry was already decided.
+- `PATCH /api/v1/career-library/education/{entryId}` `{ level?, programme?, description? }`
+  (**Admin**) — `description: null` clears it.
+- `DELETE /api/v1/career-library/education/{entryId}` — **soft delete**: it leaves the picker,
+  but job roles already linked keep rendering it. `POST …/restore` reverses it.
+
+Because entries are global, the same `{ level, programme }` resolves to one row no matter which
+role or domain names it, and an `{ id }` from any domain's picker is linkable to any role — the
+old "belongs to a different career domain" 400 is gone.
 
 `level` is `CLASS_10_PLUS_2` | `GRADUATE` | `POST_GRADUATE` | `CERTIFICATION_STUDENT` |
 `CERTIFICATION_UG`.
@@ -1018,7 +1028,7 @@ They use the standalone endpoints instead — **Staff**, same field sets:
 - `POST /api/v1/career-library/entrance-exams` `{ name, level, … }`
 - `POST /api/v1/career-library/courses` `{ name, level?, … }`
 - `POST /api/v1/career-library/institutions` `{ name, … }`
-- `POST /api/v1/career-taxonomy/domains/{id}/education` `{ level, programme, description? }`
+- `POST /api/v1/career-library/education` `{ level, programme, description? }`
 
 A counsellor's submission comes back `status: "PENDING"` and **won't appear in the pickers**
 until an admin approves it; an admin's own submission is `APPROVED` immediately. Every row
@@ -1028,7 +1038,7 @@ Admin review (all **Admin**, all 409 if the row was already decided):
 
 - `POST /career-library/{entrance-exams|courses|institutions}/{id}/approve` — and `/reject`
   with `{ rejectionReason? }`
-- `POST /career-taxonomy/education/{entryId}/approve` — and `/reject`
+- `POST /career-library/education/{entryId}/approve` — and `/reject`
 
 Build the review queue off the existing list endpoints with `?status=PENDING`. Two behaviours
 worth designing around: re-proposing a **rejected** row reopens it (same id, back to
@@ -1051,9 +1061,10 @@ future role. An `{ id }` that belongs to a *different* domain is a **400** — r
 - `GET /api/v1/career-library/institutions?search=&domainId=&limit=`
 - `GET /api/v1/career-library/courses?search=&level=&domainId=&limit=`
 
-These three cover exams/courses/colleges; the Education Path picker is fed by
-`GET /career-taxonomy/domains/{id}/education` instead (§9.4), since it's domain-owned rather
-than global.
+- `GET /api/v1/career-library/education?search=&level=&domainId=&limit=`
+
+All four take the same shape — Education Path joined them when it stopped being domain-owned
+(§9.4).
 
 `domainId` scopes the result to rows **already linked to job roles in that domain** — the
 "existing entries pulled from this Domain" tick-list. Omit it for the global list. Entry

@@ -519,17 +519,18 @@ model CareerDomain {
   updatedAt  DateTime             @updatedAt
   entries    CareerLibraryEntry[]
 
-  educationEntries DomainEducationEntry[]
-
   @@index([industryId])
   @@map("career_domains")
 }
 
-// --- Education Path: the qualifications/programmes that lead into a domain. Held at the
-// DOMAIN level (not per job role) so every role in the domain inherits the same tick-list,
-// and a new entry added while creating one role is available to every future role there.
-// Soft-deleted like the taxonomy (null = live): a deleted row leaves the pickers but keeps
-// its links resolving. Name uniqueness among live siblings is enforced in the service.
+// --- Education Path: the qualifications/programmes that lead into a career. A GLOBAL
+// canonical lookup, like EntranceExam / Course / Institution — one row per (level,
+// programme), reused by every job role that needs it, and attached to roles through
+// CareerEducationEntry. It carries no taxonomy FK: a picker scoped to one domain is built
+// from usage (which roles in that domain already link the entry), not from ownership.
+// Soft-deleted (null = live): a deleted row leaves the pickers but keeps its links
+// resolving, so uniqueness among live rows is enforced in the service rather than by a DB
+// constraint — a soft-deleted programme name stays reusable.
 // The flat qualification*/certifications* strings on CareerLibraryEntry are the older,
 // free-text layer and are intentionally left untouched — they carry descriptive prose from
 // the source workbook, not a list, so there is nothing to dual-write. ---
@@ -541,10 +542,8 @@ enum EducationPathLevel {
   CERTIFICATION_UG
 }
 
-model DomainEducationEntry {
+model EducationEntry {
   id              String             @id @default(cuid())
-  domainId        String
-  domain          CareerDomain       @relation(fields: [domainId], references: [id])
   level           EducationPathLevel
   programme       String // e.g. "B.Tech Computer Science"
   description     String?
@@ -561,17 +560,17 @@ model DomainEducationEntry {
 
   careerLinks CareerEducationEntry[]
 
-  @@index([domainId])
+  @@index([programme])
   @@index([status])
-  @@map("domain_education_entries")
+  @@map("education_entries")
 }
 
 model CareerEducationEntry {
   careerEntryId    String
   educationEntryId String
-  careerEntry      CareerLibraryEntry   @relation(fields: [careerEntryId], references: [id], onDelete: Cascade)
-  educationEntry   DomainEducationEntry @relation(fields: [educationEntryId], references: [id], onDelete: Cascade)
-  createdAt        DateTime             @default(now())
+  careerEntry      CareerLibraryEntry @relation(fields: [careerEntryId], references: [id], onDelete: Cascade)
+  educationEntry   EducationEntry     @relation(fields: [educationEntryId], references: [id], onDelete: Cascade)
+  createdAt        DateTime           @default(now())
 
   @@id([careerEntryId, educationEntryId])
   @@index([educationEntryId])

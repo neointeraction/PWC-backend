@@ -15,6 +15,9 @@ import type {
   ListCareerLibraryQuery,
   ListCareerRequestsQuery,
   ListCoursesQuery,
+  ListEducationEntriesQuery,
+  CreateEducationEntryInput,
+  UpdateEducationEntryInput,
   ListEntranceExamsQuery,
   ListInstitutionsQuery,
   SubmitCourseInput,
@@ -334,26 +337,24 @@ async function resolveInstitutions(items: InstitutionLinkItem[], actor: Actor): 
 // the "shown as a tick-list of what THIS domain has" contract.
 async function resolveEducationEntries(
   items: EducationLinkItem[],
-  domainId: string,
   actor: Actor
 ): Promise<ResolvedEducationEntry[]> {
   const ids = items.flatMap((i) => (i.id ? [i.id] : []));
   const resolved = new Map<string, ResolvedEducationEntry>();
   for (const it of items) {
     if (it.id) continue;
-    const existing = await prisma.domainEducationEntry.findFirst({
-      where: { domainId, level: it.level!, programme: it.programme!, deletedAt: null },
+    const existing = await prisma.educationEntry.findFirst({
+      where: { level: it.level!, programme: it.programme!, deletedAt: null },
     });
     const row = existing
       ? await fillBlanks(
           existing,
           { description: it.description },
-          (data) => prisma.domainEducationEntry.update({ where: { id: existing.id }, data }),
+          (data) => prisma.educationEntry.update({ where: { id: existing.id }, data }),
           reviewOnReuse(existing, actor)
         )
-      : await prisma.domainEducationEntry.create({
+      : await prisma.educationEntry.create({
           data: {
-            domainId,
             level: it.level!,
             programme: it.programme!,
             description: it.description,
@@ -363,17 +364,15 @@ async function resolveEducationEntries(
     resolved.set(row.id, { id: row.id, level: row.level, programme: row.programme });
   }
   if (ids.length) {
-    const existing = await prisma.domainEducationEntry.findMany({
+    const existing = await prisma.educationEntry.findMany({
       where: { id: { in: ids }, deletedAt: null },
-      select: { id: true, level: true, programme: true, domainId: true },
+      select: { id: true, level: true, programme: true },
     });
     if (existing.length !== new Set(ids).size) {
       throw new BadRequestError("One or more educationEntries ids are invalid or deleted");
     }
+    // No domain check: entries are global, so any live one may be attached to any role.
     for (const r of existing) {
-      if (r.domainId !== domainId) {
-        throw new BadRequestError("An educationEntries id belongs to a different career domain");
-      }
       resolved.set(r.id, { id: r.id, level: r.level, programme: r.programme });
     }
   }
@@ -387,7 +386,7 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
     resolveEntranceExams(entranceExams, actor),
     resolveCourses(courses, actor),
     resolveInstitutions(institutions, actor),
-    resolveEducationEntries(educationEntries, scalar.domainId, actor),
+    resolveEducationEntries(educationEntries, actor),
   ]);
   try {
     const created = await prisma.careerLibraryEntry.create({
@@ -423,7 +422,7 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
   // leaves the entry in — the new one when the update also re-parents it.
   const edu =
     educationEntries !== undefined
-      ? await resolveEducationEntries(educationEntries, scalar.domainId ?? current.domainId, actor)
+      ? await resolveEducationEntries(educationEntries, actor)
       : undefined;
   try {
     await prisma.$transaction(async (tx) => {
@@ -517,6 +516,124 @@ export async function listCourses(query: ListCoursesQuery) {
     take: query.limit,
     select: { id: true, name: true, level: true, fullForm: true, status: true, submittedBy: true },
   });
+}
+
+// --- Education Path entries (global canonical lookup) ---------------------------
+// Was per-domain (DomainEducationEntry); now a global row like an exam/course/institution,
+// attached to job roles through CareerEducationEntry. Domain scoping survives only as a
+// *usage* filter on the picker, via domainScope() above.
+
+// Ordered by level then programme so the picker groups naturally (10+2 → Graduate → PG →
+// certifications), matching the enum's declaration order.
+const educationOrder = [{ level: "asc" }, { programme: "asc" }] as const;
+
+export async function listEducationEntries(query: ListEducationEntriesQuery) {
+  if (query.domainId) await assertLiveDomain(query.domainId); // 400 rather than a silently empty list
+  return prisma.educationEntry.findMany({
+    where: {
+      level: query.level,
+      status: query.status,
+      programme: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
+      ...(query.includeDeleted ? {} : { deletedAt: null }),
+      ...domainScope(query.domainId),
+    },
+    orderBy: [...educationOrder],
+    take: query.limit,
+  });
+}
+
+async function getLiveEducationEntry(entryId: string) {
+  const entry = await prisma.educationEntry.findUnique({ where: { id: entryId } });
+  if (!entry || entry.deletedAt) throw new NotFoundError("Education path entry not found");
+  return entry;
+}
+
+// Unique among *live* rows only, so a soft-deleted programme name can be reused. Now a
+// global check — the same (level, programme) is one row shared by every role that needs it.
+async function assertEducationProgrammeFree(
+  level: EducationPathLevel,
+  programme: string,
+  excludeId?: string
+) {
+  const clash = await prisma.educationEntry.findFirst({
+    where: { level, programme, deletedAt: null, ...(excludeId ? { id: { not: excludeId } } : {}) },
+  });
+  if (clash) throw new ConflictError("This programme already exists at that level");
+}
+
+// A counsellor's entry lands PENDING and stays out of the pickers until an admin approves
+// it; an admin's is live immediately (and counts as its own approval).
+export async function createEducationEntry(input: CreateEducationEntryInput, actor: Actor) {
+  await assertEducationProgrammeFree(input.level, input.programme);
+  const admin = actor.role === "ADMIN" || actor.role === "SUPER_ADMIN";
+  return prisma.educationEntry.create({
+    data: {
+      level: input.level,
+      programme: input.programme,
+      description: input.description,
+      submittedBy: actor.userId,
+      ...(admin
+        ? { status: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date() }
+        : { status: "PENDING" as const }),
+    },
+  });
+}
+
+// Reviewed in place — the row IS the submission. Re-reviewing a decided row is a 409 (the
+// admin is looking at a stale queue).
+async function reviewEducationEntry(
+  entryId: string,
+  decision: "APPROVED" | "REJECTED",
+  actor: Actor,
+  rejectionReason?: string
+) {
+  const entry = await prisma.educationEntry.findUnique({ where: { id: entryId } });
+  if (!entry || entry.deletedAt) throw new NotFoundError("Education path entry not found");
+  if (entry.status !== "PENDING") {
+    throw new ConflictError(`Education path entry has already been ${entry.status.toLowerCase()}`);
+  }
+  return prisma.educationEntry.update({
+    where: { id: entryId },
+    data: {
+      status: decision,
+      reviewedBy: actor.userId,
+      reviewedAt: new Date(),
+      rejectionReason: decision === "REJECTED" ? rejectionReason ?? null : null,
+    },
+  });
+}
+
+export const approveEducationEntry = (entryId: string, actor: Actor) =>
+  reviewEducationEntry(entryId, "APPROVED", actor);
+export const rejectEducationEntry = (entryId: string, actor: Actor, reason?: string) =>
+  reviewEducationEntry(entryId, "REJECTED", actor, reason);
+
+export async function updateEducationEntry(entryId: string, input: UpdateEducationEntryInput) {
+  const existing = await getLiveEducationEntry(entryId);
+  const level = input.level ?? existing.level;
+  const programme = input.programme ?? existing.programme;
+  if (input.level !== undefined || input.programme !== undefined) {
+    await assertEducationProgrammeFree(level, programme, entryId);
+  }
+  return prisma.educationEntry.update({
+    where: { id: entryId },
+    data: { level: input.level, programme: input.programme, description: input.description },
+  });
+}
+
+// Soft delete: the row leaves the pickers, but job roles already linked to it keep
+// resolving and still render it.
+export async function deleteEducationEntry(entryId: string) {
+  await getLiveEducationEntry(entryId);
+  return prisma.educationEntry.update({ where: { id: entryId }, data: { deletedAt: new Date() } });
+}
+
+export async function restoreEducationEntry(entryId: string) {
+  const entry = await prisma.educationEntry.findUnique({ where: { id: entryId } });
+  if (!entry) throw new NotFoundError("Education path entry not found");
+  if (!entry.deletedAt) return entry;
+  await assertEducationProgrammeFree(entry.level, entry.programme, entryId);
+  return prisma.educationEntry.update({ where: { id: entryId }, data: { deletedAt: null } });
 }
 
 // --- Standalone reference-data submissions + review -----------------------------

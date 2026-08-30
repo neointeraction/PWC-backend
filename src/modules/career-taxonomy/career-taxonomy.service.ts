@@ -3,15 +3,12 @@ import type { Actor } from "../career-library/career-library.service.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import type {
   CreateClusterInput,
-  CreateDomainEducationInput,
   CreateDomainInput,
   CreateIndustryInput,
   ListClustersQuery,
-  ListDomainEducationQuery,
   ListDomainsQuery,
   ListIndustriesQuery,
   UpdateClusterInput,
-  UpdateDomainEducationInput,
   UpdateDomainInput,
   UpdateIndustryInput,
 } from "./career-taxonomy.schema.js";
@@ -255,127 +252,4 @@ export async function assertLiveDomain(domainId: string) {
     throw new BadRequestError("domainId does not reference a live career domain");
   }
   return domain;
-}
-
-// ======================= Education Path (domain-level) =======================
-
-// Ordered by level then programme so the picker groups naturally (10+2 → Graduate → PG →
-// certifications), matching the enum's declaration order.
-const educationOrder = [{ level: "asc" }, { programme: "asc" }] as const;
-
-export async function listDomainEducation(domainId: string, query: ListDomainEducationQuery) {
-  await getLiveDomain(domainId); // 404 if the domain is missing/deleted
-  return prisma.domainEducationEntry.findMany({
-    where: {
-      domainId,
-      level: query.level,
-      status: query.status,
-      ...(query.includeDeleted ? {} : { deletedAt: null }),
-    },
-    orderBy: [...educationOrder],
-  });
-}
-
-async function getLiveEducationEntry(entryId: string) {
-  const entry = await prisma.domainEducationEntry.findUnique({ where: { id: entryId } });
-  if (!entry || entry.deletedAt) throw new NotFoundError("Education path entry not found");
-  return entry;
-}
-
-// Unique among *live* siblings only (same rule as the taxonomy levels), so a soft-deleted
-// programme name can be reused. Same level + same programme in one domain is the clash.
-async function assertEducationProgrammeFree(
-  domainId: string,
-  level: CreateDomainEducationInput["level"],
-  programme: string,
-  excludeId?: string
-) {
-  const clash = await prisma.domainEducationEntry.findFirst({
-    where: { domainId, level, programme, deletedAt: null, ...(excludeId ? { id: { not: excludeId } } : {}) },
-  });
-  if (clash) throw new ConflictError("This programme already exists at that level for this domain");
-}
-
-// A counsellor's entry lands PENDING and stays out of the domain's tick-list until an admin
-// approves it; an admin's is live immediately (and counts as its own approval).
-export async function createDomainEducation(
-  domainId: string,
-  input: CreateDomainEducationInput,
-  actor: Actor
-) {
-  await getLiveDomain(domainId);
-  await assertEducationProgrammeFree(domainId, input.level, input.programme);
-  const admin = actor.role === "ADMIN" || actor.role === "SUPER_ADMIN";
-  return prisma.domainEducationEntry.create({
-    data: {
-      domainId,
-      level: input.level,
-      programme: input.programme,
-      description: input.description,
-      submittedBy: actor.userId,
-      ...(admin
-        ? { status: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date() }
-        : { status: "PENDING" as const }),
-    },
-  });
-}
-
-// Reviewed in place — the row IS the submission. Re-reviewing a decided row is a 409 (the
-// admin is looking at a stale queue).
-async function reviewDomainEducation(
-  entryId: string,
-  decision: "APPROVED" | "REJECTED",
-  actor: Actor,
-  rejectionReason?: string
-) {
-  const entry = await prisma.domainEducationEntry.findUnique({ where: { id: entryId } });
-  if (!entry || entry.deletedAt) throw new NotFoundError("Education path entry not found");
-  if (entry.status !== "PENDING") {
-    throw new ConflictError(`Education path entry has already been ${entry.status.toLowerCase()}`);
-  }
-  return prisma.domainEducationEntry.update({
-    where: { id: entryId },
-    data: {
-      status: decision,
-      reviewedBy: actor.userId,
-      reviewedAt: new Date(),
-      rejectionReason: decision === "REJECTED" ? rejectionReason ?? null : null,
-    },
-  });
-}
-
-export const approveDomainEducation = (entryId: string, actor: Actor) =>
-  reviewDomainEducation(entryId, "APPROVED", actor);
-export const rejectDomainEducation = (entryId: string, actor: Actor, reason?: string) =>
-  reviewDomainEducation(entryId, "REJECTED", actor, reason);
-
-export async function updateDomainEducation(entryId: string, input: UpdateDomainEducationInput) {
-  const existing = await getLiveEducationEntry(entryId);
-  const level = input.level ?? existing.level;
-  const programme = input.programme ?? existing.programme;
-  if (input.level !== undefined || input.programme !== undefined) {
-    await assertEducationProgrammeFree(existing.domainId, level, programme, entryId);
-  }
-  return prisma.domainEducationEntry.update({
-    where: { id: entryId },
-    data: { level: input.level, programme: input.programme, description: input.description },
-  });
-}
-
-// Soft delete, for the same reason the taxonomy levels are: the row leaves the domain's
-// picker, but job roles already linked to it keep resolving and still render it.
-export async function deleteDomainEducation(entryId: string) {
-  await getLiveEducationEntry(entryId);
-  return prisma.domainEducationEntry.update({
-    where: { id: entryId },
-    data: { deletedAt: new Date() },
-  });
-}
-
-export async function restoreDomainEducation(entryId: string) {
-  const entry = await prisma.domainEducationEntry.findUnique({ where: { id: entryId } });
-  if (!entry) throw new NotFoundError("Education path entry not found");
-  if (!entry.deletedAt) return entry;
-  await assertEducationProgrammeFree(entry.domainId, entry.level, entry.programme, entryId);
-  return prisma.domainEducationEntry.update({ where: { id: entryId }, data: { deletedAt: null } });
 }

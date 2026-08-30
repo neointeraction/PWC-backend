@@ -142,8 +142,10 @@ with a `DRAFT`→`ACTIVE` publish step) plus the counsellor ratification-request
 (submit → admin approve/reject). Its normalized links (exams/courses/colleges) take the full
 canonical field set on an inline "add new" and **blank-fill** rather than overwrite a row that
 already exists; there is deliberately no endpoint yet for editing a canonical lookup row.
-**Education Path** is modelled at the domain level (`DomainEducationEntry`, CRUD under
-`/api/v1/career-taxonomy/domains/:id/education`) and linked per job role — it is not
+**Education Path** is a global canonical lookup (`EducationEntry`, CRUD under
+`/api/v1/career-library/education`) on the same footing as exams/courses/institutions,
+linked to job roles through `CareerEducationEntry` — it carries no taxonomy FK (a
+domain-scoped picker comes from `?domainId=`, which filters by *usage*), and it is not
 dual-written back to the flat `qualification*`/`certifications*` strings. **Reference data is
 review-gated**: counsellors may propose exams/courses/institutions/education-path entries
 (staff-level POSTs), which land `PENDING` and stay out of the pickers until an admin

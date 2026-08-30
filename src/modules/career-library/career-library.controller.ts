@@ -9,6 +9,8 @@ import type {
   ListCareerLibraryQuery,
   ListCareerRequestsQuery,
   ListCoursesQuery,
+  ListEducationEntriesQuery,
+  EducationEntryIdParams,
   ListEntranceExamsQuery,
   ListInstitutionsQuery,
 } from "./career-library.schema.js";
@@ -141,4 +143,42 @@ export async function rejectInstitution(req: Request, res: Response): Promise<vo
   res
     .status(200)
     .json(await careerLibraryService.rejectInstitution(req.params.id as string, actorOf(req), req.body.rejectionReason));
+}
+
+// ---- Education Path entries (global canonical lookup) ----
+
+export async function listEducationEntries(req: Request, res: Response): Promise<void> {
+  const query = req.query as unknown as ListEducationEntriesQuery;
+  res.status(200).json(await careerLibraryService.listEducationEntries(query));
+}
+
+export async function createEducationEntry(req: Request, res: Response): Promise<void> {
+  res.status(201).json(await careerLibraryService.createEducationEntry(req.body, actorOf(req)));
+}
+
+export async function approveEducationEntry(req: Request, res: Response): Promise<void> {
+  const { entryId } = req.params as unknown as EducationEntryIdParams;
+  res.status(200).json(await careerLibraryService.approveEducationEntry(entryId, actorOf(req)));
+}
+
+export async function rejectEducationEntry(req: Request, res: Response): Promise<void> {
+  const { entryId } = req.params as unknown as EducationEntryIdParams;
+  res
+    .status(200)
+    .json(await careerLibraryService.rejectEducationEntry(entryId, actorOf(req), req.body.rejectionReason));
+}
+
+export async function updateEducationEntry(req: Request, res: Response): Promise<void> {
+  const { entryId } = req.params as unknown as EducationEntryIdParams;
+  res.status(200).json(await careerLibraryService.updateEducationEntry(entryId, req.body));
+}
+
+export async function deleteEducationEntry(req: Request, res: Response): Promise<void> {
+  const { entryId } = req.params as unknown as EducationEntryIdParams;
+  res.status(200).json(await careerLibraryService.deleteEducationEntry(entryId));
+}
+
+export async function restoreEducationEntry(req: Request, res: Response): Promise<void> {
+  const { entryId } = req.params as unknown as EducationEntryIdParams;
+  res.status(200).json(await careerLibraryService.restoreEducationEntry(entryId));
 }

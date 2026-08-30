@@ -396,24 +396,29 @@ makes restoring the original **409**). Ids may be cuid or uuid (backfilled rows)
 > `REJECTED` row reopens it, and an admin naming a `PENDING` row while adding a job role
 > implicitly approves it.
 
-The qualifications/programmes that lead into a domain, held **per domain** rather than per job
-role — so the "add job role" form shows a tick-list of what the domain already has, and anything
-added there is inherited by every future role in that domain. `level` is one of
+The qualifications/programmes that lead into a career. A **global canonical lookup**, exactly
+like entrance exams / courses / institutions: one row per `(level, programme)`, attached to job
+roles through a join table, and **not** owned by a taxonomy node. `level` is one of
 `CLASS_10_PLUS_2` \| `GRADUATE` \| `POST_GRADUATE` \| `CERTIFICATION_STUDENT` \| `CERTIFICATION_UG`.
-Soft-deleted like the taxonomy nodes: a deleted entry leaves the picker but job roles already
-linked to it keep resolving and still render it. Uniqueness is per `(domain, level, programme)`
-among live rows. The flat `qualification*` / `certifications*` strings on a career entry are the
-older free-text layer and are left untouched — they hold descriptive prose, not a list.
+Soft-deleted: a deleted entry leaves the picker but job roles already linked to it keep resolving
+and still render it — so uniqueness on `(level, programme)` is enforced in the service among live
+rows only, leaving a soft-deleted programme name reusable. The flat `qualification*` /
+`certifications*` strings on a career entry are the older free-text layer and are left untouched —
+they hold descriptive prose, not a list.
+
+Pass `?domainId=` to scope the picker to entries **already used by job roles in that domain** —
+the same usage-based filter the exam/course/institution lookups take. That replaces the old
+per-domain ownership: a domain no longer *owns* entries, it just has roles that link some.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/career-taxonomy/domains/{id}/education` | List a domain's education path. Query: `level?`, `status?` (default `APPROVED`), `includeDeleted?`. Ordered by level then programme. 404 if the domain is missing/deleted. |
-| POST | `/api/v1/career-taxonomy/domains/{id}/education` | **Staff.** Propose an entry. Body: `{ level, programme, description? }`. A counsellor's lands `PENDING` and stays out of the tick-list until approved; an admin's is `APPROVED` immediately. 409 if that programme already exists at that level in the domain. |
-| POST | `/api/v1/career-taxonomy/education/{entryId}/approve` | **Admin.** Approve a pending entry. 409 if already decided. |
-| POST | `/api/v1/career-taxonomy/education/{entryId}/reject` | **Admin.** Reject a pending entry. Body: `{ rejectionReason? }`. 409 if already decided. |
-| PATCH | `/api/v1/career-taxonomy/education/{entryId}` | **Admin.** Update `{ level?, programme?, description? }`. `description: null` clears it. 409 on a clash within the domain, 404 if missing/deleted. |
-| DELETE | `/api/v1/career-taxonomy/education/{entryId}` | **Admin.** Soft-delete. Returns the row with `deletedAt` set. |
-| POST | `/api/v1/career-taxonomy/education/{entryId}/restore` | **Admin.** Clear `deletedAt`. 409 if a live row now holds that level+programme. |
+| GET | `/api/v1/career-library/education` | List education path entries. Query: `search?`, `level?`, `status?` (default `APPROVED`), `includeDeleted?`, `domainId?` (scope to entries used by roles in that domain — 400 if it isn't a live domain), `limit?` (default 50). Ordered by level then programme. |
+| POST | `/api/v1/career-library/education` | **Staff.** Propose an entry. Body: `{ level, programme, description? }`. A counsellor's lands `PENDING` and stays out of the pickers until approved; an admin's is `APPROVED` immediately. 409 if that programme already exists at that level. |
+| POST | `/api/v1/career-library/education/{entryId}/approve` | **Admin.** Approve a pending entry. 409 if already decided. |
+| POST | `/api/v1/career-library/education/{entryId}/reject` | **Admin.** Reject a pending entry. Body: `{ rejectionReason? }`. 409 if already decided. |
+| PATCH | `/api/v1/career-library/education/{entryId}` | **Admin.** Update `{ level?, programme?, description? }`. `description: null` clears it. 409 on a clash with another live entry at that level, 404 if missing/deleted. |
+| DELETE | `/api/v1/career-library/education/{entryId}` | **Admin.** Soft-delete. Returns the row with `deletedAt` set. |
+| POST | `/api/v1/career-library/education/{entryId}/restore` | **Admin.** Clear `deletedAt`. 409 if a live row now holds that level+programme. |
 
 ## Sessions
 

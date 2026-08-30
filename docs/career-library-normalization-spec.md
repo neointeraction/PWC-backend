@@ -188,8 +188,11 @@ dropdowns:
   one role must not clobber another's data.
 - **Domain-scoped typeahead.** `?domainId=` on the three dropdown endpoints answers "what
   does this domain already have", derived from the join tables — no extra schema.
-- **Education Path** (`DomainEducationEntry` + `CareerEducationEntry`) is normalized at the
-  **domain** level, managed under `/api/v1/career-taxonomy/`. Unlike exams/courses it is
+- **Education Path** (`EducationEntry` + `CareerEducationEntry`) is a global canonical
+  lookup like exams/courses/institutions, managed under `/api/v1/career-library/education`.
+  It was originally domain-scoped (`DomainEducationEntry` under `/api/v1/career-taxonomy/`),
+  which duplicated the same programme once per domain; it now carries no taxonomy FK and a
+  domain-scoped picker is built from usage (`?domainId=`). Unlike exams/courses it is
   **not** dual-written back to the flat `qualification*`/`certifications*` strings: those
   hold workbook prose, not lists.
 
