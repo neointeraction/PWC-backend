@@ -1,5 +1,12 @@
 import type { Request, Response } from "express";
+import { UnauthorizedError } from "../../common/errors/AppError.js";
 import * as service from "./career-taxonomy.service.js";
+import type { Actor } from "../career-library/career-library.service.js";
+
+function actorOf(req: Request): Actor {
+  if (!req.user) throw new UnauthorizedError();
+  return { userId: req.user.sub, role: req.user.role };
+}
 
 // ---- Clusters ----
 export async function listClusters(req: Request, res: Response): Promise<void> {
@@ -62,7 +69,15 @@ export async function listDomainEducation(req: Request, res: Response): Promise<
   res.status(200).json(await service.listDomainEducation(req.params.id as string, req.query as never));
 }
 export async function createDomainEducation(req: Request, res: Response): Promise<void> {
-  res.status(201).json(await service.createDomainEducation(req.params.id as string, req.body));
+  res.status(201).json(await service.createDomainEducation(req.params.id as string, req.body, actorOf(req)));
+}
+export async function approveDomainEducation(req: Request, res: Response): Promise<void> {
+  res.status(200).json(await service.approveDomainEducation(req.params.entryId as string, actorOf(req)));
+}
+export async function rejectDomainEducation(req: Request, res: Response): Promise<void> {
+  res
+    .status(200)
+    .json(await service.rejectDomainEducation(req.params.entryId as string, actorOf(req), req.body.rejectionReason));
 }
 export async function updateDomainEducation(req: Request, res: Response): Promise<void> {
   res.status(200).json(await service.updateDomainEducation(req.params.entryId as string, req.body));

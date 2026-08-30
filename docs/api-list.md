@@ -308,9 +308,14 @@ dual-written during the transition — see `docs/career-library-normalization-sp
 |---|---|---|
 | GET | `/api/v1/career-library` | Search/list entries. Query: `search?` (free text across jobRole/oneLineDescription and the taxonomy names), `clusterId?, industryId?, domainId?` (filter by taxonomy id at any level; combining `clusterId`+`industryId` ANDs them), `aiResilienceGrade?` (`LOW`\|`MEDIUM`\|`HIGH`\|`VERY_HIGH`), `status?` (defaults to `ACTIVE`), `page?` (default 1), `pageSize?` (default 20, max 100). Each entry includes its `domain` chain (`domain.industry.cluster`) so the cluster/industry/domain names are still present. Returns `{ data, pagination: { page, pageSize, total, totalPages } }`. |
 | GET | `/api/v1/career-library/filters` | Filter-dropdown source, now backed by the taxonomy tables (live rows only): `clusters` / `industries` / `domains` as `{id, name}` objects (industries carry `clusterId`, domains carry `industryId` for cascading) plus the fixed `aiResilienceGrades` list. For a fully nested picker use `GET /career-taxonomy/tree`. |
-| GET | `/api/v1/career-library/entrance-exams` | **Typeahead dropdown.** Canonical entrance exams. Query: `search?`, `level?` (`UG`\|`PG`), `domainId?`, `limit?` (default 50). `domainId` scopes the list to exams already linked to job roles in that domain ("what this domain already has"); 400 if it isn't a live domain. Omit it for the global list. |
-| GET | `/api/v1/career-library/institutions` | **Typeahead dropdown.** Canonical institutions/colleges. Query: `search?`, `domainId?`, `limit?`. `domainId` scopes to institutions already linked to job roles in that domain; 400 if it isn't a live domain. |
-| GET | `/api/v1/career-library/courses` | **Typeahead dropdown.** Canonical courses. Query: `search?`, `level?`, `domainId?`, `limit?`. `domainId` scopes to courses already linked to job roles in that domain; 400 if it isn't a live domain. |
+| GET | `/api/v1/career-library/entrance-exams` | **Typeahead dropdown.** Canonical entrance exams. Query: `search?`, `level?` (`UG`\|`PG`), `domainId?`, `limit?` (default 50). `domainId` scopes the list to exams already linked to job roles in that domain ("what this domain already has"); 400 if it isn't a live domain. Omit it for the global list. Add `status?` (`PENDING`\|`APPROVED`\|`REJECTED`, default `APPROVED`) for the admin review queue — pickers show approved rows only. Each row carries `status` + `submittedBy`. |
+| GET | `/api/v1/career-library/institutions` | **Typeahead dropdown.** Canonical institutions/colleges. Query: `search?`, `domainId?`, `limit?`. `domainId` scopes to institutions already linked to job roles in that domain; 400 if it isn't a live domain. Add `status?` (`PENDING`\|`APPROVED`\|`REJECTED`, default `APPROVED`) for the admin review queue — pickers show approved rows only. Each row carries `status` + `submittedBy`. |
+| GET | `/api/v1/career-library/courses` | **Typeahead dropdown.** Canonical courses. Query: `search?`, `level?`, `domainId?`, `limit?`. `domainId` scopes to courses already linked to job roles in that domain; 400 if it isn't a live domain. Add `status?` (`PENDING`\|`APPROVED`\|`REJECTED`, default `APPROVED`) for the admin review queue — pickers show approved rows only. Each row carries `status` + `submittedBy`. |
+| POST | `/api/v1/career-library/entrance-exams` | **Staff.** Propose a canonical entrance exam. Body: `{ name, level, … }` (same detail fields as the inline link item). A counsellor's lands `PENDING`; an admin's is `APPROVED` immediately. An existing row is reused + blank-filled, never duplicated. |
+| POST | `/api/v1/career-library/courses` | **Staff.** Propose a canonical course. Body: `{ name, level?, … }`. Same review rules. |
+| POST | `/api/v1/career-library/institutions` | **Staff.** Propose a canonical institution. Body: `{ name, … }`. Same review rules. |
+| POST | `/api/v1/career-library/{entrance-exams\|courses\|institutions}/{id}/approve` | **Admin.** Approve a pending row. 409 if already approved/rejected, 404 if missing. |
+| POST | `/api/v1/career-library/{entrance-exams\|courses\|institutions}/{id}/reject` | **Admin.** Reject a pending row. Body: `{ rejectionReason? }`. 409 if already decided. |
 | POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `domainId` (a live `CareerDomain` leaf — cluster/industry are derived from it; 400 if unknown or soft-deleted), `jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields (incl. `qualification10th12thExplanation`, `qualificationGraduationDefined`, `qualificationPGDefined`), `roleOverview`, `keySkills` (string list), `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` / `educationEntries` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name, education items are `[{ id } \| { level, programme, description? }]`). Returns the assembled entry. `createdBy` = calling admin. |
 | PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` toggle). A provided link array (`entranceExams`/`courses`/`institutions`/`educationEntries`) **replaces** that entry's links; omitting it leaves them unchanged. **Clearing a value:** omitting a scalar leaves it unchanged, sending `null` clears it — accepted for every nullable column (`salaryIndia*`/`salaryGlobal*` text **and** numeric, `roleOverview`, `qualification10th12thExplanation`, `qualificationGraduation(Defined)`, `qualificationPG(Defined)`, `entranceExamsUGDescription`). Empty strings are still rejected; clear with `null`. `jobRole`, `domainId`, `aiResilienceGrade`, `aiResilienceComment`, `oneLineDescription` and `qualification10th12th` are NOT NULL and reject `null`. Clear a list by sending `[]`. 400 on an unknown link `id`. Sets `updatedBy`. 404 if not found. |
 | DELETE | `/api/v1/career-library/{id}` | **Admin.** Delete an entry (cascades its links; first detaches any request's `resultingEntryId`). 404 if not found. |
@@ -360,6 +365,15 @@ makes restoring the original **409**). Ids may be cuid or uuid (backfilled rows)
 
 ### Education Path (domain-level)
 
+> **Review model.** Counsellors may propose education path entries, exams, courses and
+> institutions; admins approve or reject them. Review happens **in place** — the row *is* the
+> submission, carrying `status` (`PENDING`/`APPROVED`/`REJECTED`), `submittedBy`, `reviewedBy`,
+> `reviewedAt` and `rejectionReason`. This is deliberately unlike `CareerLibraryRequest` (the
+> job-role flow), which is a separate ticket the admin re-keys into an entry. Pickers and
+> tick-lists show `APPROVED` only; pass `status=PENDING` for the review queue. Re-proposing a
+> `REJECTED` row reopens it, and an admin naming a `PENDING` row while adding a job role
+> implicitly approves it.
+
 The qualifications/programmes that lead into a domain, held **per domain** rather than per job
 role — so the "add job role" form shows a tick-list of what the domain already has, and anything
 added there is inherited by every future role in that domain. `level` is one of
@@ -371,8 +385,10 @@ older free-text layer and are left untouched — they hold descriptive prose, no
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/career-taxonomy/domains/{id}/education` | List a domain's education path. Query: `level?`, `includeDeleted?`. Ordered by level then programme. 404 if the domain is missing/deleted. |
-| POST | `/api/v1/career-taxonomy/domains/{id}/education` | **Admin.** Create. Body: `{ level, programme, description? }`. 409 if that programme already exists at that level in the domain. |
+| GET | `/api/v1/career-taxonomy/domains/{id}/education` | List a domain's education path. Query: `level?`, `status?` (default `APPROVED`), `includeDeleted?`. Ordered by level then programme. 404 if the domain is missing/deleted. |
+| POST | `/api/v1/career-taxonomy/domains/{id}/education` | **Staff.** Propose an entry. Body: `{ level, programme, description? }`. A counsellor's lands `PENDING` and stays out of the tick-list until approved; an admin's is `APPROVED` immediately. 409 if that programme already exists at that level in the domain. |
+| POST | `/api/v1/career-taxonomy/education/{entryId}/approve` | **Admin.** Approve a pending entry. 409 if already decided. |
+| POST | `/api/v1/career-taxonomy/education/{entryId}/reject` | **Admin.** Reject a pending entry. Body: `{ rejectionReason? }`. 409 if already decided. |
 | PATCH | `/api/v1/career-taxonomy/education/{entryId}` | **Admin.** Update `{ level?, programme?, description? }`. `description: null` clears it. 409 on a clash within the domain, 404 if missing/deleted. |
 | DELETE | `/api/v1/career-taxonomy/education/{entryId}` | **Admin.** Soft-delete. Returns the row with `deletedAt` set. |
 | POST | `/api/v1/career-taxonomy/education/{entryId}/restore` | **Admin.** Clear `deletedAt`. 409 if a live row now holds that level+programme. |

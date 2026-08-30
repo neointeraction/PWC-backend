@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { EducationPathLevel, UserRole } from "@prisma/client";
+import type { EducationPathLevel, ReviewStatus, UserRole } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
@@ -17,6 +17,9 @@ import type {
   ListCoursesQuery,
   ListEntranceExamsQuery,
   ListInstitutionsQuery,
+  SubmitCourseInput,
+  SubmitEntranceExamInput,
+  SubmitInstitutionInput,
   UpdateCareerEntryInput,
 } from "./career-library.schema.js";
 
@@ -24,6 +27,33 @@ import type {
 export interface Actor {
   userId: string;
   role: UserRole;
+}
+
+const isAdmin = (actor: Actor): boolean => actor.role === "ADMIN" || actor.role === "SUPER_ADMIN";
+
+// Review state for a reference row this actor is creating. An admin's addition is live
+// immediately (and counts as its own approval); a counsellor's waits for review.
+function reviewOnCreate(actor: Actor) {
+  return isAdmin(actor)
+    ? { status: "APPROVED" as const, submittedBy: actor.userId, reviewedBy: actor.userId, reviewedAt: new Date() }
+    : { status: "PENDING" as const, submittedBy: actor.userId };
+}
+
+// What to do when a find-or-create lands on a row that already exists:
+//   - an ADMIN naming a row a counsellor proposed is an implicit approval;
+//   - anyone re-proposing a REJECTED row reopens it for review;
+//   - otherwise leave the review state alone.
+// Returned as an update patch, merged with the blank-fill patch by the callers below.
+function reviewOnReuse(existing: { status: ReviewStatus }, actor: Actor) {
+  if (existing.status === "PENDING" && isAdmin(actor)) {
+    return { status: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date() };
+  }
+  if (existing.status === "REJECTED") {
+    return isAdmin(actor)
+      ? { status: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date(), rejectionReason: null }
+      : { status: "PENDING" as const, submittedBy: actor.userId, reviewedBy: null, reviewedAt: null, rejectionReason: null };
+  }
+  return {};
 }
 
 // Flattens the domain → industry → cluster chain onto each entry so responses still carry the
@@ -129,20 +159,20 @@ export async function getCareerLibraryFilters() {
 const entryLinkInclude = {
   ...domainChainInclude,
   entranceExamLinks: {
-    select: { entranceExam: { select: { id: true, name: true, level: true, fullForm: true } } },
+    select: { entranceExam: { select: { id: true, name: true, level: true, fullForm: true, status: true } } },
     orderBy: { entranceExam: { name: "asc" } },
   },
   courseLinks: {
-    select: { course: { select: { id: true, name: true, level: true } } },
+    select: { course: { select: { id: true, name: true, level: true, status: true } } },
     orderBy: { course: { name: "asc" } },
   },
   institutionLinks: {
-    select: { institution: { select: { id: true, name: true, city: true, state: true } } },
+    select: { institution: { select: { id: true, name: true, city: true, state: true, status: true } } },
     orderBy: { institution: { name: "asc" } },
   },
   educationLinks: {
     select: {
-      educationEntry: { select: { id: true, level: true, programme: true, description: true, deletedAt: true } },
+      educationEntry: { select: { id: true, level: true, programme: true, description: true, deletedAt: true, status: true } },
     },
     orderBy: { educationEntry: { programme: "asc" } },
   },
@@ -208,16 +238,17 @@ type ResolvedEducationEntry = { id: string; level: EducationPathLevel; programme
 async function fillBlanks<T extends Record<string, unknown>>(
   existing: T,
   detail: Record<string, unknown>,
-  update: (data: Record<string, unknown>) => Promise<T>
+  update: (data: Record<string, unknown>) => Promise<T>,
+  extra: Record<string, unknown> = {}
 ): Promise<T> {
-  const patch: Record<string, unknown> = {};
+  const patch: Record<string, unknown> = { ...extra };
   for (const [key, value] of Object.entries(detail)) {
     if (value !== undefined && existing[key] == null) patch[key] = value;
   }
   return Object.keys(patch).length > 0 ? update(patch) : existing;
 }
 
-async function resolveEntranceExams(items: ExamLinkItem[]): Promise<ResolvedExam[]> {
+async function resolveEntranceExams(items: ExamLinkItem[], actor: Actor): Promise<ResolvedExam[]> {
   const ids = items.flatMap((i) => (i.id ? [i.id] : []));
   const resolved = new Map<string, ResolvedExam>();
   for (const it of items) {
@@ -227,10 +258,15 @@ async function resolveEntranceExams(items: ExamLinkItem[]): Promise<ResolvedExam
       where: { name_level: { name: name!, level: level! } },
     });
     const row = existing
-      ? await fillBlanks(existing, detail, (data) =>
-          prisma.entranceExam.update({ where: { id: existing.id }, data })
+      ? await fillBlanks(
+          existing,
+          detail,
+          (data) => prisma.entranceExam.update({ where: { id: existing.id }, data }),
+          reviewOnReuse(existing, actor)
         )
-      : await prisma.entranceExam.create({ data: { name: name!, level: level!, ...detail } });
+      : await prisma.entranceExam.create({
+          data: { name: name!, level: level!, ...detail, ...reviewOnCreate(actor) },
+        });
     resolved.set(row.id, { id: row.id, name: row.name, level: row.level });
   }
   if (ids.length) {
@@ -241,7 +277,7 @@ async function resolveEntranceExams(items: ExamLinkItem[]): Promise<ResolvedExam
   return [...resolved.values()];
 }
 
-async function resolveCourses(items: CourseLinkItem[]): Promise<ResolvedCourse[]> {
+async function resolveCourses(items: CourseLinkItem[], actor: Actor): Promise<ResolvedCourse[]> {
   const ids = items.flatMap((i) => (i.id ? [i.id] : []));
   const resolved = new Map<string, ResolvedCourse>();
   for (const it of items) {
@@ -250,8 +286,13 @@ async function resolveCourses(items: CourseLinkItem[]): Promise<ResolvedCourse[]
     const level = rawLevel ?? "UG";
     const existing = await prisma.course.findUnique({ where: { name_level: { name: name!, level } } });
     const row = existing
-      ? await fillBlanks(existing, detail, (data) => prisma.course.update({ where: { id: existing.id }, data }))
-      : await prisma.course.create({ data: { name: name!, level, ...detail } });
+      ? await fillBlanks(
+          existing,
+          detail,
+          (data) => prisma.course.update({ where: { id: existing.id }, data }),
+          reviewOnReuse(existing, actor)
+        )
+      : await prisma.course.create({ data: { name: name!, level, ...detail, ...reviewOnCreate(actor) } });
     resolved.set(row.id, { id: row.id, name: row.name, level: row.level });
   }
   if (ids.length) {
@@ -262,7 +303,7 @@ async function resolveCourses(items: CourseLinkItem[]): Promise<ResolvedCourse[]
   return [...resolved.values()];
 }
 
-async function resolveInstitutions(items: InstitutionLinkItem[]): Promise<ResolvedInstitution[]> {
+async function resolveInstitutions(items: InstitutionLinkItem[], actor: Actor): Promise<ResolvedInstitution[]> {
   const ids = items.flatMap((i) => (i.id ? [i.id] : []));
   const resolved = new Map<string, ResolvedInstitution>();
   for (const it of items) {
@@ -270,8 +311,13 @@ async function resolveInstitutions(items: InstitutionLinkItem[]): Promise<Resolv
     const { id: _id, name, ...detail } = it;
     const existing = await prisma.institution.findUnique({ where: { name: name! } });
     const row = existing
-      ? await fillBlanks(existing, detail, (data) => prisma.institution.update({ where: { id: existing.id }, data }))
-      : await prisma.institution.create({ data: { name: name!, ...detail } });
+      ? await fillBlanks(
+          existing,
+          detail,
+          (data) => prisma.institution.update({ where: { id: existing.id }, data }),
+          reviewOnReuse(existing, actor)
+        )
+      : await prisma.institution.create({ data: { name: name!, ...detail, ...reviewOnCreate(actor) } });
     resolved.set(row.id, { id: row.id, name: row.name });
   }
   if (ids.length) {
@@ -288,7 +334,8 @@ async function resolveInstitutions(items: InstitutionLinkItem[]): Promise<Resolv
 // the "shown as a tick-list of what THIS domain has" contract.
 async function resolveEducationEntries(
   items: EducationLinkItem[],
-  domainId: string
+  domainId: string,
+  actor: Actor
 ): Promise<ResolvedEducationEntry[]> {
   const ids = items.flatMap((i) => (i.id ? [i.id] : []));
   const resolved = new Map<string, ResolvedEducationEntry>();
@@ -298,11 +345,20 @@ async function resolveEducationEntries(
       where: { domainId, level: it.level!, programme: it.programme!, deletedAt: null },
     });
     const row = existing
-      ? await fillBlanks(existing, { description: it.description }, (data) =>
-          prisma.domainEducationEntry.update({ where: { id: existing.id }, data })
+      ? await fillBlanks(
+          existing,
+          { description: it.description },
+          (data) => prisma.domainEducationEntry.update({ where: { id: existing.id }, data }),
+          reviewOnReuse(existing, actor)
         )
       : await prisma.domainEducationEntry.create({
-          data: { domainId, level: it.level!, programme: it.programme!, description: it.description },
+          data: {
+            domainId,
+            level: it.level!,
+            programme: it.programme!,
+            description: it.description,
+            ...reviewOnCreate(actor),
+          },
         });
     resolved.set(row.id, { id: row.id, level: row.level, programme: row.programme });
   }
@@ -328,10 +384,10 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
   const { entranceExams = [], courses = [], institutions = [], educationEntries = [], ...scalar } = input;
   await assertLiveDomain(scalar.domainId); // 400 if domainId isn't a live taxonomy leaf
   const [exams, crs, insts, edu] = await Promise.all([
-    resolveEntranceExams(entranceExams),
-    resolveCourses(courses),
-    resolveInstitutions(institutions),
-    resolveEducationEntries(educationEntries, scalar.domainId),
+    resolveEntranceExams(entranceExams, actor),
+    resolveCourses(courses, actor),
+    resolveInstitutions(institutions, actor),
+    resolveEducationEntries(educationEntries, scalar.domainId, actor),
   ]);
   try {
     const created = await prisma.careerLibraryEntry.create({
@@ -360,14 +416,14 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
   const { entranceExams, courses, institutions, educationEntries, ...scalar } = input;
   if (scalar.domainId !== undefined) await assertLiveDomain(scalar.domainId); // 400 if invalid/deleted
   // Resolve only the link arrays that were provided (undefined = leave unchanged).
-  const exams = entranceExams !== undefined ? await resolveEntranceExams(entranceExams) : undefined;
-  const crs = courses !== undefined ? await resolveCourses(courses) : undefined;
-  const insts = institutions !== undefined ? await resolveInstitutions(institutions) : undefined;
+  const exams = entranceExams !== undefined ? await resolveEntranceExams(entranceExams, actor) : undefined;
+  const crs = courses !== undefined ? await resolveCourses(courses, actor) : undefined;
+  const insts = institutions !== undefined ? await resolveInstitutions(institutions, actor) : undefined;
   // Education entries hang off the domain, so they resolve against the domain this update
   // leaves the entry in — the new one when the update also re-parents it.
   const edu =
     educationEntries !== undefined
-      ? await resolveEducationEntries(educationEntries, scalar.domainId ?? current.domainId)
+      ? await resolveEducationEntries(educationEntries, scalar.domainId ?? current.domainId, actor)
       : undefined;
   try {
     await prisma.$transaction(async (tx) => {
@@ -424,12 +480,13 @@ export async function listEntranceExams(query: ListEntranceExamsQuery) {
   return prisma.entranceExam.findMany({
     where: {
       level: query.level,
+      status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
       ...domainScope(query.domainId),
     },
     orderBy: { name: "asc" },
     take: query.limit,
-    select: { id: true, name: true, level: true, fullForm: true, conductingBody: true },
+    select: { id: true, name: true, level: true, fullForm: true, conductingBody: true, status: true, submittedBy: true },
   });
 }
 
@@ -437,12 +494,13 @@ export async function listInstitutions(query: ListInstitutionsQuery) {
   if (query.domainId) await assertLiveDomain(query.domainId);
   return prisma.institution.findMany({
     where: {
+      status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
       ...domainScope(query.domainId),
     },
     orderBy: { name: "asc" },
     take: query.limit,
-    select: { id: true, name: true, city: true, state: true, type: true },
+    select: { id: true, name: true, city: true, state: true, type: true, status: true, submittedBy: true },
   });
 }
 
@@ -451,14 +509,131 @@ export async function listCourses(query: ListCoursesQuery) {
   return prisma.course.findMany({
     where: {
       level: query.level,
+      status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
       ...domainScope(query.domainId),
     },
     orderBy: { name: "asc" },
     take: query.limit,
-    select: { id: true, name: true, level: true, fullForm: true },
+    select: { id: true, name: true, level: true, fullForm: true, status: true, submittedBy: true },
   });
 }
+
+// --- Standalone reference-data submissions + review -----------------------------
+// The inline "add new" inside the job-role form is admin-only (that form is), so this is
+// the path a counsellor uses to propose reference data on its own. Same find-or-create
+// semantics as the link items: an existing row is reused and blank-filled rather than
+// duplicated, and `reviewOnReuse` decides whether that reuse approves or reopens it.
+
+export async function submitEntranceExam(input: SubmitEntranceExamInput, actor: Actor) {
+  const { name, level, ...detail } = input;
+  const existing = await prisma.entranceExam.findUnique({ where: { name_level: { name, level } } });
+  if (existing) {
+    return fillBlanks(
+      existing,
+      detail,
+      (data) => prisma.entranceExam.update({ where: { id: existing.id }, data }),
+      reviewOnReuse(existing, actor)
+    );
+  }
+  return prisma.entranceExam.create({ data: { name, level, ...detail, ...reviewOnCreate(actor) } });
+}
+
+export async function submitCourse(input: SubmitCourseInput, actor: Actor) {
+  const { name, level, ...detail } = input;
+  const existing = await prisma.course.findUnique({ where: { name_level: { name, level } } });
+  if (existing) {
+    return fillBlanks(
+      existing,
+      detail,
+      (data) => prisma.course.update({ where: { id: existing.id }, data }),
+      reviewOnReuse(existing, actor)
+    );
+  }
+  return prisma.course.create({ data: { name, level, ...detail, ...reviewOnCreate(actor) } });
+}
+
+export async function submitInstitution(input: SubmitInstitutionInput, actor: Actor) {
+  const { name, ...detail } = input;
+  const existing = await prisma.institution.findUnique({ where: { name } });
+  if (existing) {
+    return fillBlanks(
+      existing,
+      detail,
+      (data) => prisma.institution.update({ where: { id: existing.id }, data }),
+      reviewOnReuse(existing, actor)
+    );
+  }
+  return prisma.institution.create({ data: { name, ...detail, ...reviewOnCreate(actor) } });
+}
+
+// Review is in place: the row IS the submission, so approving flips its status rather than
+// creating anything. Re-reviewing a row that was already decided is a 409 — the admin is
+// looking at a stale queue.
+// Every reviewable table carries the same five review columns, so one helper serves all
+// of them — but Prisma's per-model delegates don't unify, so each entity supplies its own
+// find/update closures rather than being reached through an index.
+type ReviewPatch = {
+  status: ReviewStatus;
+  reviewedBy: string;
+  reviewedAt: Date;
+  rejectionReason: string | null;
+};
+
+interface Reviewable {
+  label: string;
+  find: (id: string) => Promise<{ id: string; status: ReviewStatus } | null>;
+  update: (id: string, data: ReviewPatch) => Promise<unknown>;
+}
+
+const reviewables = {
+  entranceExam: {
+    label: "Entrance exam",
+    find: (id) => prisma.entranceExam.findUnique({ where: { id } }),
+    update: (id, data) => prisma.entranceExam.update({ where: { id }, data }),
+  },
+  course: {
+    label: "Course",
+    find: (id) => prisma.course.findUnique({ where: { id } }),
+    update: (id, data) => prisma.course.update({ where: { id }, data }),
+  },
+  institution: {
+    label: "Institution",
+    find: (id) => prisma.institution.findUnique({ where: { id } }),
+    update: (id, data) => prisma.institution.update({ where: { id }, data }),
+  },
+} satisfies Record<string, Reviewable>;
+
+async function reviewLookup(
+  kind: keyof typeof reviewables,
+  id: string,
+  decision: "APPROVED" | "REJECTED",
+  actor: Actor,
+  rejectionReason?: string
+) {
+  const { label, find, update } = reviewables[kind];
+  const existing = await find(id);
+  if (!existing) throw new NotFoundError(`${label} not found`);
+  if (existing.status !== "PENDING") {
+    throw new ConflictError(`${label} has already been ${existing.status.toLowerCase()}`);
+  }
+  return update(id, {
+    status: decision,
+    reviewedBy: actor.userId,
+    reviewedAt: new Date(),
+    rejectionReason: decision === "REJECTED" ? rejectionReason ?? null : null,
+  });
+}
+
+export const approveEntranceExam = (id: string, actor: Actor) => reviewLookup("entranceExam", id, "APPROVED", actor);
+export const rejectEntranceExam = (id: string, actor: Actor, reason?: string) =>
+  reviewLookup("entranceExam", id, "REJECTED", actor, reason);
+export const approveCourse = (id: string, actor: Actor) => reviewLookup("course", id, "APPROVED", actor);
+export const rejectCourse = (id: string, actor: Actor, reason?: string) =>
+  reviewLookup("course", id, "REJECTED", actor, reason);
+export const approveInstitution = (id: string, actor: Actor) => reviewLookup("institution", id, "APPROVED", actor);
+export const rejectInstitution = (id: string, actor: Actor, reason?: string) =>
+  reviewLookup("institution", id, "REJECTED", actor, reason);
 
 export async function deleteCareerEntry(id: string) {
   const entry = await prisma.careerLibraryEntry.findUnique({ where: { id } });

@@ -104,3 +104,41 @@ export async function rejectCareerRequest(req: Request, res: Response): Promise<
   const request = await careerLibraryService.rejectCareerRequest(requestId, actorOf(req));
   res.status(200).json(request);
 }
+
+// --- Standalone reference-data submissions + review ---
+// Counsellors propose; admins approve/reject. The service decides PENDING vs APPROVED from
+// the actor's role, so these controllers stay dumb.
+export async function submitEntranceExam(req: Request, res: Response): Promise<void> {
+  res.status(201).json(await careerLibraryService.submitEntranceExam(req.body, actorOf(req)));
+}
+export async function submitCourse(req: Request, res: Response): Promise<void> {
+  res.status(201).json(await careerLibraryService.submitCourse(req.body, actorOf(req)));
+}
+export async function submitInstitution(req: Request, res: Response): Promise<void> {
+  res.status(201).json(await careerLibraryService.submitInstitution(req.body, actorOf(req)));
+}
+
+export async function approveEntranceExam(req: Request, res: Response): Promise<void> {
+  res.status(200).json(await careerLibraryService.approveEntranceExam(req.params.id as string, actorOf(req)));
+}
+export async function rejectEntranceExam(req: Request, res: Response): Promise<void> {
+  res
+    .status(200)
+    .json(await careerLibraryService.rejectEntranceExam(req.params.id as string, actorOf(req), req.body.rejectionReason));
+}
+export async function approveCourse(req: Request, res: Response): Promise<void> {
+  res.status(200).json(await careerLibraryService.approveCourse(req.params.id as string, actorOf(req)));
+}
+export async function rejectCourse(req: Request, res: Response): Promise<void> {
+  res
+    .status(200)
+    .json(await careerLibraryService.rejectCourse(req.params.id as string, actorOf(req), req.body.rejectionReason));
+}
+export async function approveInstitution(req: Request, res: Response): Promise<void> {
+  res.status(200).json(await careerLibraryService.approveInstitution(req.params.id as string, actorOf(req)));
+}
+export async function rejectInstitution(req: Request, res: Response): Promise<void> {
+  res
+    .status(200)
+    .json(await careerLibraryService.rejectInstitution(req.params.id as string, actorOf(req), req.body.rejectionReason));
+}

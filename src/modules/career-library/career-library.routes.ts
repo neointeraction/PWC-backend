@@ -14,6 +14,11 @@ import {
   listCoursesQuerySchema,
   listEntranceExamsQuerySchema,
   listInstitutionsQuerySchema,
+  lookupIdParamsSchema,
+  rejectLookupSchema,
+  submitCourseSchema,
+  submitEntranceExamSchema,
+  submitInstitutionSchema,
   updateCareerEntrySchema,
 } from "./career-library.schema.js";
 
@@ -57,6 +62,65 @@ careerLibraryRouter.post(
   ...requireAdmin,
   validate({ body: createCareerEntrySchema }),
   asyncHandler(careerLibraryController.createCareerLibraryEntry)
+);
+
+// --- Reference data proposed on its own (counsellor) + review (admin) ---
+// The inline "add new" in the job-role form is admin-only because that form is; these are
+// the paths a counsellor uses. Declared before "/:id" so the literal segments win.
+careerLibraryRouter.post(
+  "/entrance-exams",
+  ...requireStaff,
+  validate({ body: submitEntranceExamSchema }),
+  asyncHandler(careerLibraryController.submitEntranceExam)
+);
+careerLibraryRouter.post(
+  "/courses",
+  ...requireStaff,
+  validate({ body: submitCourseSchema }),
+  asyncHandler(careerLibraryController.submitCourse)
+);
+careerLibraryRouter.post(
+  "/institutions",
+  ...requireStaff,
+  validate({ body: submitInstitutionSchema }),
+  asyncHandler(careerLibraryController.submitInstitution)
+);
+
+careerLibraryRouter.post(
+  "/entrance-exams/:id/approve",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema }),
+  asyncHandler(careerLibraryController.approveEntranceExam)
+);
+careerLibraryRouter.post(
+  "/entrance-exams/:id/reject",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema, body: rejectLookupSchema }),
+  asyncHandler(careerLibraryController.rejectEntranceExam)
+);
+careerLibraryRouter.post(
+  "/courses/:id/approve",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema }),
+  asyncHandler(careerLibraryController.approveCourse)
+);
+careerLibraryRouter.post(
+  "/courses/:id/reject",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema, body: rejectLookupSchema }),
+  asyncHandler(careerLibraryController.rejectCourse)
+);
+careerLibraryRouter.post(
+  "/institutions/:id/approve",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema }),
+  asyncHandler(careerLibraryController.approveInstitution)
+);
+careerLibraryRouter.post(
+  "/institutions/:id/reject",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema, body: rejectLookupSchema }),
+  asyncHandler(careerLibraryController.rejectInstitution)
 );
 
 // --- Ratification requests (declared before "/:id" so "requests" isn't parsed as an id) ---

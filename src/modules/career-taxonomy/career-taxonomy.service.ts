@@ -1,4 +1,5 @@
 import { prisma } from "../../config/prisma.js";
+import type { Actor } from "../career-library/career-library.service.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import type {
   CreateClusterInput,
@@ -268,6 +269,7 @@ export async function listDomainEducation(domainId: string, query: ListDomainEdu
     where: {
       domainId,
       level: query.level,
+      status: query.status,
       ...(query.includeDeleted ? {} : { deletedAt: null }),
     },
     orderBy: [...educationOrder],
@@ -294,18 +296,58 @@ async function assertEducationProgrammeFree(
   if (clash) throw new ConflictError("This programme already exists at that level for this domain");
 }
 
-export async function createDomainEducation(domainId: string, input: CreateDomainEducationInput) {
+// A counsellor's entry lands PENDING and stays out of the domain's tick-list until an admin
+// approves it; an admin's is live immediately (and counts as its own approval).
+export async function createDomainEducation(
+  domainId: string,
+  input: CreateDomainEducationInput,
+  actor: Actor
+) {
   await getLiveDomain(domainId);
   await assertEducationProgrammeFree(domainId, input.level, input.programme);
+  const admin = actor.role === "ADMIN" || actor.role === "SUPER_ADMIN";
   return prisma.domainEducationEntry.create({
     data: {
       domainId,
       level: input.level,
       programme: input.programme,
       description: input.description,
+      submittedBy: actor.userId,
+      ...(admin
+        ? { status: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date() }
+        : { status: "PENDING" as const }),
     },
   });
 }
+
+// Reviewed in place — the row IS the submission. Re-reviewing a decided row is a 409 (the
+// admin is looking at a stale queue).
+async function reviewDomainEducation(
+  entryId: string,
+  decision: "APPROVED" | "REJECTED",
+  actor: Actor,
+  rejectionReason?: string
+) {
+  const entry = await prisma.domainEducationEntry.findUnique({ where: { id: entryId } });
+  if (!entry || entry.deletedAt) throw new NotFoundError("Education path entry not found");
+  if (entry.status !== "PENDING") {
+    throw new ConflictError(`Education path entry has already been ${entry.status.toLowerCase()}`);
+  }
+  return prisma.domainEducationEntry.update({
+    where: { id: entryId },
+    data: {
+      status: decision,
+      reviewedBy: actor.userId,
+      reviewedAt: new Date(),
+      rejectionReason: decision === "REJECTED" ? rejectionReason ?? null : null,
+    },
+  });
+}
+
+export const approveDomainEducation = (entryId: string, actor: Actor) =>
+  reviewDomainEducation(entryId, "APPROVED", actor);
+export const rejectDomainEducation = (entryId: string, actor: Actor, reason?: string) =>
+  reviewDomainEducation(entryId, "REJECTED", actor, reason);
 
 export async function updateDomainEducation(entryId: string, input: UpdateDomainEducationInput) {
   const existing = await getLiveEducationEntry(entryId);

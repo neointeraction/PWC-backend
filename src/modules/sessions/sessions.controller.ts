@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import * as sessionsService from "./sessions.service.js";
 import type {
+  AddSlotsBody,
   BookSessionsBody,
   BookingOptionsQuery,
   CancelSessionBody,
@@ -20,6 +21,17 @@ import type {
 export async function importSlots(req: Request, res: Response): Promise<void> {
   const result = await sessionsService.importSlots(req.body as ImportSlotsBody);
   res.status(201).json(result);
+}
+
+export async function addSlots(req: Request, res: Response): Promise<void> {
+  const result = await sessionsService.addSlots(req.body as AddSlotsBody);
+  res.status(201).json(result);
+}
+
+export async function deleteSlot(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as { id: string };
+  await sessionsService.deleteSlot(id);
+  res.status(204).send();
 }
 
 export async function listSlots(req: Request, res: Response): Promise<void> {

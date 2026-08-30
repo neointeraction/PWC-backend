@@ -5,6 +5,7 @@ import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { advanceWorkflowStatus, WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
 import { sendTemplateEmail } from "../email/email.service.js";
 import type {
+  AddSlotsBody,
   BookSessionsBody,
   CancelSessionBody,
   CounsellorMyStudentsQuery,
@@ -116,6 +117,69 @@ export async function importSlots(input: ImportSlotsBody) {
   } catch (err) {
     handlePrismaError(err);
   }
+}
+
+function formatSlotDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+// Adds availability for a single counsellor on a project *after* the one-time import.
+// The import stays one-shot (it guards against re-uploading the same sheet); this is the
+// deliberate escape hatch for a counsellor assigned to the project later.
+export async function addSlots(input: AddSlotsBody) {
+  const project = await prisma.project.findUnique({ where: { id: input.projectId } });
+  if (!project) throw new BadRequestError("projectId does not exist");
+
+  const assignment = await prisma.projectCounsellor.findFirst({
+    where: { projectId: input.projectId, counsellorId: input.counsellorId },
+    select: { id: true },
+  });
+  if (!assignment) {
+    throw new BadRequestError("Counsellor is not assigned to this project — assign them first via POST /counsellors/:id/projects");
+  }
+
+  // Pre-check so the admin gets back *which* rows clash, rather than a bare unique-constraint
+  // 409 from createMany. The constraint is [counsellorId, slotDate, startTime] — global to the
+  // counsellor, not per-project, so a clash on another project counts too.
+  const existing = await prisma.counsellorSlot.findMany({
+    where: {
+      counsellorId: input.counsellorId,
+      OR: input.slots.map((slot) => ({ slotDate: toDate(slot.date), startTime: slot.startTime })),
+    },
+    select: { slotDate: true, startTime: true },
+  });
+  if (existing.length > 0) {
+    throw new ConflictError("Some of these slots already exist for this counsellor", {
+      existingSlots: existing.map((slot) => ({ date: formatSlotDate(slot.slotDate), startTime: slot.startTime })),
+    });
+  }
+
+  try {
+    const result = await prisma.counsellorSlot.createMany({
+      data: input.slots.map((slot) => ({
+        counsellorId: input.counsellorId,
+        projectId: input.projectId,
+        slotDate: toDate(slot.date),
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+      })),
+    });
+    return { added: result.count };
+  } catch (err) {
+    handlePrismaError(err); // P2002 → 409 (duplicate rows inside the payload itself)
+  }
+}
+
+// Removes an unbooked slot from the inventory (uploaded in error, or availability no
+// longer offered). A BOOKED slot is protected — cancelling its session releases it back
+// to OPEN first, which keeps the student's session record the single source of truth.
+export async function deleteSlot(id: string) {
+  const slot = await prisma.counsellorSlot.findUnique({ where: { id } });
+  if (!slot) throw new NotFoundError("Slot not found");
+  if (slot.status === "BOOKED" || slot.sessionId) {
+    throw new ConflictError("This slot is booked — cancel its session first, which releases the slot back to OPEN");
+  }
+  await prisma.counsellorSlot.delete({ where: { id } });
 }
 
 export async function listSlots(query: ListSlotsQuery) {

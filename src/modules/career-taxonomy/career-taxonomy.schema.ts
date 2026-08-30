@@ -66,8 +66,12 @@ export const EDUCATION_PATH_LEVELS = [
 export const educationEntryIdParamsSchema = z.object({ entryId: id });
 export type EducationEntryIdParams = z.infer<typeof educationEntryIdParamsSchema>;
 
+const REVIEW_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
+
 export const listDomainEducationQuerySchema = z.object({
   level: z.enum(EDUCATION_PATH_LEVELS).optional(),
+  // The tick-list shows APPROVED only; an admin review queue passes PENDING/REJECTED.
+  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
   includeDeleted,
 });
 export type ListDomainEducationQuery = z.infer<typeof listDomainEducationQuerySchema>;
@@ -85,3 +89,9 @@ export const updateDomainEducationSchema = z.object({
   description: z.string().trim().min(1).nullish(), // null clears it
 });
 export type UpdateDomainEducationInput = z.infer<typeof updateDomainEducationSchema>;
+
+// Reject carries an optional reason back to the submitting counsellor; approve takes no body.
+export const rejectDomainEducationSchema = z.object({
+  rejectionReason: z.string().trim().min(1).optional(),
+});
+export type RejectDomainEducationInput = z.infer<typeof rejectDomainEducationSchema>;

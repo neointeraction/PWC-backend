@@ -999,6 +999,36 @@ Websites are plain strings, not validated URLs — `"www.nta.ac.in"` is accepted
 > across job roles. There is no endpoint yet for editing a canonical row outright, so a
 > value that was entered wrong the first time currently needs a DB fix.
 
+### Proposing reference data as a counsellor
+
+The job-role form is admin-only, so a counsellor can't reach the inline "add new" above.
+They use the standalone endpoints instead — **Staff**, same field sets:
+
+- `POST /api/v1/career-library/entrance-exams` `{ name, level, … }`
+- `POST /api/v1/career-library/courses` `{ name, level?, … }`
+- `POST /api/v1/career-library/institutions` `{ name, … }`
+- `POST /api/v1/career-taxonomy/domains/{id}/education` `{ level, programme, description? }`
+
+A counsellor's submission comes back `status: "PENDING"` and **won't appear in the pickers**
+until an admin approves it; an admin's own submission is `APPROVED` immediately. Every row
+carries `status`, `submittedBy`, `reviewedBy`, `reviewedAt`, `rejectionReason`.
+
+Admin review (all **Admin**, all 409 if the row was already decided):
+
+- `POST /career-library/{entrance-exams|courses|institutions}/{id}/approve` — and `/reject`
+  with `{ rejectionReason? }`
+- `POST /career-taxonomy/education/{entryId}/approve` — and `/reject`
+
+Build the review queue off the existing list endpoints with `?status=PENDING`. Two behaviours
+worth designing around: re-proposing a **rejected** row reopens it (same id, back to
+`PENDING`, reason cleared) rather than erroring, and an admin naming a **pending** row while
+adding a job role implicitly approves it. Submitting a name that already exists never creates
+a duplicate — it reuses the row and fills its blank columns.
+
+The career entry's `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions` /
+`linkedEducationEntries` each include `status`, so if an admin links something still pending,
+flag it in the UI rather than assuming everything linked is approved.
+
 **Education entries are domain-scoped.** A `{ level, programme }` item is created under the
 job role's own domain and immediately appears in that domain's tick-list (§9.4) for every
 future role. An `{ id }` that belongs to a *different* domain is a **400** — read ids from

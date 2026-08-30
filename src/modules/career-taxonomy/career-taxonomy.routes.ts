@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
-import { requireAuth, requireAdmin } from "../../common/middlewares/auth.js";
+import { requireAuth, requireStaff, requireAdmin } from "../../common/middlewares/auth.js";
 import * as controller from "./career-taxonomy.controller.js";
 import {
   createClusterSchema,
@@ -11,6 +11,7 @@ import {
   educationEntryIdParamsSchema,
   listClustersQuerySchema,
   listDomainEducationQuerySchema,
+  rejectDomainEducationSchema,
   listDomainsQuerySchema,
   listIndustriesQuerySchema,
   taxonomyIdParamsSchema,
@@ -135,11 +136,25 @@ careerTaxonomyRouter.get(
   validate({ params: taxonomyIdParamsSchema, query: listDomainEducationQuerySchema }),
   asyncHandler(controller.listDomainEducation)
 );
+// Staff (counsellors included) may propose an entry; a counsellor's lands PENDING and only
+// an admin can approve it into the domain's tick-list.
 careerTaxonomyRouter.post(
   "/domains/:id/education",
-  ...requireAdmin,
+  ...requireStaff,
   validate({ params: taxonomyIdParamsSchema, body: createDomainEducationSchema }),
   asyncHandler(controller.createDomainEducation)
+);
+careerTaxonomyRouter.post(
+  "/education/:entryId/approve",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema }),
+  asyncHandler(controller.approveDomainEducation)
+);
+careerTaxonomyRouter.post(
+  "/education/:entryId/reject",
+  ...requireAdmin,
+  validate({ params: educationEntryIdParamsSchema, body: rejectDomainEducationSchema }),
+  asyncHandler(controller.rejectDomainEducation)
 );
 careerTaxonomyRouter.patch(
   "/education/:entryId",

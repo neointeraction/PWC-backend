@@ -43,6 +43,11 @@ import {
   listCoursesQuerySchema,
   listEntranceExamsQuerySchema,
   listInstitutionsQuerySchema,
+  lookupIdParamsSchema,
+  rejectLookupSchema,
+  submitCourseSchema,
+  submitEntranceExamSchema,
+  submitInstitutionSchema,
   updateCareerEntrySchema,
 } from "../modules/career-library/career-library.schema.js";
 import {
@@ -54,6 +59,7 @@ import {
   listClustersQuerySchema,
   listDomainEducationQuerySchema,
   listDomainsQuerySchema,
+  rejectDomainEducationSchema,
   listIndustriesQuerySchema,
   taxonomyIdParamsSchema,
   updateClusterSchema,
@@ -91,6 +97,7 @@ import {
   updateAdminSchema,
 } from "../modules/admins/admins.schema.js";
 import {
+  addSlotsBodySchema,
   bookSessionsBodySchema,
   bookingOptionsQuerySchema,
   cancelSessionBodySchema,
@@ -107,6 +114,7 @@ import {
   sessionIdParamsSchema,
   setMeetingLinkBodySchema,
   setNotesBodySchema,
+  slotIdParamsSchema,
   studentIdParamsSchema as sessionStudentIdParamsSchema,
 } from "../modules/sessions/sessions.schema.js";
 
@@ -641,6 +649,18 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/slots",
+  tags: ["Sessions"],
+  summary: "Add availability slots for one counsellor on a project (used after the one-time import — e.g. a counsellor assigned to the project later)",
+  request: { body: { content: { "application/json": { schema: addSlotsBodySchema } } } },
+  responses: {
+    201: { description: "Slots added", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
   method: "get",
   path: "/api/v1/sessions/slots",
   tags: ["Sessions"],
@@ -648,6 +668,18 @@ registry.registerPath({
   request: { query: listSlotsQuerySchema },
   responses: {
     200: { description: "List of slots", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/sessions/slots/{id}",
+  tags: ["Sessions"],
+  summary: "Remove an unbooked counsellor slot (409 if it is BOOKED — cancel its session first)",
+  request: { params: slotIdParamsSchema },
+  responses: {
+    204: { description: "Slot removed" },
+    ...errorResponses,
   },
 });
 
@@ -1223,6 +1255,90 @@ registry.registerPath({
   },
 });
 
+// --- Career Library (reference data: counsellor proposes, admin reviews) ---
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/entrance-exams",
+  tags: ["Career Library"],
+  summary:
+    "Propose a canonical entrance exam. Staff. A counsellor's submission lands PENDING and stays out of the pickers until approved; an admin's is APPROVED immediately. An existing row is reused and blank-filled rather than duplicated.",
+  request: { body: { content: { "application/json": { schema: submitEntranceExamSchema } } } },
+  responses: { 201: { description: "Submitted entrance exam", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/entrance-exams/{id}/approve",
+  tags: ["Career Library"],
+  summary: "Approve a pending entrance exam (admin). 409 if it was already approved or rejected.",
+  request: { params: lookupIdParamsSchema },
+  responses: { 200: { description: "Approved entrance exam", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/entrance-exams/{id}/reject",
+  tags: ["Career Library"],
+  summary: "Reject a pending entrance exam (admin), optionally with a reason. 409 if it was already decided.",
+  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: rejectLookupSchema } } } },
+  responses: { 200: { description: "Rejected entrance exam", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/courses",
+  tags: ["Career Library"],
+  summary:
+    "Propose a canonical course. Staff. A counsellor's submission lands PENDING and stays out of the pickers until approved; an admin's is APPROVED immediately. An existing row is reused and blank-filled rather than duplicated.",
+  request: { body: { content: { "application/json": { schema: submitCourseSchema } } } },
+  responses: { 201: { description: "Submitted course", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/courses/{id}/approve",
+  tags: ["Career Library"],
+  summary: "Approve a pending course (admin). 409 if it was already approved or rejected.",
+  request: { params: lookupIdParamsSchema },
+  responses: { 200: { description: "Approved course", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/courses/{id}/reject",
+  tags: ["Career Library"],
+  summary: "Reject a pending course (admin), optionally with a reason. 409 if it was already decided.",
+  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: rejectLookupSchema } } } },
+  responses: { 200: { description: "Rejected course", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/institutions",
+  tags: ["Career Library"],
+  summary:
+    "Propose a canonical institution. Staff. A counsellor's submission lands PENDING and stays out of the pickers until approved; an admin's is APPROVED immediately. An existing row is reused and blank-filled rather than duplicated.",
+  request: { body: { content: { "application/json": { schema: submitInstitutionSchema } } } },
+  responses: { 201: { description: "Submitted institution", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/institutions/{id}/approve",
+  tags: ["Career Library"],
+  summary: "Approve a pending institution (admin). 409 if it was already approved or rejected.",
+  request: { params: lookupIdParamsSchema },
+  responses: { 200: { description: "Approved institution", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/institutions/{id}/reject",
+  tags: ["Career Library"],
+  summary: "Reject a pending institution (admin), optionally with a reason. 409 if it was already decided.",
+  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: rejectLookupSchema } } } },
+  responses: { 200: { description: "Rejected institution", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
 // --- Assessment (score preview) ---
 
 registry.registerPath({
@@ -1431,7 +1547,8 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-taxonomy/domains/{id}/education",
   tags: taxTag,
-  summary: "Add an Education Path entry to a domain (admin). 409 if that programme already exists at that level.",
+  summary:
+    "Propose an Education Path entry for a domain. Staff — a counsellor's lands PENDING and stays out of the tick-list until approved; an admin's is APPROVED immediately. 409 if that programme already exists at that level.",
   request: { params: taxonomyIdParamsSchema, body: { content: { "application/json": { schema: createDomainEducationSchema } } } },
   responses: { 201: { description: "Created education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1450,6 +1567,22 @@ registry.registerPath({
   summary: "Soft-delete an Education Path entry (admin). Job roles already linked keep resolving it.",
   request: { params: educationEntryIdParamsSchema },
   responses: { 200: { description: "Soft-deleted education path entry", content: { "application/json": { schema: genericObjectSchema } } }, 404: errorResponses[404] },
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/education/{entryId}/approve",
+  tags: taxTag,
+  summary: "Approve a pending Education Path entry (admin). 409 if it was already approved or rejected.",
+  request: { params: educationEntryIdParamsSchema },
+  responses: { 200: { description: "Approved education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-taxonomy/education/{entryId}/reject",
+  tags: taxTag,
+  summary: "Reject a pending Education Path entry (admin), optionally with a reason. 409 if it was already decided.",
+  request: { params: educationEntryIdParamsSchema, body: { content: { "application/json": { schema: rejectDomainEducationSchema } } } },
+  responses: { 200: { description: "Rejected education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 registry.registerPath({
   method: "post",

@@ -440,6 +440,28 @@ course is reference data, not a second place to curate per-career links. When an
 "add new" names a row that already exists, only **blank** columns are filled — canonical
 rows are shared across job roles, so linking one must never overwrite another role's data.
 
+### Reference-data review — `ReviewStatus`
+
+`EntranceExam`, `Course`, `Institution` and `DomainEducationEntry` each carry the same five
+review columns: `status` (`ReviewStatus` = `PENDING`/`APPROVED`/`REJECTED`, **default
+`APPROVED`**), `submittedBy`, `reviewedBy`, `reviewedAt`, `rejectionReason`, plus an index on
+`status`.
+
+Counsellors may propose any of these four; admins approve or reject. Review is **in place** —
+the row *is* the submission, so approving flips a status rather than creating anything. That
+differs deliberately from `CareerLibraryRequest`, which is a separate ticket for a whole job
+role that an admin reviews and then re-keys into an entry: a 3-to-9-field reference row doesn't
+justify a second table and a retype.
+
+- The column default is `APPROVED` so the migration leaves the already-seeded library
+  (166 exams / 677 institutions / 1,319 courses) visible.
+- An admin's own addition is `APPROVED` on the spot and records itself as the reviewer.
+- Find-or-create interacts with review: an **admin** naming a `PENDING` row implicitly
+  approves it, and anyone re-proposing a `REJECTED` row reopens it for review. Both are
+  handled by `reviewOnReuse()` in `career-library.service.ts`.
+- Pickers filter to `APPROVED`; a linked row's `status` is exposed on the career entry's
+  `linked*` arrays so the UI can flag a pending/rejected link rather than silently dropping it.
+
 ### `DomainEducationEntry` / `CareerEducationEntry` — Education Path
 
 The qualifications/programmes that lead into a career domain. Held at the **domain** level,

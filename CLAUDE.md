@@ -97,7 +97,11 @@ pnpm install              # install dependencies
 # Postgres runs locally via Homebrew (postgresql@14), not Docker — start with:
 #   brew services start postgresql@14
 pnpm prisma:generate      # generate Prisma client after schema changes
-pnpm prisma:migrate       # create + apply a dev migration
+pnpm prisma:migrate       # create + apply a dev migration (dev DB only — see next line)
+# Tests run against a SEPARATE database (pwc_counselling_test) that pnpm test does NOT
+# migrate. After any new migration, apply it there too or the suite fails with
+# "column ... does not exist":
+#   DATABASE_URL="postgresql://pwc:pwc_dev_password@localhost:5432/pwc_counselling_test?schema=public" npx prisma migrate deploy
 pnpm dev                  # run the API with hot reload
 pnpm test                 # run the test suite (vitest)
 pnpm typecheck             # type-check without emitting
@@ -135,7 +139,11 @@ canonical field set on an inline "add new" and **blank-fill** rather than overwr
 already exists; there is deliberately no endpoint yet for editing a canonical lookup row.
 **Education Path** is modelled at the domain level (`DomainEducationEntry`, CRUD under
 `/api/v1/career-taxonomy/domains/:id/education`) and linked per job role — it is not
-dual-written back to the flat `qualification*`/`certifications*` strings. The student assessment **Report** is built
+dual-written back to the flat `qualification*`/`certifications*` strings. **Reference data is
+review-gated**: counsellors may propose exams/courses/institutions/education-path entries
+(staff-level POSTs), which land `PENDING` and stay out of the pickers until an admin
+approves/rejects them. Review is *in place* via a shared `ReviewStatus` column on the four
+tables — not a separate ticket like `CareerLibraryRequest` (job roles), which stays as it is. The student assessment **Report** is built
 (`src/modules/reports/` — `GET /reports/students/:id/assessment` assembles the full report
 as JSON for the frontend to render/print) and a dev scoring tester is served at
 `/dev/assessment` (non-prod, `public/assessment-tester.html`, backed by

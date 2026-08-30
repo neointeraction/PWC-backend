@@ -107,11 +107,24 @@ describe("Education Path (domain-level) + full-detail link items", () => {
     // 404 on an unknown domain / entry; 403 for a counsellor on the write path.
     expect((await authRequest(app).get("/api/v1/career-taxonomy/domains/nope/education")).status).toBe(404);
     expect((await authRequest(app).patch("/api/v1/career-taxonomy/education/nope").send({ programme: "x" })).status).toBe(404);
+    // A counsellor may now propose an entry, but it lands PENDING and stays out of the
+    // default tick-list until an admin approves it.
     const counsellorWrite = await request(app)
       .post(`/api/v1/career-taxonomy/domains/${domainId}/education`)
-      .set("Authorization", bearer("COUNSELLOR"))
-      .send({ level: "GRADUATE", programme: "Test Edu NoPerm" });
-    expect(counsellorWrite.status).toBe(403);
+      .set("Authorization", bearer("COUNSELLOR", { userId: "counsellor-user-1" }))
+      .send({ level: "GRADUATE", programme: "Test Edu Proposed" });
+    expect(counsellorWrite.status).toBe(201);
+    expect(counsellorWrite.body.status).toBe("PENDING");
+    expect(counsellorWrite.body.submittedBy).toBe("counsellor-user-1");
+
+    const pickerAfterProposal = await authRequest(app).get(`/api/v1/career-taxonomy/domains/${domainId}/education`);
+    expect(pickerAfterProposal.body.map((e: { programme: string }) => e.programme)).not.toContain("Test Edu Proposed");
+
+    // Reviewing it is admin-only.
+    const counsellorApprove = await request(app)
+      .post(`/api/v1/career-taxonomy/education/${counsellorWrite.body.id}/approve`)
+      .set("Authorization", bearer("COUNSELLOR"));
+    expect(counsellorApprove.status).toBe(403);
   });
 
   it("links education entries to a job role, writing new ones back to the domain", async () => {

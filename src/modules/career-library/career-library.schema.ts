@@ -2,6 +2,9 @@ import { z } from "zod";
 
 const AI_RESILIENCE_GRADES = ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"] as const;
 const CAREER_LIBRARY_STATUSES = ["DRAFT", "ACTIVE"] as const;
+// Review state of counsellor-proposable reference data (exams/courses/institutions and the
+// domain education path). Mirrors the prisma `ReviewStatus` enum.
+const REVIEW_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
 
 export const listCareerLibraryQuerySchema = z.object({
   // Free-text search across jobRole, oneLineDescription, and the taxonomy names.
@@ -168,6 +171,8 @@ export type UpdateCareerEntryInput = z.infer<typeof updateCareerEntrySchema>;
 
 export const listEntranceExamsQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
+  // Pickers show APPROVED rows only; an admin review queue passes PENDING/REJECTED.
+  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
   level: z.enum(QUALIFICATION_LEVELS).optional(),
   // Scope to exams/courses/institutions already linked to job roles in this domain
   // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
@@ -178,6 +183,8 @@ export type ListEntranceExamsQuery = z.infer<typeof listEntranceExamsQuerySchema
 
 export const listInstitutionsQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
+  // Pickers show APPROVED rows only; an admin review queue passes PENDING/REJECTED.
+  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
   // Scope to exams/courses/institutions already linked to job roles in this domain
   // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
   domainId: z.string().min(1).optional(),
@@ -187,6 +194,8 @@ export type ListInstitutionsQuery = z.infer<typeof listInstitutionsQuerySchema>;
 
 export const listCoursesQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
+  // Pickers show APPROVED rows only; an admin review queue passes PENDING/REJECTED.
+  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
   level: z.enum(QUALIFICATION_LEVELS).optional(),
   // Scope to exams/courses/institutions already linked to job roles in this domain
   // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
@@ -229,3 +238,57 @@ export const approveCareerRequestSchema = z.object({
   resultingEntryId: z.string().cuid().optional(),
 });
 export type ApproveCareerRequestInput = z.infer<typeof approveCareerRequestSchema>;
+
+// --- Standalone reference-data submissions (counsellor proposes, admin reviews) ---
+// Same shape as the inline "add new" link items, minus the `id` branch: this path always
+// creates (or re-proposes) a row. A counsellor's submission lands PENDING; an admin's is
+// APPROVED on the spot. Reuses `detail` so the field set can't drift from the link items.
+
+export const lookupIdParamsSchema = z.object({ id: z.string().cuid() });
+export type LookupIdParams = z.infer<typeof lookupIdParamsSchema>;
+
+export const submitEntranceExamSchema = z.object({
+  name: z.string().trim().min(1),
+  level: z.enum(QUALIFICATION_LEVELS),
+  fullForm: detail,
+  conductingBody: detail,
+  officialWebsite: detail,
+  examMode: detail,
+  frequency: detail,
+  applicableFor: detail,
+  subjectRequirements12th: detail,
+  applicationWindow: detail,
+});
+export type SubmitEntranceExamInput = z.infer<typeof submitEntranceExamSchema>;
+
+export const submitCourseSchema = z.object({
+  name: z.string().trim().min(1),
+  level: z.enum(QUALIFICATION_LEVELS).default("UG"),
+  fullForm: detail,
+  durationYears: detail,
+  stream12thRequirements: detail,
+  relevantEntranceExams: detail,
+  programmesOffered: detail,
+  topColleges: detail,
+  furtherStudyOptions: detail,
+});
+export type SubmitCourseInput = z.infer<typeof submitCourseSchema>;
+
+export const submitInstitutionSchema = z.object({
+  name: z.string().trim().min(1),
+  shortName: detail,
+  city: detail,
+  state: detail,
+  type: detail,
+  website: detail,
+  entranceExamsRequired: detail,
+  programmesOffered: detail,
+  ranking: detail,
+});
+export type SubmitInstitutionInput = z.infer<typeof submitInstitutionSchema>;
+
+// Reject carries an optional reason back to the submitting counsellor; approve takes no body.
+export const rejectLookupSchema = z.object({
+  rejectionReason: z.string().trim().min(1).optional(),
+});
+export type RejectLookupInput = z.infer<typeof rejectLookupSchema>;

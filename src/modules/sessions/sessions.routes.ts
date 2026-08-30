@@ -5,6 +5,7 @@ import { requireStaff, requireAdmin, requireStudentOrStaff } from "../../common/
 import { ownSessionParam, ownStudentParam } from "../../common/middlewares/ownership.js";
 import * as sessionsController from "./sessions.controller.js";
 import {
+  addSlotsBodySchema,
   bookSessionsBodySchema,
   bookingOptionsQuerySchema,
   cancelSessionBodySchema,
@@ -20,15 +21,19 @@ import {
   sendDayReminderBodySchema,
   sessionIdParamsSchema,
   setMeetingLinkBodySchema,
+  slotIdParamsSchema,
   setNotesBodySchema,
   studentIdParamsSchema,
 } from "./sessions.schema.js";
 
 export const sessionsRouter = Router();
 
-// Slot inventory (Admin, at project creation — one-time import)
+// Slot inventory. The bulk import is the one-time upload at project creation; add/delete
+// maintain it afterward (e.g. a counsellor assigned to the project later needs availability).
 sessionsRouter.post("/slots/import", ...requireAdmin, validate({ body: importSlotsBodySchema }), asyncHandler(sessionsController.importSlots));
+sessionsRouter.post("/slots", ...requireAdmin, validate({ body: addSlotsBodySchema }), asyncHandler(sessionsController.addSlots));
 sessionsRouter.get("/slots", ...requireStaff, validate({ query: listSlotsQuerySchema }), asyncHandler(sessionsController.listSlots));
+sessionsRouter.delete("/slots/:id", ...requireAdmin, validate({ params: slotIdParamsSchema }), asyncHandler(sessionsController.deleteSlot));
 
 // Booking (Student self-service, or staff on their behalf)
 sessionsRouter.get(

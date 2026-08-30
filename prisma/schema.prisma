@@ -393,6 +393,18 @@ enum CareerLibraryStatus {
 }
 
 // UG vs PG, used to scope the canonical entrance-exam / course lookups.
+// Counsellors may propose new reference data (exams / courses / institutions / education
+// path entries); an admin approves or rejects it. Admin-created rows are APPROVED on the
+// spot, and the column default is APPROVED so the migration doesn't hide the already-seeded
+// library. Unlike `CareerLibraryRequest` (a ticket for a whole job role, reviewed and then
+// re-keyed by the admin), these are reviewed **in place** — the row IS the submission, so
+// approving costs one call and nothing is retyped.
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum QualificationLevel {
   UG
   PG
@@ -530,19 +542,27 @@ enum EducationPathLevel {
 }
 
 model DomainEducationEntry {
-  id          String             @id @default(cuid())
-  domainId    String
-  domain      CareerDomain       @relation(fields: [domainId], references: [id])
-  level       EducationPathLevel
-  programme   String // e.g. "B.Tech Computer Science"
-  description String?
-  deletedAt   DateTime?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
+  id              String             @id @default(cuid())
+  domainId        String
+  domain          CareerDomain       @relation(fields: [domainId], references: [id])
+  level           EducationPathLevel
+  programme       String // e.g. "B.Tech Computer Science"
+  description     String?
+  deletedAt       DateTime?
+  // Review workflow (see `ReviewStatus`). `submittedBy` is the proposing user; the reviewer
+  // fields are stamped when an admin approves or rejects it.
+  status          ReviewStatus       @default(APPROVED)
+  submittedBy     String?
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   careerLinks CareerEducationEntry[]
 
   @@index([domainId])
+  @@index([status])
   @@map("domain_education_entries")
 }
 
@@ -708,6 +728,13 @@ model EntranceExam {
   applicableFor           String? // which courses/streams the exam gates
   subjectRequirements12th String?
   applicationWindow       String?
+  // Review workflow (see `ReviewStatus`). `submittedBy` is the proposing user; the reviewer
+  // fields are stamped when an admin approves or rejects it.
+  status                  ReviewStatus       @default(APPROVED)
+  submittedBy             String?
+  reviewedBy              String?
+  reviewedAt              DateTime?
+  rejectionReason         String?
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
 
@@ -715,12 +742,13 @@ model EntranceExam {
 
   @@unique([name, level])
   @@index([name])
+  @@index([status])
   @@map("entrance_exams")
 }
 
 model Institution {
-  id                    String   @id @default(cuid())
-  name                  String   @unique
+  id                    String       @id @default(cuid())
+  name                  String       @unique
   shortName             String? // abbreviation, e.g. "IIT-B"
   city                  String?
   state                 String?
@@ -730,12 +758,20 @@ model Institution {
   entranceExamsRequired String?
   programmesOffered     String?
   ranking               String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  // Review workflow (see `ReviewStatus`). `submittedBy` is the proposing user; the reviewer
+  // fields are stamped when an admin approves or rejects it.
+  status                ReviewStatus @default(APPROVED)
+  submittedBy           String?
+  reviewedBy            String?
+  reviewedAt            DateTime?
+  rejectionReason       String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
 
   careerLinks CareerInstitution[]
 
   @@index([name])
+  @@index([status])
   @@map("institutions")
 }
 
@@ -753,6 +789,13 @@ model Course {
   programmesOffered      String?
   topColleges            String?
   furtherStudyOptions    String?
+  // Review workflow (see `ReviewStatus`). `submittedBy` is the proposing user; the reviewer
+  // fields are stamped when an admin approves or rejects it.
+  status                 ReviewStatus       @default(APPROVED)
+  submittedBy            String?
+  reviewedBy             String?
+  reviewedAt             DateTime?
+  rejectionReason        String?
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 
@@ -760,6 +803,7 @@ model Course {
 
   @@unique([name, level])
   @@index([name])
+  @@index([status])
   @@map("courses")
 }
 

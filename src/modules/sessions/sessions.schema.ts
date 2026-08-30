@@ -65,6 +65,32 @@ export const importSlotsBodySchema = z.object({
 });
 export type ImportSlotsBody = z.infer<typeof importSlotsBodySchema>;
 
+// --- Slot add / delete (Admin, after the initial import) ---
+// The one-time import above is the project's opening inventory. These exist for the
+// case the import can't cover: a counsellor assigned to a project *after* it went
+// live (POST /counsellors/:id/projects) has no slots at all and would otherwise be
+// unbookable. Scoped to one counsellor at a time so an "add availability" screen maps
+// straight onto it.
+
+export const addSlotsBodySchema = z.object({
+  projectId: z.string().cuid(),
+  counsellorId: z.string().cuid(),
+  slots: z
+    .array(
+      z.object({
+        date: dateSchema,
+        startTime: timeSchema,
+        endTime: timeSchema,
+      })
+    )
+    .min(1),
+});
+export type AddSlotsBody = z.infer<typeof addSlotsBodySchema>;
+
+export const slotIdParamsSchema = z.object({
+  id: z.string().cuid(),
+});
+
 export const listSlotsQuerySchema = z.object({
   projectId: z.string().cuid().optional(),
   counsellorId: z.string().cuid().optional(),
