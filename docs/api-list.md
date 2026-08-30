@@ -406,6 +406,11 @@ rows only, leaving a soft-deleted programme name reusable. The flat `qualificati
 `certifications*` strings on a career entry are the older free-text layer and are left untouched —
 they hold descriptive prose, not a list.
 
+Seeded from the career-library workbook: `pnpm db:seed:education` derives **439 programmes and
+14,283 role links** from the flat `qualification*`/`certifications*` columns (see
+`prisma/seed-education-path.ts` for exactly which columns are mined and which are skipped as
+boilerplate). So a job role fetched from this API already carries its `linkedEducationEntries`.
+
 Pass `?domainId=` to scope the picker to entries **already used by job roles in that domain** —
 the same usage-based filter the exam/course/institution lookups take. That replaces the old
 per-domain ownership: a domain no longer *owns* entries, it just has roles that link some.

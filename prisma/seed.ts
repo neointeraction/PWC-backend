@@ -4,6 +4,7 @@ import { env } from "../src/config/env.js";
 import { class9to10AssessmentQuestions } from "./seed-data/assessment/class9to10.js";
 import { seedCareerLibraryData } from "./seed-data/career-library/index.js";
 import { seedCareerLibraryNormalization } from "./seed-data/career-library/normalize.js";
+import { seedEducationPath } from "./seed-education-path.js";
 import { feedbackParentQuestions } from "./seed-data/forms/feedbackParent.js";
 import { feedbackStudentQuestions } from "./seed-data/forms/feedbackStudent.js";
 import { preCounsellingParentQuestions } from "./seed-data/forms/preCounsellingParent.js";
@@ -157,6 +158,10 @@ async function main(): Promise<void> {
   await seedAssessmentQuestions(class9to10AssessmentQuestions);
   await seedCareerLibraryData(prisma);
   await seedCareerLibraryNormalization(prisma);
+  // Derives EducationEntry + role links from the flat qualification*/certifications*
+  // columns the workbook import leaves behind. Must run after the two above, since it
+  // reads the career entries they create.
+  await seedEducationPath();
 }
 
 main()

@@ -110,6 +110,8 @@ pnpm prisma:migrate       # create + apply a dev migration (dev DB only — see 
 pnpm dev                  # run the API with hot reload
 pnpm test                 # run the test suite (vitest)
 pnpm typecheck             # type-check without emitting
+pnpm db:seed              # seed reference data (includes the Education Path derivation)
+pnpm db:seed:education    # re-derive Education Path only; --dry-run reports without writing
 ```
 
 ## What's not built yet
@@ -146,7 +148,10 @@ already exists; there is deliberately no endpoint yet for editing a canonical lo
 `/api/v1/career-library/education`) on the same footing as exams/courses/institutions,
 linked to job roles through `CareerEducationEntry` — it carries no taxonomy FK (a
 domain-scoped picker comes from `?domainId=`, which filters by *usage*), and it is not
-dual-written back to the flat `qualification*`/`certifications*` strings. **Reference data is
+dual-written back to the flat `qualification*`/`certifications*` strings. Those flat columns
+are the *source* the table was seeded from — `prisma/seed-education-path.ts`
+(`pnpm db:seed:education`, also the last step of `pnpm db:seed`) derives 439 programmes and
+14,283 role links from them; it's idempotent and leaves the prose columns alone. **Reference data is
 review-gated**: counsellors may propose exams/courses/institutions/education-path entries
 (staff-level POSTs), which land `PENDING` and stay out of the pickers until an admin
 approves/rejects them. Review is *in place* via a shared `ReviewStatus` column on the four

@@ -491,6 +491,14 @@ once per domain.
 
 - **Soft delete**: a deleted entry leaves the pickers but stays linked, so job roles already
   using it keep rendering it.
+- **Seeded from the workbook prose.** `prisma/seed-education-path.ts` (`pnpm db:seed:education`,
+  also run as the last step of `pnpm db:seed`) derives entries and role links from the flat
+  columns: `qualification10th12th` verbatim (26 distinct values across the library),
+  `qualificationGraduationDefined` up to `", Recommended focus:"`, the part of
+  `qualificationPG` after a literal `"PG:"`, and both `certifications*` arrays. It yields
+  **439 programmes and 14,283 role links** over 1,319 job roles. `qualificationPGDefined` and
+  `qualificationGraduation` are deliberately **not** mined — they're generated boilerplate
+  sentences, not lists. Idempotent, and it never touches the flat columns.
 - **Domain-scoped pickers still work**, via usage rather than ownership:
   `GET /career-library/education?domainId=` returns entries already linked to job roles in
   that domain — the same `domainScope()` filter the exam/course/institution lookups use.
