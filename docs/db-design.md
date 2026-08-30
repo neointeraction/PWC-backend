@@ -627,11 +627,12 @@ audiences).
 
 ## Deliberate scope gaps (not modeled yet)
 
-- **Assessment scoring — deferred components.** The core engine ships (see Assessment
-  section above), but four report pieces await PWC confirmation and are `null`/omitted
-  until then: **Time-Consistency + composite ARI** — needs per-question `timeTakenMs`
-  from the frontend; the field and engine hook exist and activate automatically once
-  timing arrives. Everything else in the report is live. Two interpretation calls,
+- **Assessment scoring — complete, with one conditional piece.** The core engine ships
+  (see Assessment section above). **Time-Consistency + composite ARI** compute whenever
+  the attempt's aptitude answers carry `timeTakenMs` — the API accepts and stores it, so
+  this now depends only on whether the frontend sends timing; without it, those two
+  values are `null` and listed in the report's `meta.pending`. Everything else in the
+  report is live unconditionally. Two interpretation calls,
   confirmed with PWC and documented in code: (a) RVS uses "sum" aggregation (the
   Construct's "average" wording would make the lower grade bands unreachable); (b) a
   Difficulty-Consistency clean sweep is treated as non-penalized (a perfect aptitude

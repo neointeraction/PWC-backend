@@ -60,6 +60,7 @@ export async function previewAssessmentScore(input: PreviewScoreBody) {
   }
 
   const responseByFieldKey = new Map(input.answers.map((a) => [a.fieldKey, a.response ?? null]));
+  const timeByFieldKey = new Map(input.answers.map((a) => [a.fieldKey, a.timeTakenMs ?? null]));
   const normalized: AnsweredQuestion[] = questions.map((q) => {
     // Forgiving for a preview tool: an unanswered Likert item defaults to the neutral
     // middle value (the engine rejects a null Likert), and an unanswered aptitude item
@@ -77,7 +78,7 @@ export async function previewAssessmentScore(input: PreviewScoreBody) {
       format: q.format,
       order: q.order,
       response: normalizeResponse(raw),
-      timeTakenMs: null,
+      timeTakenMs: timeByFieldKey.get(q.fieldKey) ?? null,
     };
   });
 
@@ -143,10 +144,18 @@ export async function saveAssessmentAnswers(attemptId: string, input: SaveAssess
   await prisma.$transaction(
     input.answers.map((a) => {
       const question = questionsByFieldKey.get(a.fieldKey)!;
+      // Omitted `timeTakenMs` leaves an existing value alone (a partial re-save must not
+      // wipe timing already captured); an explicit null clears it.
+      const timing = a.timeTakenMs === undefined ? {} : { timeTakenMs: a.timeTakenMs };
       return prisma.assessmentAnswer.upsert({
         where: { attemptId_questionId: { attemptId, questionId: question.id } },
-        update: { selectedOption: a.selectedOption as never },
-        create: { attemptId, questionId: question.id, selectedOption: a.selectedOption as never },
+        update: { selectedOption: a.selectedOption as never, ...timing },
+        create: {
+          attemptId,
+          questionId: question.id,
+          selectedOption: a.selectedOption as never,
+          timeTakenMs: a.timeTakenMs ?? null,
+        },
       });
     })
   );

@@ -17,9 +17,14 @@ export const attemptIdParamsSchema = z.object({
 });
 export type AttemptIdParams = z.infer<typeof attemptIdParamsSchema>;
 
+// `timeTakenMs` is the per-question elapsed time. It is optional: omit it and any
+// previously saved value is left untouched; send `null` to clear one. The aptitude Time
+// Consistency component (and therefore the composite ARI) only activates once every
+// aptitude answer carries a value — see src/modules/assessment/scoring/ari.ts.
 const assessmentAnswerInputSchema = z.object({
   fieldKey: z.string().trim().min(1),
   selectedOption: z.unknown(),
+  timeTakenMs: z.number().int().nonnegative().nullable().optional(),
 });
 
 export const saveAssessmentAnswersBodySchema = z.object({
@@ -39,6 +44,9 @@ export const previewScoreBodySchema = z.object({
       z.object({
         fieldKey: z.string().trim().min(1),
         response: z.union([z.string(), z.number()]).nullable().optional(),
+        // Optional per-question elapsed time, so the dev tester can exercise TC/ARI
+        // without a real attempt. ARI stays null unless every aptitude item has one.
+        timeTakenMs: z.number().int().nonnegative().nullable().optional(),
       })
     )
     .default([]),

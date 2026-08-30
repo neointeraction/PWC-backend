@@ -8,6 +8,7 @@ const app = createApp();
 const COHORT = "CLASS_9_10";
 
 let studentId: string;
+let timingStudentId: string;
 
 interface AssessmentQuestion {
   fieldKey: string;
@@ -65,6 +66,23 @@ describe("Assessment submission API", () => {
       motherOccupation: "Doctor",
     });
     studentId = student.body.student.id;
+
+    const timingStudent = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Meera",
+      lastName: "Rao",
+      email: "meera@test-assessment-submission.example",
+      mobile: "+919876560004",
+      studentCode: "ASUB2",
+      projectId: project.id,
+      divisionId: division.body.id,
+      parentMobile: "+919876560005",
+      parentEmail: "parent-meera@test-assessment-submission.example",
+      fatherName: "Rao Sr",
+      fatherOccupation: "Teacher",
+      motherName: "Rao Jr",
+      motherOccupation: "Architect",
+    });
+    timingStudentId = timingStudent.body.student.id;
   });
 
   afterAll(async () => {
@@ -135,6 +153,64 @@ describe("Assessment submission API", () => {
     expect(res.status).toBe(400);
     expect(Array.isArray(res.body.error.details.missingFieldKeys)).toBe(true);
     expect(res.body.error.details.missingFieldKeys.length).toBeGreaterThan(0);
+  });
+
+  it("persists per-question timing, and a later save without it doesn't wipe it", async () => {
+    const attempt = await authRequest(app)
+      .post("/api/v1/assessment/attempts")
+      .send({ studentId: timingStudentId, cohort: COHORT });
+
+    const saved = await authRequest(app)
+      .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
+      .send({ answers: [{ fieldKey: "riasec_realistic_r1", selectedOption: "3", timeTakenMs: 8200 }] });
+    expect(saved.status).toBe(200);
+    expect(saved.body.answers[0].timeTakenMs).toBe(8200);
+
+    // Re-saving the same answer without timing must leave the stored value alone.
+    const resaved = await authRequest(app)
+      .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
+      .send({ answers: [{ fieldKey: "riasec_realistic_r1", selectedOption: "4" }] });
+    expect(resaved.status).toBe(200);
+    expect(resaved.body.answers[0].timeTakenMs).toBe(8200);
+
+    // An explicit null clears it.
+    const cleared = await authRequest(app)
+      .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
+      .send({ answers: [{ fieldKey: "riasec_realistic_r1", selectedOption: "4", timeTakenMs: null }] });
+    expect(cleared.body.answers[0].timeTakenMs).toBeNull();
+
+    // Negative timing is rejected.
+    const bad = await authRequest(app)
+      .put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`)
+      .send({ answers: [{ fieldKey: "riasec_realistic_r1", selectedOption: "4", timeTakenMs: -1 }] });
+    expect(bad.status).toBe(400);
+  });
+
+  it("computes the composite ARI when the submitted attempt carries timing", async () => {
+    const questions = await authRequest(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
+    const attempt = await authRequest(app)
+      .post("/api/v1/assessment/attempts")
+      .send({ studentId: timingStudentId, cohort: COHORT });
+
+    // Unhurried (>5s) answers -> no Time Consistency penalty.
+    const answers = questions.body.map((q: AssessmentQuestion) => ({
+      fieldKey: q.fieldKey,
+      selectedOption: buildAnswer(q),
+      timeTakenMs: 20_000,
+    }));
+    await authRequest(app).put(`/api/v1/assessment/attempts/${attempt.body.id}/answers`).send({ answers });
+
+    const submitRes = await authRequest(app).post(`/api/v1/assessment/attempts/${attempt.body.id}/submit`);
+    expect(submitRes.status).toBe(200);
+
+    const resultRes = await authRequest(app).get(`/api/v1/assessment/attempts/${attempt.body.id}/result`);
+    expect(resultRes.status).toBe(200);
+    const ari = resultRes.body.report.reliability.ari;
+    expect(ari.timingAvailable).toBe(true);
+    expect(ari.tc).not.toBeNull();
+    expect(ari.ari).not.toBeNull();
+    expect(ari.ari.score).toBeGreaterThan(0);
+    expect(resultRes.body.report.meta.pending).not.toContain("ari");
   });
 
   it("submits successfully once every question is answered, and locks it", async () => {

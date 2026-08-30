@@ -511,6 +511,49 @@ describe("scoreAssessment (full attempt)", () => {
     expect(report.meta.pending).not.toContain("careerFit");
   });
 
+  it("computes TC and the composite ARI once every aptitude answer carries timing", () => {
+    // Every aptitude item answered correctly and unhurried (>5s) -> no TC penalty.
+    const answers = fullAnswers((q) => (q.section === "APTITUDE" ? q.correctOption ?? "E" : 4)).map(
+      (a) => ({ ...a, timeTakenMs: 20_000 })
+    );
+    const start = new Date("2026-01-01T10:00:00Z");
+    const report = scoreAssessment({
+      answers,
+      startedAt: start,
+      submittedAt: new Date(start.getTime() + 30 * 60000),
+    });
+
+    expect(report.reliability.ari.timingAvailable).toBe(true);
+    expect(report.reliability.ari.tc).toBe(100);
+    expect(report.reliability.ari.dc).toBe(100);
+    expect(report.reliability.ari.ari).not.toBeNull();
+    expect(report.reliability.ari.ari!.score).toBe(100);
+    expect(report.reliability.ari.ari!.level).toBeTruthy();
+    // No longer deferred once timing is present.
+    expect(report.meta.pending).not.toContain("ari");
+    expect(report.meta.pending).not.toContain("timeConsistency");
+    expect(report.meta.timingAvailable).toBe(true);
+  });
+
+  it("keeps TC/ARI deferred when only some aptitude answers carry timing", () => {
+    let stamped = false;
+    const answers = fullAnswers((q) => (q.section === "APTITUDE" ? q.correctOption ?? "E" : 4)).map((a) => {
+      if (a.section !== "APTITUDE" || stamped) return a;
+      stamped = true;
+      return { ...a, timeTakenMs: 20_000 };
+    });
+    const start = new Date("2026-01-01T10:00:00Z");
+    const report = scoreAssessment({
+      answers,
+      startedAt: start,
+      submittedAt: new Date(start.getTime() + 30 * 60000),
+    });
+
+    expect(report.reliability.ari.timingAvailable).toBe(false);
+    expect(report.reliability.ari.ari).toBeNull();
+    expect(report.meta.pending).toContain("ari");
+  });
+
   it("leaves Career Fit null (and pending) when no domainUnits are supplied", () => {
     const answers = fullAnswers((q) => (q.section === "APTITUDE" ? q.correctOption ?? "E" : 4));
     const start = new Date("2026-01-01T10:00:00Z");

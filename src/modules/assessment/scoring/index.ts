@@ -3,8 +3,9 @@
 // Pure over a normalized attempt (AnsweredQuestion[] + timing). Produces the full
 // computed report backing the Career kREATE output. What's intentionally NOT here yet
 // (pending client sign-off — see the assessment work notes):
-//   - Time Consistency / composite ARI: needs per-question timing (returned null until
-//     the frontend sends timeTakenMs)
+//   - Time Consistency / composite ARI: needs per-question timing. Computed whenever
+//     every aptitude answer carries a timeTakenMs; null (and listed in meta.pending)
+//     otherwise.
 //   - RVS (Response Validity Score): penalty formula ambiguity to confirm
 //   - Career Fit (top-6 careers): industry-vs-domain granularity + a few weight rows
 //     that don't sum to 100
@@ -110,7 +111,9 @@ export function scoreAssessment(input: ScoreInput): AssessmentReport {
 
   const graduationPathways = scoreGraduationPathways(profile);
   const careerFit = domainUnits ? scoreCareerFit(profile, domainUnits) : null;
-  const pending = ["timeConsistency", "ari"];
+  // TC/ARI are only "pending" while the attempt carries no per-question timing — once
+  // every aptitude answer has a timeTakenMs they are fully computed.
+  const pending = ari.timingAvailable ? [] : ["timeConsistency", "ari"];
   if (!careerFit) pending.push("careerFit");
 
   return {

@@ -725,8 +725,15 @@ progresses (implements "Save Progress"). 409 if the attempt is already `SUBMITTE
 
 `timeTakenMs` is **optional** but **please send it for aptitude questions** — it's the
 time the student spent on that question, and it powers the Time-Consistency half of the
-aptitude reliability score (ARI). Until you send it, ARI/Time-Consistency stay `null`
-in the result; everything else scores without it.
+aptitude reliability score (ARI). It is now accepted and stored: send it and ARI is
+computed on submit; omit it and ARI/Time-Consistency stay `null` while everything else
+still scores. ARI activates only when **every** aptitude answer carries a value, so send
+it for all of them or none.
+
+Timing follows the usual partial-save semantics: **omitting** `timeTakenMs` on a later
+save of the same answer leaves the stored value untouched (so a "change my answer"
+re-save doesn't wipe the original timing), while sending `null` explicitly clears it.
+Negative values are rejected with 400.
 
 ```
 POST /attempts/{attemptId}/submit
@@ -790,15 +797,19 @@ report backing the Career kREATE output:
 }
 ```
 
-**What's live vs. pending.** Everything the report needs is computed except the
-composite ARI: trait scores + grades, DCS, DPS, Stream Fit, **Graduation Pathways**,
-**Career Fit** (top-6 domains each with a `representativeCareer`, plus a top-3 industry
-rollup for the "Industry Choice" table), and the RVS (EIM) / ACI / ORI /
-Difficulty-Consistency measures. You can build the Trait Map, Champion's Profile, Stream
-Fit, Graduation Pathways, Career Compass and most of the Reliability Dashboard now. The
-only thing still in `report.meta.pending` is `ari`/`tc` (the composite ARI — `null` until
-you send per-question `timeTakenMs`). Render that tile defensively (hide when `null`).
-`careerFit` is `null` only if the career library is empty.
+**What's live.** Everything the report needs is computed: trait scores + grades, DCS,
+DPS, Stream Fit, **Graduation Pathways**, **Career Fit** (top-6 domains each with a
+`representativeCareer`, plus a top-3 industry rollup for the "Industry Choice" table),
+the RVS (EIM) / ACI / ORI / Difficulty-Consistency measures, and — when the attempt
+carried per-question timing — the composite **ARI**.
+
+The example above is an attempt saved **without** `timeTakenMs`, which is why `tc`/`ari`
+are `null`, `timingAvailable` is `false` and `meta.pending` lists `timeConsistency`/`ari`.
+Send timing on every aptitude answer (§8.3) and the same attempt returns
+`"ari": { "dc": 100, "tc": 100, "ari": { "score": 100, "level": "...", "meaning": "..." },
+"timingAvailable": true }` with `meta.pending` no longer listing them. Either way, render
+the ARI tile defensively (hide when `ari.ari` is `null`) — `meta.pending` is the flag to
+branch on. `careerFit` is `null` only if the career library is empty.
 
 **Fit-qualifying threshold (recommendations).** The surfaced recommendation lists —
 `streamFit.top3`, `graduationPathways.top3`, and `careerFit.top6Domains` /
@@ -1359,11 +1370,12 @@ versions.
 Do **not** start frontend work assuming these exist. Ask the backend team for status
 before building UI that depends on any of them:
 
-- **Assessment scoring — nearly complete.** Submitting an attempt computes the full
+- **Assessment scoring — complete.** Submitting an attempt computes the full
   `AssessmentResult` — trait scores/grades, DCS, DPS, Stream Fit, Graduation Pathways,
   Career Fit (top-6 domains + representative careers), and RVS/ACI/ORI/DC reliability
-  (see §8.4). The **only** piece still not produced is Time-Consistency + composite ARI
-  (needs per-question `timeTakenMs`); don't build the composite-ARI tile against this yet.
+  (see §8.4). Time-Consistency + composite ARI are computed too, but only for attempts
+  whose aptitude answers carry `timeTakenMs` (§8.3) — until you send timing, that one
+  tile stays `null` and is listed in `report.meta.pending`.
 - **Reports** — the **student assessment report is built**: `GET
   /api/v1/reports/students/{id}/assessment` returns the whole report as structured JSON
   (student, championProfile, traitMap, careerCompass, streamFit, graduationPathways,
