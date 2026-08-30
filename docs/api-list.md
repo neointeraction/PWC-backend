@@ -220,12 +220,12 @@ Admin-managed CRUD for counsellor accounts (each backed by a `User` with role
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/counsellors` | Create a counsellor. Also creates a linked `User` (role `COUNSELLOR`) with a temp password (from the `password?` body field if given — e.g. carried in an import sheet — otherwise generated), returned once. `mustChangePassword` is set so it's changed at first login. Body: `firstName, lastName, email, mobile, counsellorCode?, password?, instituteId, projectIds?` — `counsellorCode` is **auto-generated** (`C0001`, `C0002`, …) when omitted (supply it only to carry a legacy/import code). 400 if `instituteId` is unknown or any `projectId` isn't under that institute; 409 on duplicate `email`/`mobile`/`counsellorCode`. |
+| POST | `/api/v1/counsellors` | Create a counsellor. Also creates a linked `User` (role `COUNSELLOR`) with a temp password (from the `password?` body field if given — e.g. carried in an import sheet — otherwise generated), returned once. `mustChangePassword` is set so it's changed at first login. Body: `firstName, lastName, email, mobile, counsellorCode?, password?, instituteId?, projectIds?` — `counsellorCode` is **auto-generated** (`C0001`, `C0002`, …) when omitted (supply it only to carry a legacy/import code). `instituteId` is **optional**: omit it to create the counsellor into an unassigned pool (no institute yet) and assign one later via `POST /counsellors/{id}/projects`, which backfills it from the project's institute. `projectIds` requires `instituteId` to be set (400 otherwise). 400 if `instituteId` is unknown or any `projectId` isn't under that institute; 409 on duplicate `email`/`mobile`/`counsellorCode`. |
 | GET | `/api/v1/counsellors` | List counsellors (with user, institute, assigned projects). Query: `instituteId?, projectId?` (filters to counsellors assigned to that project). |
 | GET | `/api/v1/counsellors/{id}` | Get one counsellor. 404 if unknown. |
 | PATCH | `/api/v1/counsellors/{id}` | Update. Body (partial): `firstName?, lastName?, mobile?, isActive?`. `isActive:false` deactivates the login without deleting. |
 | DELETE | `/api/v1/counsellors/{id}` | Delete (removes the linked `User`, cascading the counsellor, its slots, and project links). **409 if the counsellor has any `Session`** (would orphan session history) — deactivate with `isActive:false` instead; `error.details.sessionCount` is returned. |
-| POST | `/api/v1/counsellors/{id}/projects` | Assign the counsellor to a project (`ProjectCounsellor`). Body: `{ projectId }`. 400 if the project isn't under the counsellor's institute; 409 if already assigned. Returns the updated counsellor. |
+| POST | `/api/v1/counsellors/{id}/projects` | Assign the counsellor to a project (`ProjectCounsellor`). Body: `{ projectId }`. If the counsellor has no institute yet, this backfills `instituteId` from the project's institute (its first assignment becomes its home institute); otherwise 400 if the project isn't under the counsellor's existing institute. 409 if already assigned. Returns the updated counsellor. |
 | DELETE | `/api/v1/counsellors/{id}/projects/{projectId}` | Unassign from a project. 404 if not currently assigned. Returns the updated counsellor. |
 
 ## Forms
@@ -328,7 +328,7 @@ dual-written during the transition — see `docs/career-library-normalization-sp
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/career-library` | Search/list entries. Query: `search?` (free text across jobRole/oneLineDescription and the taxonomy names), `clusterId?, industryId?, domainId?` (filter by taxonomy id at any level; combining `clusterId`+`industryId` ANDs them), `aiResilienceGrade?` (`LOW`\|`MEDIUM`\|`HIGH`\|`VERY_HIGH`), `status?` (defaults to `ACTIVE`), `page?` (default 1), `pageSize?` (default 20, max 100). Each entry includes its `domain` chain (`domain.industry.cluster`) so the cluster/industry/domain names are still present. Returns `{ data, pagination: { page, pageSize, total, totalPages } }`. |
+| GET | `/api/v1/career-library` | Search/list entries. Query: `search?` (free text across jobRole/oneLineDescription and the taxonomy names), `clusterId?, industryId?, domainId?` (filter by taxonomy id at any level; combining `clusterId`+`industryId` ANDs them), `aiResilienceGrade?` (`LOW`\|`MEDIUM`\|`HIGH`\|`VERY_HIGH`), `status?` (defaults to `ACTIVE`), `reviewStatus?` (`PENDING`\|`APPROVED`\|`REJECTED`, defaults to `APPROVED` — pass `reviewStatus=PENDING&status=DRAFT` for the admin queue of counsellor-submitted roles), `page?` (default 1), `pageSize?` (default 20, max 100). Each entry includes its `domain` chain (`domain.industry.cluster`) so the cluster/industry/domain names are still present. Returns `{ data, pagination: { page, pageSize, total, totalPages } }`. |
 | GET | `/api/v1/career-library/filters` | Filter-dropdown source, now backed by the taxonomy tables (live rows only): `clusters` / `industries` / `domains` as `{id, name}` objects (industries carry `clusterId`, domains carry `industryId` for cascading) plus the fixed `aiResilienceGrades` list. For a fully nested picker use `GET /career-taxonomy/tree`. |
 | GET | `/api/v1/career-library/entrance-exams` | **Typeahead dropdown.** Canonical entrance exams. Query: `search?`, `level?` (`UG`\|`PG`), `domainId?`, `limit?` (default 50). `domainId` scopes the list to exams already linked to job roles in that domain ("what this domain already has"); 400 if it isn't a live domain. Omit it for the global list. Add `status?` (`PENDING`\|`APPROVED`\|`REJECTED`, default `APPROVED`) for the admin review queue — pickers show approved rows only. Each row carries `status` + `submittedBy`. |
 | GET | `/api/v1/career-library/institutions` | **Typeahead dropdown.** Canonical institutions/colleges. Query: `search?`, `domainId?`, `limit?`. `domainId` scopes to institutions already linked to job roles in that domain; 400 if it isn't a live domain. Add `status?` (`PENDING`\|`APPROVED`\|`REJECTED`, default `APPROVED`) for the admin review queue — pickers show approved rows only. Each row carries `status` + `submittedBy`. |
@@ -338,15 +338,25 @@ dual-written during the transition — see `docs/career-library-normalization-sp
 | POST | `/api/v1/career-library/institutions` | **Staff.** Propose a canonical institution. Body: `{ name, … }`. Same review rules. |
 | POST | `/api/v1/career-library/{entrance-exams\|courses\|institutions}/{id}/approve` | **Admin.** Approve a pending row. 409 if already approved/rejected, 404 if missing. |
 | POST | `/api/v1/career-library/{entrance-exams\|courses\|institutions}/{id}/reject` | **Admin.** Reject a pending row. Body: `{ rejectionReason? }`. 409 if already decided. |
-| POST | `/api/v1/career-library` | **Admin.** Create an entry. Required: `domainId` (a live `CareerDomain` leaf — cluster/industry are derived from it; 400 if unknown or soft-deleted), `jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription, qualification10th12th`. Optional: salary/qualification fields (incl. `qualification10th12thExplanation`, `qualificationGraduationDefined`, `qualificationPGDefined`), `roleOverview`, `keySkills` (string list), `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` / `educationEntries` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name, education items are `[{ id } \| { level, programme, description? }]`). Returns the assembled entry. `createdBy` = calling admin. |
-| PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` toggle). A provided link array (`entranceExams`/`courses`/`institutions`/`educationEntries`) **replaces** that entry's links; omitting it leaves them unchanged. **Clearing a value:** omitting a scalar leaves it unchanged, sending `null` clears it — accepted for every nullable column (`salaryIndia*`/`salaryGlobal*` text **and** numeric, `roleOverview`, `qualification10th12thExplanation`, `qualificationGraduation(Defined)`, `qualificationPG(Defined)`, `entranceExamsUGDescription`). Empty strings are still rejected; clear with `null`. `jobRole`, `domainId`, `aiResilienceGrade`, `aiResilienceComment`, `oneLineDescription` and `qualification10th12th` are NOT NULL and reject `null`. Clear a list by sending `[]`. 400 on an unknown link `id`. Sets `updatedBy`. 404 if not found. |
+| POST | `/api/v1/career-library` | **Staff.** Create an entry. Required: `domainId` (a live `CareerDomain` leaf — cluster/industry are derived from it; 400 if unknown or soft-deleted), `jobRole, aiResilienceGrade, aiResilienceComment, oneLineDescription`. Optional: salary/qualification fields (incl. `qualification10th12th` and its `qualification10th12thExplanation`, `qualificationGraduationDefined`, `qualificationPGDefined`), `roleOverview`, `keySkills` (string list), `topCompanies`, `certifications*`, `status` (default `DRAFT`), and the normalized links `entranceExams` / `courses` / `institutions` / `educationEntries` (each `[{ id } \| { name, … }]`; exam items need `level` when added by name, education items are `[{ id } \| { level, programme, description? }]`). Returns the assembled entry. `createdBy` = calling user. **Two flows through this one route:** an admin's entry is created with `reviewStatus:APPROVED` (+ `reviewedBy`/`reviewedAt` stamped to them) and whatever `status` they asked for, so `status:"ACTIVE"` puts it in the library in a single call; a counsellor's is forced to `reviewStatus:PENDING` + `status:DRAFT` regardless of the `status` sent, and stays out of every read until an admin approves it. |
+| PATCH | `/api/v1/career-library/{id}` | **Admin.** Partial update (any create field, incl. `status` toggle). A provided link array (`entranceExams`/`courses`/`institutions`/`educationEntries`) **replaces** that entry's links; omitting it leaves them unchanged. **Clearing a value:** omitting a scalar leaves it unchanged, sending `null` clears it — accepted for every nullable column (`salaryIndia*`/`salaryGlobal*` text **and** numeric, `roleOverview`, `qualification10th12thExplanation`, `qualification10th12th`, `qualificationGraduation(Defined)`, `qualificationPG(Defined)`, `entranceExamsUGDescription`). Empty strings are still rejected; clear with `null`. `jobRole`, `domainId`, `aiResilienceGrade`, `aiResilienceComment` and `oneLineDescription` are NOT NULL and reject `null`. Clear a list by sending `[]`. 400 on an unknown link `id`. Sets `updatedBy`. 404 if not found. |
 | DELETE | `/api/v1/career-library/{id}` | **Admin.** Delete an entry (cascades its links; first detaches any request's `resultingEntryId`). 404 if not found. |
-| GET | `/api/v1/career-library/{id}` | Get one entry. Includes the `domain` chain (`domain.industry.cluster`), the curated normalized links `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions` / `linkedEducationEntries`, plus the legacy broad value-match view `relatedInstitutions` (by `domain.industry.name`) / `relatedCourses` (by `domain.industry.cluster.name`) / `relatedEntranceExams` (kept during transition). 404 if not found. |
+| POST | `/api/v1/career-library/{id}/approve` | **Admin.** Approve a counsellor-submitted job role. Publishes it in one action: `reviewStatus:APPROVED` **and** `status:ACTIVE`, plus `reviewedBy`/`reviewedAt`. Returns the assembled entry. 409 if it isn't `PENDING` (already decided, or an admin's own entry that never needed review); 404 if missing. |
+| POST | `/api/v1/career-library/{id}/reject` | **Admin.** Reject a counsellor-submitted job role. **Deletes it permanently** (no body, nothing retained) — its links cascade, and any canonical exam/course/institution the submission created stays behind to be reviewed on its own. Returns `{ id, deleted: true }`. 409 if it isn't `PENDING`; 404 if missing. |
+| GET | `/api/v1/career-library/{id}` | Get one entry. Includes the `domain` chain (`domain.industry.cluster`), the curated normalized links `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions` / `linkedEducationEntries`, plus the legacy broad value-match view `relatedInstitutions` (by `domain.industry.name`) / `relatedCourses` (by `domain.industry.cluster.name`) / `relatedEntranceExams` (kept during transition). Entries awaiting review are visible to staff only — a student fetching one gets 404. 404 if not found. |
 
-### Ratification requests
+### Ratification requests (lightweight suggestions)
 
-Counsellors propose careers that aren't in the library; admins review. `CareerLibraryRequest`
-status: `PENDING` → `APPROVED`\|`REJECTED`.
+The **short** way for a counsellor to flag a missing career: a suggestion ticket with a
+handful of fields, not a job role. Admins review it, then create the real entry themselves
+and link it back via `resultingEntryId` — approving a request never creates an entry, because
+the ticket's sparse fields can't fill one. `CareerLibraryRequest` status:
+`PENDING` → `APPROVED`\|`REJECTED`.
+
+For the **full** counsellor-submits-a-job-role flow (same payload an admin uses, held for
+approval), use `POST /api/v1/career-library` and the `{id}/approve` \| `{id}/reject` routes
+above instead. The two paths coexist: this one is "I noticed a gap", that one is "here is the
+complete role, please publish it".
 
 | Method | Path | Description |
 |---|---|---|
@@ -385,29 +395,31 @@ makes restoring the original **409**). Ids may be cuid or uuid (backfilled rows)
 | DELETE | `/api/v1/career-taxonomy/domains/{id}` | **Admin.** Soft-delete. |
 | POST | `/api/v1/career-taxonomy/domains/{id}/restore` | **Admin.** Restore. 409 on name clash. |
 
-### Education Path (domain-level)
+### Education Path
 
-> **Review model.** Counsellors may propose education path entries, exams, courses and
-> institutions; admins approve or reject them. Review happens **in place** — the row *is* the
-> submission, carrying `status` (`PENDING`/`APPROVED`/`REJECTED`), `submittedBy`, `reviewedBy`,
-> `reviewedAt` and `rejectionReason`. This is deliberately unlike `CareerLibraryRequest` (the
-> job-role flow), which is a separate ticket the admin re-keys into an entry. Pickers and
-> tick-lists show `APPROVED` only; pass `status=PENDING` for the review queue. Re-proposing a
-> `REJECTED` row reopens it, and an admin naming a `PENDING` row while adding a job role
-> implicitly approves it.
+> **Publish model.** Education Path entries do **not** use the exam/course/institution review
+> workflow. They carry the same `DRAFT`/`ACTIVE` flag a career entry does: a counsellor's
+> addition lands `DRAFT`, an admin's is `ACTIVE`, and publishing is `PATCH { status: "ACTIVE" }`
+> — there is no approve/reject pair and no rejection reason. Pickers show `ACTIVE` only; pass
+> `status=DRAFT` to see what's unpublished.
 
 The qualifications/programmes that lead into a career. A **global canonical lookup**, exactly
 like entrance exams / courses / institutions: one row per `(level, programme)`, attached to job
 roles through a join table, and **not** owned by a taxonomy node. `level` is one of
 `CLASS_10_PLUS_2` \| `GRADUATE` \| `POST_GRADUATE` \| `CERTIFICATION_STUDENT` \| `CERTIFICATION_UG`.
-Soft-deleted: a deleted entry leaves the picker but job roles already linked to it keep resolving
-and still render it — so uniqueness on `(level, programme)` is enforced in the service among live
-rows only, leaving a soft-deleted programme name reusable. The flat `qualification*` /
+`status` is the same `DRAFT` \| `ACTIVE` publish flag a career entry carries — `DRAFT` is not
+offered in the pickers, and publishing is a plain `PATCH { status: "ACTIVE" }` (there is no
+approve/reject review flow, and no soft delete: `DELETE` is permanent and cascades the links
+from every job role using it). `(level, programme)` is unique in the database. The flat
+`qualification*` /
 `certifications*` strings on a career entry are the older free-text layer and are left untouched —
 they hold descriptive prose, not a list.
 
 Seeded from the career-library workbook: `pnpm db:seed:education` derives **439 programmes and
-14,283 role links** from the flat `qualification*`/`certifications*` columns (see
+14,283 role links** (all `ACTIVE`) from the flat `qualification*`/`certifications*` columns.
+`description` is filled per level from the matching explanation column —
+`qualification10th12thExplanation`, `qualificationGraduationDefined`, `qualificationPGDefined`;
+the two certification levels have no such column and carry none (see
 `prisma/seed-education-path.ts` for exactly which columns are mined and which are skipped as
 boilerplate). So a job role fetched from this API already carries its `linkedEducationEntries`.
 
@@ -417,13 +429,12 @@ per-domain ownership: a domain no longer *owns* entries, it just has roles that 
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/career-library/education` | List education path entries. Query: `search?`, `level?`, `status?` (default `APPROVED`), `includeDeleted?`, `domainId?` (scope to entries used by roles in that domain — 400 if it isn't a live domain), `limit?` (default 50). Ordered by level then programme. |
-| POST | `/api/v1/career-library/education` | **Staff.** Propose an entry. Body: `{ level, programme, description? }`. A counsellor's lands `PENDING` and stays out of the pickers until approved; an admin's is `APPROVED` immediately. 409 if that programme already exists at that level. |
-| POST | `/api/v1/career-library/education/{entryId}/approve` | **Admin.** Approve a pending entry. 409 if already decided. |
-| POST | `/api/v1/career-library/education/{entryId}/reject` | **Admin.** Reject a pending entry. Body: `{ rejectionReason? }`. 409 if already decided. |
-| PATCH | `/api/v1/career-library/education/{entryId}` | **Admin.** Update `{ level?, programme?, description? }`. `description: null` clears it. 409 on a clash with another live entry at that level, 404 if missing/deleted. |
-| DELETE | `/api/v1/career-library/education/{entryId}` | **Admin.** Soft-delete. Returns the row with `deletedAt` set. |
-| POST | `/api/v1/career-library/education/{entryId}/restore` | **Admin.** Clear `deletedAt`. 409 if a live row now holds that level+programme. |
+| GET | `/api/v1/career-library/education` | List education path entries. Query: `search?`, `level?`, `status?` (`DRAFT` \| `ACTIVE`, default `ACTIVE`), `domainId?` (scope to entries used by roles in that domain — 400 if it isn't a live domain), `limit?` (default 50). Ordered by level then programme. |
+| POST | `/api/v1/career-library/education` | **Staff.** Add an entry. Body: `{ level, programme, description?, status? }`. A counsellor's lands `DRAFT` and stays out of the pickers until an admin approves it (below); an admin's is `ACTIVE` immediately. 409 if that programme already exists at that level. |
+| PATCH | `/api/v1/career-library/education/{entryId}` | **Admin.** Update `{ level?, programme?, description?, status? }` — this is also the publish step (`status: "ACTIVE"`). `description: null` clears it. 409 on a clash with another entry at that level, 404 if missing. |
+| POST | `/api/v1/career-library/education/{entryId}/approve` | **Admin.** Approve a proposed entry — publishes the `DRAFT` to `ACTIVE` so it appears in the pickers. Equivalent to `PATCH … {status:"ACTIVE"}`, but the verb the review screen calls. 409 if already `ACTIVE`, 404 if missing. |
+| POST | `/api/v1/career-library/education/{entryId}/reject` | **Admin.** Reject a proposed entry — **deletes it permanently**. Returns `{ id, deleted: true }`. 409 if it is already `ACTIVE` (unpublish it first) or if any job role still links to it (the `CareerEducationEntry` rows would cascade away silently — unlink them first). 404 if missing. |
+| DELETE | `/api/v1/career-library/education/{entryId}` | **Admin.** **Permanent** delete — the `CareerEducationEntry` links from every job role using it cascade away. Returns `{ id, deleted: true }`. 404 if missing. |
 
 ## Sessions
 

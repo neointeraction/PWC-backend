@@ -41,12 +41,16 @@ async function assertProjectsBelongToInstitute(projectIds: string[], instituteId
 }
 
 export async function createCounsellor(input: CreateCounsellorInput) {
-  const institute = await prisma.institute.findUnique({ where: { id: input.instituteId } });
-  if (!institute) {
-    throw new BadRequestError("instituteId does not exist");
-  }
   const projectIds = input.projectIds ?? [];
-  await assertProjectsBelongToInstitute(projectIds, input.instituteId);
+  if (input.instituteId) {
+    const institute = await prisma.institute.findUnique({ where: { id: input.instituteId } });
+    if (!institute) {
+      throw new BadRequestError("instituteId does not exist");
+    }
+    await assertProjectsBelongToInstitute(projectIds, input.instituteId);
+  } else if (projectIds.length > 0) {
+    throw new BadRequestError("projectIds requires instituteId to be set");
+  }
 
   // Import sheets may carry the temp password; otherwise generate one. mustChangePassword
   // defaults to true either way, so it's changed at first login.
@@ -156,13 +160,20 @@ export async function assignProject(id: string, input: AssignProjectBody) {
   if (!project) {
     throw new BadRequestError("projectId does not exist");
   }
-  if (project.instituteId !== counsellor.instituteId) {
+  if (counsellor.instituteId !== null && project.instituteId !== counsellor.instituteId) {
     throw new BadRequestError("Project does not belong to the counsellor's institute");
   }
 
   try {
-    await prisma.projectCounsellor.create({
-      data: { counsellorId: id, projectId: input.projectId },
+    await prisma.$transaction(async (tx) => {
+      // A counsellor created without an institute (pool) picks up its home institute
+      // from the first project it's assigned to.
+      if (counsellor.instituteId === null) {
+        await tx.counsellor.update({ where: { id }, data: { instituteId: project.instituteId } });
+      }
+      await tx.projectCounsellor.create({
+        data: { counsellorId: id, projectId: input.projectId },
+      });
     });
   } catch (err) {
     handlePrismaError(err); // P2002 → 409 (already assigned)

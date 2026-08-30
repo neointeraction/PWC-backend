@@ -70,12 +70,136 @@ describe("Career Library writes + ratification", () => {
     expect(res.body.createdBy).toBeTypeOf("string");
   });
 
-  it("403s a counsellor trying to create an entry (admin-only)", async () => {
+  it("holds a counsellor's submitted job role as PENDING + DRAFT", async () => {
     const res = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", counsellorToken)
-      .send(entryBody({ jobRole: "Test CL Role Nope" }));
-    expect(res.status).toBe(403);
+      // ACTIVE is ignored for a counsellor — they can't publish their own submission.
+      .send(entryBody({ jobRole: "Test CL Role Pending", status: "ACTIVE" }));
+    expect(res.status).toBe(201);
+    expect(res.body.reviewStatus).toBe("PENDING");
+    expect(res.body.status).toBe("DRAFT");
+    expect(res.body.reviewedBy).toBeNull();
+
+    // Invisible in the library, even to an admin browsing the default list.
+    const list = await authRequest(app).get("/api/v1/career-library").query({ search: "Test CL Role Pending" });
+    expect(list.body.data.some((e: { id: string }) => e.id === res.body.id)).toBe(false);
+  });
+
+  it("marks an admin's own entry APPROVED on the spot", async () => {
+    const res = await authRequest(app)
+      .post("/api/v1/career-library")
+      .send(entryBody({ jobRole: "Test CL Role AdminDirect", status: "ACTIVE" }));
+    expect(res.status).toBe(201);
+    expect(res.body.reviewStatus).toBe("APPROVED");
+    expect(res.body.status).toBe("ACTIVE");
+    expect(res.body.reviewedBy).toBeTypeOf("string");
+
+    // Use case 1: one call and it's in the library.
+    const list = await authRequest(app).get("/api/v1/career-library").query({ search: "Test CL Role AdminDirect" });
+    expect(list.body.data.some((e: { id: string }) => e.id === res.body.id)).toBe(true);
+  });
+
+  it("surfaces pending submissions to the admin review queue", async () => {
+    const created = await request(app)
+      .post("/api/v1/career-library")
+      .set("Authorization", counsellorToken)
+      .send(entryBody({ jobRole: "Test CL Role Queue" }));
+
+    const queue = await authRequest(app)
+      .get("/api/v1/career-library")
+      .query({ reviewStatus: "PENDING", status: "DRAFT", search: "Test CL Role Queue" });
+    expect(queue.status).toBe(200);
+    expect(queue.body.data.some((e: { id: string }) => e.id === created.body.id)).toBe(true);
+  });
+
+  it("publishes a counsellor's job role when an admin approves it", async () => {
+    const created = await request(app)
+      .post("/api/v1/career-library")
+      .set("Authorization", counsellorToken)
+      .send(entryBody({ jobRole: "Test CL Role Approve" }));
+    const id = created.body.id;
+
+    const approved = await authRequest(app).post(`/api/v1/career-library/${id}/approve`);
+    expect(approved.status).toBe(200);
+    expect(approved.body.reviewStatus).toBe("APPROVED");
+    // Approve publishes in one action rather than leaving a DRAFT behind.
+    expect(approved.body.status).toBe("ACTIVE");
+    expect(approved.body.reviewedBy).toBeTypeOf("string");
+
+    const list = await authRequest(app).get("/api/v1/career-library").query({ search: "Test CL Role Approve" });
+    expect(list.body.data.some((e: { id: string }) => e.id === id)).toBe(true);
+
+    // Re-reviewing a decided entry is a stale-queue 409.
+    const again = await authRequest(app).post(`/api/v1/career-library/${id}/approve`);
+    expect(again.status).toBe(409);
+  });
+
+  it("deletes a counsellor's job role when an admin rejects it", async () => {
+    const created = await request(app)
+      .post("/api/v1/career-library")
+      .set("Authorization", counsellorToken)
+      .send(entryBody({ jobRole: "Test CL Role Reject" }));
+    const id = created.body.id;
+
+    const rejected = await authRequest(app).post(`/api/v1/career-library/${id}/reject`);
+    expect(rejected.status).toBe(200);
+    expect(rejected.body).toEqual({ id, deleted: true });
+
+    expect(await prisma.careerLibraryEntry.findUnique({ where: { id } })).toBeNull();
+    const got = await authRequest(app).get(`/api/v1/career-library/${id}`);
+    expect(got.status).toBe(404);
+  });
+
+  it("403s a counsellor trying to approve or reject a job role", async () => {
+    const created = await request(app)
+      .post("/api/v1/career-library")
+      .set("Authorization", counsellorToken)
+      .send(entryBody({ jobRole: "Test CL Role SelfApprove" }));
+    const id = created.body.id;
+
+    const approve = await request(app)
+      .post(`/api/v1/career-library/${id}/approve`)
+      .set("Authorization", counsellorToken);
+    expect(approve.status).toBe(403);
+
+    const reject = await request(app)
+      .post(`/api/v1/career-library/${id}/reject`)
+      .set("Authorization", counsellorToken);
+    expect(reject.status).toBe(403);
+  });
+
+  it("409s when reviewing an entry that was never submitted for review", async () => {
+    const created = await authRequest(app)
+      .post("/api/v1/career-library")
+      .send(entryBody({ jobRole: "Test CL Role NotPending" }));
+    const res = await authRequest(app).post(`/api/v1/career-library/${created.body.id}/approve`);
+    expect(res.status).toBe(409);
+  });
+
+  it("treats qualification10th12th as optional, and lets PATCH clear it", async () => {
+    const { qualification10th12th: _omitted, ...withoutQual } = entryBody({
+      jobRole: "Test CL Role NoQual",
+    });
+    const created = await authRequest(app).post("/api/v1/career-library").send(withoutQual);
+    expect(created.status).toBe(201);
+    expect(created.body.qualification10th12th).toBeNull();
+
+    // Still settable, and null clears it again like the sibling qualification columns.
+    const set = await authRequest(app)
+      .patch(`/api/v1/career-library/${created.body.id}`)
+      .send({ qualification10th12th: "12th PCM" });
+    expect(set.body.qualification10th12th).toBe("12th PCM");
+    const cleared = await authRequest(app)
+      .patch(`/api/v1/career-library/${created.body.id}`)
+      .send({ qualification10th12th: null });
+    expect(cleared.body.qualification10th12th).toBeNull();
+
+    // An empty string is still not a way to clear it.
+    const blank = await authRequest(app)
+      .patch(`/api/v1/career-library/${created.body.id}`)
+      .send({ qualification10th12th: "" });
+    expect(blank.status).toBe(400);
   });
 
   it("publishes an entry via PATCH status ACTIVE, and hides DRAFTs from the default list", async () => {

@@ -207,8 +207,10 @@ model Counsellor {
   userId         String    @unique
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   counsellorCode String    @unique // admin-generated human-readable id, e.g. "CN1"
-  instituteId    String
-  institute      Institute @relation(fields: [instituteId], references: [id])
+  // Nullable: a counsellor can be created into the pool with no institute yet, then
+  // assigned to one later via POST /counsellors/:id/projects (which backfills this).
+  instituteId    String?
+  institute      Institute? @relation(fields: [instituteId], references: [id])
   mobile         String    @unique
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -441,7 +443,9 @@ model CareerLibraryEntry {
   // Three distinct qualification levels, matching the source "Career Library" sheet.
   // Each has a raw column plus a cleaned/normalized "DEFINED" variant (yellow columns in
   // the workbook); `qualification10th12thExplanation` is the "10+2 Explanation" note.
-  qualification10th12th            String
+  // All three are optional: plenty of roles have no meaningful 10+2 entry requirement, and
+  // the level a role actually starts at varies (every imported row happens to have one).
+  qualification10th12th            String?
   qualification10th12thExplanation String?
   qualificationGraduation          String?
   qualificationGraduationDefined   String?
@@ -460,10 +464,20 @@ model CareerLibraryEntry {
 
   topCourses String[]
   status     CareerLibraryStatus @default(ACTIVE)
-  createdBy  String // User id (admin/super admin), or a seed/import label
+  createdBy  String // User id (admin/super admin/counsellor), or a seed/import label
   updatedBy  String?
   createdAt  DateTime            @default(now())
   updatedAt  DateTime            @updatedAt
+
+  // Review workflow (see `ReviewStatus`), mirroring the reference-data tables. A
+  // counsellor may submit a full job role: it lands PENDING (and DRAFT) and stays out of
+  // the library until an admin approves it. An admin's own addition is APPROVED on the
+  // spot. Rejection hard-deletes the row, so REJECTED is never persisted here — the
+  // enum value exists only because the enum is shared.
+  // `createdBy` doubles as the submitter stamp; these two record who decided.
+  reviewStatus ReviewStatus @default(APPROVED)
+  reviewedBy   String?
+  reviewedAt   DateTime?
 
   requests CareerLibraryRequest[]
 
@@ -475,6 +489,7 @@ model CareerLibraryEntry {
   educationLinks    CareerEducationEntry[]
 
   @@index([domainId])
+  @@index([reviewStatus])
   @@map("career_library_entries")
 }
 
@@ -528,9 +543,9 @@ model CareerDomain {
 // programme), reused by every job role that needs it, and attached to roles through
 // CareerEducationEntry. It carries no taxonomy FK: a picker scoped to one domain is built
 // from usage (which roles in that domain already link the entry), not from ownership.
-// Soft-deleted (null = live): a deleted row leaves the pickers but keeps its links
-// resolving, so uniqueness among live rows is enforced in the service rather than by a DB
-// constraint — a soft-deleted programme name stays reusable.
+// No soft delete and no review workflow: `status` is the same DRAFT/ACTIVE publish flag a
+// CareerLibraryEntry carries, and `(level, programme)` is unique in the DB — with no
+// soft-deleted rows to leave a name occupied, the constraint can live where it belongs.
 // The flat qualification*/certifications* strings on CareerLibraryEntry are the older,
 // free-text layer and are intentionally left untouched — they carry descriptive prose from
 // the source workbook, not a list, so there is nothing to dual-write. ---
@@ -543,23 +558,21 @@ enum EducationPathLevel {
 }
 
 model EducationEntry {
-  id              String             @id @default(cuid())
-  level           EducationPathLevel
-  programme       String // e.g. "B.Tech Computer Science"
-  description     String?
-  deletedAt       DateTime?
-  // Review workflow (see `ReviewStatus`). `submittedBy` is the proposing user; the reviewer
-  // fields are stamped when an admin approves or rejects it.
-  status          ReviewStatus       @default(APPROVED)
-  submittedBy     String?
-  reviewedBy      String?
-  reviewedAt      DateTime?
-  rejectionReason String?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  id          String              @id @default(cuid())
+  level       EducationPathLevel
+  programme   String // e.g. "B.Tech Computer Science"
+  // Longer prose about the requirement at this level. Seeded per level from the career
+  // workbook's explanation columns (see prisma/seed-education-path.ts).
+  description String?
+  // DRAFT is not offered in the pickers; ACTIVE is. Same publish flag as CareerLibraryEntry.
+  status      CareerLibraryStatus @default(ACTIVE)
+  submittedBy String? // who added it (audit stamp; not an FK, matching other modules)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
 
   careerLinks CareerEducationEntry[]
 
+  @@unique([level, programme])
   @@index([programme])
   @@index([status])
   @@map("education_entries")

@@ -87,47 +87,121 @@ describe("Education Path (global lookup) + full-detail link items", () => {
       .query({ search: "Test Edu B.Tech CSE", level: "GRADUATE" });
     expect(graduateOnly.body.map((e: { programme: string }) => e.programme)).toEqual(["Test Edu B.Tech CSE"]);
 
-    // Soft delete drops it from the picker; restore brings it back.
+    // Delete is permanent now - the row is gone, not hidden.
     const deleted = await authRequest(app).delete(`/api/v1/career-library/education/${entryId}`);
     expect(deleted.status).toBe(200);
-    expect(deleted.body.deletedAt).not.toBeNull();
     const afterDelete = await authRequest(app)
       .get("/api/v1/career-library/education")
       .query({ search: "Test Edu B.Tech CSE" });
     expect(afterDelete.body).toHaveLength(1);
-    const withDeleted = await authRequest(app)
-      .get("/api/v1/career-library/education")
-      .query({ search: "Test Edu B.Tech CSE", includeDeleted: "true" });
-    expect(withDeleted.body).toHaveLength(2);
-
-    const restored = await authRequest(app).post(`/api/v1/career-library/education/${entryId}/restore`);
-    expect(restored.status).toBe(200);
-    expect(restored.body.deletedAt).toBeNull();
+    expect((await authRequest(app).delete(`/api/v1/career-library/education/${entryId}`)).status).toBe(404);
 
     // 404 on an unknown entry; 400 on a domainId filter that isn't a live domain.
     expect((await authRequest(app).patch("/api/v1/career-library/education/nope").send({ programme: "x" })).status).toBe(404);
     expect((await authRequest(app).get("/api/v1/career-library/education").query({ domainId: "nope" })).status).toBe(400);
+  });
 
-    // A counsellor may propose an entry, but it lands PENDING and stays out of the
-    // default picker until an admin approves it.
-    const counsellorWrite = await request(app)
+  it("a counsellor's entry lands DRAFT; publishing it to ACTIVE is the admin's step", async () => {
+    const proposed = await request(app)
       .post("/api/v1/career-library/education")
       .set("Authorization", bearer("COUNSELLOR", { userId: "counsellor-user-1" }))
       .send({ level: "GRADUATE", programme: "Test Edu Proposed" });
-    expect(counsellorWrite.status).toBe(201);
-    expect(counsellorWrite.body.status).toBe("PENDING");
-    expect(counsellorWrite.body.submittedBy).toBe("counsellor-user-1");
+    expect(proposed.status).toBe(201);
+    expect(proposed.body.status).toBe("DRAFT");
+    expect(proposed.body.submittedBy).toBe("counsellor-user-1");
 
-    const pickerAfterProposal = await authRequest(app)
+    // The default picker is ACTIVE-only, so a DRAFT entry isn't offered...
+    const picker = await authRequest(app)
       .get("/api/v1/career-library/education")
       .query({ search: "Test Edu Proposed" });
-    expect(pickerAfterProposal.body).toHaveLength(0);
+    expect(picker.body).toHaveLength(0);
+    // ...but ?status=DRAFT finds it for review.
+    const drafts = await authRequest(app)
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu Proposed", status: "DRAFT" });
+    expect(drafts.body).toHaveLength(1);
 
-    // Reviewing it is admin-only.
-    const counsellorApprove = await request(app)
-      .post(`/api/v1/career-library/education/${counsellorWrite.body.id}/approve`)
-      .set("Authorization", bearer("COUNSELLOR"));
-    expect(counsellorApprove.status).toBe(403);
+    // Publishing is a plain PATCH, and it's admin-only.
+    const byCounsellor = await request(app)
+      .patch(`/api/v1/career-library/education/${proposed.body.id}`)
+      .set("Authorization", bearer("COUNSELLOR"))
+      .send({ status: "ACTIVE" });
+    expect(byCounsellor.status).toBe(403);
+
+    const published = await authRequest(app)
+      .patch(`/api/v1/career-library/education/${proposed.body.id}`)
+      .send({ status: "ACTIVE" });
+    expect(published.status).toBe(200);
+    expect(published.body.status).toBe("ACTIVE");
+
+    const afterPublish = await authRequest(app)
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu Proposed" });
+    expect(afterPublish.body).toHaveLength(1);
+  });
+
+  it("approves and rejects a counsellor's proposed education entry", async () => {
+    const propose = (programme: string) =>
+      request(app)
+        .post("/api/v1/career-library/education")
+        .set("Authorization", bearer("COUNSELLOR", { userId: "counsellor-user-1" }))
+        .send({ level: "GRADUATE", programme });
+
+    // Approve publishes it into the picker.
+    const ok = await propose("Test Edu Approved Prog");
+    const approved = await authRequest(app).post(`/api/v1/career-library/education/${ok.body.id}/approve`);
+    expect(approved.status).toBe(200);
+    expect(approved.body.status).toBe("ACTIVE");
+    const picker = await authRequest(app)
+      .get("/api/v1/career-library/education")
+      .query({ search: "Test Edu Approved Prog" });
+    expect(picker.body).toHaveLength(1);
+    // Already published — the admin is on a stale queue.
+    expect((await authRequest(app).post(`/api/v1/career-library/education/${ok.body.id}/approve`)).status).toBe(409);
+
+    // Reject deletes the row outright.
+    const doomed = await propose("Test Edu Rejected Prog");
+    const rejected = await authRequest(app).post(`/api/v1/career-library/education/${doomed.body.id}/reject`);
+    expect(rejected.status).toBe(200);
+    expect(rejected.body).toEqual({ id: doomed.body.id, deleted: true });
+    expect(await prisma.educationEntry.findUnique({ where: { id: doomed.body.id } })).toBeNull();
+
+    // Review is admin-only, and unknown ids 404.
+    const self = await propose("Test Edu SelfApprove Prog");
+    const byCounsellor = await request(app)
+      .post(`/api/v1/career-library/education/${self.body.id}/approve`)
+      .set("Authorization", bearer("COUNSELLOR", { userId: "counsellor-user-1" }));
+    expect(byCounsellor.status).toBe(403);
+    expect((await authRequest(app).post("/api/v1/career-library/education/nope/reject")).status).toBe(404);
+  });
+
+  it("refuses to reject an education entry that job roles already link to", async () => {
+    const proposed = await request(app)
+      .post("/api/v1/career-library/education")
+      .set("Authorization", bearer("COUNSELLOR", { userId: "counsellor-user-1" }))
+      .send({ level: "GRADUATE", programme: "Test Edu Linked Prog" });
+
+    // Link it to a job role, then try to reject it — the join rows would cascade away.
+    await authRequest(app)
+      .post("/api/v1/career-library")
+      .send(entryBody({ jobRole: "Test Edu Role Linked", educationEntries: [{ id: proposed.body.id }] }));
+
+    const rejected = await authRequest(app).post(`/api/v1/career-library/education/${proposed.body.id}/reject`);
+    expect(rejected.status).toBe(409);
+    expect(await prisma.educationEntry.findUnique({ where: { id: proposed.body.id } })).not.toBeNull();
+  });
+
+  it("an admin adding an entry publishes it straight to ACTIVE, with a description", async () => {
+    const created = await authRequest(app)
+      .post("/api/v1/career-library/education")
+      .send({
+        level: "POST_GRADUATE",
+        programme: "Test Edu MSc Something",
+        description: "A relevant Master's building on the UG degree.",
+      });
+    expect(created.status).toBe(201);
+    expect(created.body.status).toBe("ACTIVE");
+    expect(created.body.description).toBe("A relevant Master's building on the UG degree.");
   });
 
   it("links education entries to a job role and reuses one global row across roles", async () => {

@@ -179,7 +179,7 @@ A counselling cycle/cohort under an institute.
 | languageId | String? | FK → Language. Nullable at the DB level (pre-language backfill), but the service resolves the default (English) on create, so new projects always carry one. Future: admins pick another language at creation. |
 
 ### `Counsellor`
-Extends `User` (role=COUNSELLOR). Belongs to exactly one institute; assigned to
+Extends `User` (role=COUNSELLOR). Belongs to at most one institute; assigned to
 specific projects via `ProjectCounsellor`.
 
 | Field | Type | Notes |
@@ -187,7 +187,7 @@ specific projects via `ProjectCounsellor`.
 | id | String (cuid) | PK |
 | userId | String | FK → User, unique, cascade delete |
 | counsellorCode | String | unique; auto-generated login id, e.g. `C0001` (see `CodeSequence`), or a supplied legacy/import code |
-| instituteId | String | FK → Institute |
+| instituteId | String? | FK → Institute. Nullable — a counsellor can be created into an unassigned pool with no institute, and picks one up when it's first assigned to a project (`POST /counsellors/{id}/projects`, which backfills this from the project's institute) |
 | mobile | String | unique, E.164 |
 
 ### `ProjectCounsellor`
@@ -344,7 +344,7 @@ cross-table mapping.
 | salaryIndiaMinLPA, salaryIndiaMaxLPA | Float? | best-effort parse of the above; null when unparseable |
 | salaryGlobalRangeText | String? | raw source text, e.g. "$70k–$160k" |
 | salaryGlobalMinUSD, salaryGlobalMaxUSD | Float? | best-effort parse (in USD, not $k); null when unparseable |
-| qualification10th12th | String | required |
+| qualification10th12th | String? | optional — a role need not state a 10+2 entry requirement (every workbook-imported row happens to have one, but the API doesn't demand it) |
 | qualification10th12thExplanation | String? | the "10+2 Explanation" note (yellow column) accompanying the 10th/12th qualification |
 | qualificationGraduation, qualificationPG | String? | source has 3 distinct qualification levels, not 1 |
 | qualificationGraduationDefined, qualificationPGDefined | String? | cleaned/normalized "DEFINED" variants of the graduation/PG qualifications (yellow columns added in the 1808 workbook) |
@@ -353,12 +353,18 @@ cross-table mapping.
 | entranceExamsPG | String[] | PG level |
 | certificationsStudent, certificationsUG | String[] | source distinguishes pre-UG vs. during-UG certification recommendations |
 | topCourses | String[] | tag-style multi-value |
-| status | `CareerLibraryStatus` enum | DRAFT / ACTIVE |
+| status | `CareerLibraryStatus` enum | DRAFT / ACTIVE — the publish flag |
+| reviewStatus | `ReviewStatus` enum | PENDING / APPROVED / REJECTED — orthogonal to `status`: `status` is "is it published", `reviewStatus` is "has an admin agreed it belongs". Defaults to `APPROVED`, so seeded and admin-created rows need no review. A counsellor creating a role gets `PENDING` + `status:DRAFT`, filtered out of every read until an admin approves. **REJECTED is never persisted here** — rejecting a job role deletes the row; the value exists only because the enum is shared with the reference tables. Indexed |
+| reviewedBy, reviewedAt | String?, DateTime? | who approved it, when. `createdBy` doubles as the submitter stamp, so there's no separate `submittedBy` |
 | createdBy, updatedBy | String | User id, or `"seed:career-library-import"` for bulk-imported rows |
 
 ### `CareerLibraryRequest`
 Counsellor-submitted request to add an unlisted career; reviewed by Admin/Super Admin
-before becoming a permanent `CareerLibraryEntry`.
+before becoming a permanent `CareerLibraryEntry`. This is the **lightweight** proposal path —
+a few fields plus a justification, with the admin building the real entry by hand afterwards
+(approving a request never creates one). A counsellor who wants to submit a *complete* role
+posts it to `CareerLibraryEntry` directly and it's held via `reviewStatus` above; both paths
+are live.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -452,16 +458,26 @@ rows are shared across job roles, so linking one must never overwrite another ro
 
 ### Reference-data review — `ReviewStatus`
 
-`EntranceExam`, `Course`, `Institution` and `EducationEntry` each carry the same five
+`EntranceExam`, `Course` and `Institution` each carry the same five
 review columns: `status` (`ReviewStatus` = `PENDING`/`APPROVED`/`REJECTED`, **default
 `APPROVED`**), `submittedBy`, `reviewedBy`, `reviewedAt`, `rejectionReason`, plus an index on
 `status`.
 
-Counsellors may propose any of these four; admins approve or reject. Review is **in place** —
-the row *is* the submission, so approving flips a status rather than creating anything. That
-differs deliberately from `CareerLibraryRequest`, which is a separate ticket for a whole job
-role that an admin reviews and then re-keys into an entry: a 3-to-9-field reference row doesn't
-justify a second table and a retype.
+Counsellors may propose any of these three; admins approve or reject. Review is **in place** —
+the row *is* the submission, so approving flips a status rather than creating anything.
+
+Two tables reach the same outcome by other means:
+
+- `CareerLibraryEntry` carries its own `reviewStatus` (added later, see above) so a counsellor
+  can submit a **complete job role** through the ordinary create route and have it held for
+  approval. Same in-place idea, separate column because the entry already had a `status` that
+  means something else (published vs. not).
+- `EducationEntry` opts out of `ReviewStatus` entirely — its `DRAFT`/`ACTIVE` publish flag
+  already expresses "not in the pickers yet", so its approve/reject endpoints operate on that
+  instead of a fourth status column (see below).
+
+`CareerLibraryRequest` remains a separate ticket, and stays that way: it's a short suggestion
+an admin re-keys into an entry, not a submission that can be published in place.
 
 - The column default is `APPROVED` so the migration leaves the already-seeded library
   (166 exams / 677 institutions / 1,319 courses) visible.
@@ -471,6 +487,9 @@ justify a second table and a retype.
   handled by `reviewOnReuse()` in `career-library.service.ts`.
 - Pickers filter to `APPROVED`; a linked row's `status` is exposed on the career entry's
   `linked*` arrays so the UI can flag a pending/rejected link rather than silently dropping it.
+- Rejecting one of these three **keeps** the row (marked `REJECTED`, with the reason) so it can
+  be reopened. Rejecting a job role or an education entry **deletes** it instead — there's no
+  reuse story for a whole role, and a tombstoned programme would just clutter the lookup.
 
 ### `EducationEntry` / `CareerEducationEntry` — Education Path
 
@@ -483,19 +502,25 @@ once per domain.
 
 | Model | Key fields | Notes |
 |---|---|---|
-| `EducationEntry` | `level` (`EducationPathLevel`), `programme`, `description?`, `deletedAt?` | `(level, programme)` unique among live rows, enforced in the service — not a DB constraint, because soft-deleted rows must leave the name reusable. Indexed on `programme` (typeahead) and `status` |
+| `EducationEntry` | `level` (`EducationPathLevel`), `programme`, `description?`, `status` (`CareerLibraryStatus`), `submittedBy?` | `(level, programme)` **unique in the DB**. Indexed on `programme` (typeahead) and `status`. No `ReviewStatus` columns and no `deletedAt`: `status` is the same `DRAFT`/`ACTIVE` publish flag `CareerLibraryEntry` uses, and delete is permanent. Its `/approve` endpoint publishes `DRAFT`→`ACTIVE`; `/reject` deletes, and refuses while any `CareerEducationEntry` still points at it (those cascade, so it would silently strip the programme from live roles) |
 | `CareerEducationEntry` | `careerEntryId` + `educationEntryId` (composite PK, cascade) | many-to-many; which entries this job role uses. **The only link between an education entry and the taxonomy** — a domain relates to entries transitively, through its roles |
 
 `EducationPathLevel` = `CLASS_10_PLUS_2` \| `GRADUATE` \| `POST_GRADUATE` \|
 `CERTIFICATION_STUDENT` \| `CERTIFICATION_UG`.
 
-- **Soft delete**: a deleted entry leaves the pickers but stays linked, so job roles already
-  using it keep rendering it.
+- **No soft delete.** Deleting an entry is permanent and cascades its `CareerEducationEntry`
+  rows, so every job role that used that programme loses it. This is the one place the
+  Education Path is less forgiving than the taxonomy.
 - **Seeded from the workbook prose.** `prisma/seed-education-path.ts` (`pnpm db:seed:education`,
   also run as the last step of `pnpm db:seed`) derives entries and role links from the flat
   columns: `qualification10th12th` verbatim (26 distinct values across the library),
   `qualificationGraduationDefined` up to `", Recommended focus:"`, the part of
-  `qualificationPG` after a literal `"PG:"`, and both `certifications*` arrays. It yields
+  `qualificationPG` after a literal `"PG:"`, and both `certifications*` arrays. `description`
+  comes from the matching explanation column per level — `qualification10th12thExplanation`,
+  `qualificationGraduationDefined`, `qualificationPGDefined` — which is the one use for the PG
+  boilerplate: unusable as a programme *name*, fine as prose. Certification entries have no
+  such column and carry no description. A programme shared by many roles takes the first
+  non-empty explanation; `--dry-run` reports how many alternatives were discarded. It yields
   **439 programmes and 14,283 role links** over 1,319 job roles. `qualificationPGDefined` and
   `qualificationGraduation` are deliberately **not** mined — they're generated boilerplate
   sentences, not lists. Idempotent, and it never touches the flat columns.

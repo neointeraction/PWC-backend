@@ -58,8 +58,10 @@ describe("Education Path seed — PG parsing", () => {
 describe("Education Path seed — per-role derivation", () => {
   const base = {
     qualification10th12th: "12th PCM from a recognized board",
+    qualification10th12thExplanation: "Minimum aggregate as per institution norms",
     qualificationGraduationDefined: "BTech / BSc, Recommended focus: CS.",
     qualificationPG: "BTech. PG: MTech AI, MSc CS.",
+    qualificationPGDefined: "a relevant Master's building on CS",
     certificationsStudent: ["Python Basics"],
     certificationsUG: ["AWS Cloud Practitioner"],
   };
@@ -68,15 +70,25 @@ describe("Education Path seed — per-role derivation", () => {
     const derived = deriveForEntry(base);
     expect(derived).toEqual(
       expect.arrayContaining([
-        { level: "CLASS_10_PLUS_2", programme: "12th PCM from a recognized board" },
-        { level: "GRADUATE", programme: "BTech" },
-        { level: "GRADUATE", programme: "BSc" },
-        { level: "POST_GRADUATE", programme: "MTech AI" },
-        { level: "POST_GRADUATE", programme: "MSc CS" },
-        { level: "CERTIFICATION_STUDENT", programme: "Python Basics" },
-        { level: "CERTIFICATION_UG", programme: "AWS Cloud Practitioner" },
+        { level: "GRADUATE", programme: "BTech", description: "BTech / BSc, Recommended focus: CS." },
+        { level: "GRADUATE", programme: "BSc", description: "BTech / BSc, Recommended focus: CS." },
+        { level: "POST_GRADUATE", programme: "MTech AI", description: "a relevant Master's building on CS" },
+        { level: "POST_GRADUATE", programme: "MSc CS", description: "a relevant Master's building on CS" },
       ])
     );
+  });
+
+  it("takes each level's description from its own explanation column", () => {
+    const byLevel = Object.fromEntries(deriveForEntry(base).map((d) => [`${d.level} ${d.programme}`, d.description]));
+    // 10+2 explanation, graduation "Defined", PG "Defined" — the PG boilerplate is unusable
+    // as a programme name but is exactly right as prose.
+    expect(byLevel["CLASS_10_PLUS_2 12th PCM from a recognized board"]).toBe(
+      "Minimum aggregate as per institution norms"
+    );
+    expect(byLevel["POST_GRADUATE MTech AI"]).toBe("a relevant Master's building on CS");
+    // Certifications have no explanation column anywhere in the workbook.
+    expect(byLevel["CERTIFICATION_STUDENT Python Basics"]).toBeNull();
+    expect(byLevel["CERTIFICATION_UG AWS Cloud Practitioner"]).toBeNull();
   });
 
   it("dedupes a programme repeated within one role", () => {
@@ -92,8 +104,10 @@ describe("Education Path seed — per-role derivation", () => {
     expect(
       deriveForEntry({
         qualification10th12th: "January",
+        qualification10th12thExplanation: "January",
         qualificationGraduationDefined: "January",
         qualificationPG: "January",
+        qualificationPGDefined: null,
         certificationsStudent: ["January"],
         certificationsUG: ["January"],
       })

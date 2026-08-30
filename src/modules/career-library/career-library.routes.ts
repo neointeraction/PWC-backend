@@ -15,7 +15,6 @@ import {
   createEducationEntrySchema,
   educationEntryIdParamsSchema,
   listEducationEntriesQuerySchema,
-  rejectEducationEntrySchema,
   updateEducationEntrySchema,
   listEntranceExamsQuerySchema,
   listInstitutionsQuerySchema,
@@ -68,8 +67,9 @@ careerLibraryRouter.get(
 );
 
 // --- Education Path entries (global canonical lookup) ---
-// Staff (counsellors included) may propose an entry; a counsellor's lands PENDING and only
-// an admin can approve it into the pickers. Editing/removing a row is Admin.
+// Staff (counsellors included) may propose an entry; a counsellor's lands DRAFT (this table
+// carries DRAFT/ACTIVE, not a ReviewStatus) and only an admin's approve publishes it into
+// the pickers. Reject deletes it. Editing/removing a row is Admin.
 careerLibraryRouter.post(
   "/education",
   ...requireStaff,
@@ -85,14 +85,8 @@ careerLibraryRouter.post(
 careerLibraryRouter.post(
   "/education/:entryId/reject",
   ...requireAdmin,
-  validate({ params: educationEntryIdParamsSchema, body: rejectEducationEntrySchema }),
-  asyncHandler(careerLibraryController.rejectEducationEntry)
-);
-careerLibraryRouter.post(
-  "/education/:entryId/restore",
-  ...requireAdmin,
   validate({ params: educationEntryIdParamsSchema }),
-  asyncHandler(careerLibraryController.restoreEducationEntry)
+  asyncHandler(careerLibraryController.rejectEducationEntry)
 );
 careerLibraryRouter.patch(
   "/education/:entryId",
@@ -107,12 +101,29 @@ careerLibraryRouter.delete(
   asyncHandler(careerLibraryController.deleteEducationEntry)
 );
 
-// Create a library entry (admin). New entries default to DRAFT; publish by setting ACTIVE.
+// Create a library entry (staff). Two paths through the same payload:
+//   - admin/super admin: added straight to the library (DRAFT by default, ACTIVE if asked);
+//   - counsellor: held as PENDING + DRAFT until an admin approves or rejects it below.
 careerLibraryRouter.post(
   "/",
-  ...requireAdmin,
+  ...requireStaff,
   validate({ body: createCareerEntrySchema }),
   asyncHandler(careerLibraryController.createCareerLibraryEntry)
+);
+
+// Review of a counsellor-submitted job role (admin). Approve publishes it; reject deletes
+// it. Declared before "/:id" so the literal sub-paths win.
+careerLibraryRouter.post(
+  "/:id/approve",
+  ...requireAdmin,
+  validate({ params: careerLibraryIdParamsSchema }),
+  asyncHandler(careerLibraryController.approveCareerLibraryEntry)
+);
+careerLibraryRouter.post(
+  "/:id/reject",
+  ...requireAdmin,
+  validate({ params: careerLibraryIdParamsSchema }),
+  asyncHandler(careerLibraryController.rejectCareerLibraryEntry)
 );
 
 // --- Reference data proposed on its own (counsellor) + review (admin) ---

@@ -9,8 +9,11 @@ export const createCounsellorSchema = z.object({
   // Auto-generated (C0001, C0002, ...) when omitted. Optional override for imports.
   counsellorCode: z.string().trim().min(1).optional(),
   password: z.string().min(1).optional(), // temp password from the import sheet; generated if omitted
-  instituteId: z.string().cuid(),
-  // Optional: assign to these projects on creation (each must belong to the institute).
+  // Optional: a counsellor can be created into the pool with no institute yet, and
+  // assigned to one later via POST /counsellors/:id/projects.
+  instituteId: z.string().cuid().optional(),
+  // Optional: assign to these projects on creation (each must belong to instituteId,
+  // so this requires instituteId to be set).
   projectIds: z.array(z.string().cuid()).optional(),
 });
 export type CreateCounsellorInput = z.infer<typeof createCounsellorSchema>;

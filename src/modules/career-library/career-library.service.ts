@@ -83,6 +83,9 @@ export async function listCareerLibraryEntries(query: ListCareerLibraryQuery) {
 
   const where: Prisma.CareerLibraryEntryWhereInput = {
     status: query.status,
+    // APPROVED unless the caller asked otherwise, so a counsellor's pending submission is
+    // invisible to the library (students included) until an admin approves it.
+    reviewStatus: query.reviewStatus,
     aiResilienceGrade: query.aiResilienceGrade,
     ...(query.domainId ? { domainId: query.domainId } : {}),
     ...(Object.keys(domainFilter).length ? { domain: domainFilter } : {}),
@@ -175,7 +178,7 @@ const entryLinkInclude = {
   },
   educationLinks: {
     select: {
-      educationEntry: { select: { id: true, level: true, programme: true, description: true, deletedAt: true, status: true } },
+      educationEntry: { select: { id: true, level: true, programme: true, description: true, status: true } },
     },
     orderBy: { educationEntry: { programme: "asc" } },
   },
@@ -332,9 +335,10 @@ async function resolveInstitutions(items: InstitutionLinkItem[], actor: Actor): 
 }
 
 // Education Path items are scoped to the entry's own domain: a new `{ level, programme }`
-// is written back to that domain (so every future role there inherits it), and an existing
-// `{ id }` must already belong to it — linking another domain's path would silently break
-// the "shown as a tick-list of what THIS domain has" contract.
+// Education entries are global, so a `{ level, programme }` item find-or-creates one shared
+// row and an `{ id }` may be any existing entry. Unlike the exam/course/institution lookups
+// there is no review status to reconcile — an admin adding one inline publishes it ACTIVE,
+// which is what the job-role form (admin-only) implies.
 async function resolveEducationEntries(
   items: EducationLinkItem[],
   actor: Actor
@@ -344,34 +348,32 @@ async function resolveEducationEntries(
   for (const it of items) {
     if (it.id) continue;
     const existing = await prisma.educationEntry.findFirst({
-      where: { level: it.level!, programme: it.programme!, deletedAt: null },
+      where: { level: it.level!, programme: it.programme! },
     });
     const row = existing
-      ? await fillBlanks(
-          existing,
-          { description: it.description },
-          (data) => prisma.educationEntry.update({ where: { id: existing.id }, data }),
-          reviewOnReuse(existing, actor)
+      ? await fillBlanks(existing, { description: it.description }, (data) =>
+          prisma.educationEntry.update({ where: { id: existing.id }, data })
         )
       : await prisma.educationEntry.create({
           data: {
             level: it.level!,
             programme: it.programme!,
             description: it.description,
-            ...reviewOnCreate(actor),
+            submittedBy: actor.userId,
+            status: "ACTIVE",
           },
         });
     resolved.set(row.id, { id: row.id, level: row.level, programme: row.programme });
   }
   if (ids.length) {
     const existing = await prisma.educationEntry.findMany({
-      where: { id: { in: ids }, deletedAt: null },
+      where: { id: { in: ids } },
       select: { id: true, level: true, programme: true },
     });
     if (existing.length !== new Set(ids).size) {
-      throw new BadRequestError("One or more educationEntries ids are invalid or deleted");
+      throw new BadRequestError("One or more educationEntries ids are invalid");
     }
-    // No domain check: entries are global, so any live one may be attached to any role.
+    // No domain check: entries are global, so any of them may be attached to any role.
     for (const r of existing) {
       resolved.set(r.id, { id: r.id, level: r.level, programme: r.programme });
     }
@@ -388,10 +390,17 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
     resolveInstitutions(institutions, actor),
     resolveEducationEntries(educationEntries, actor),
   ]);
+  // An admin's addition is live as submitted and counts as its own approval; a
+  // counsellor's is held for review and forced to DRAFT regardless of what it asked for,
+  // so an unapproved role can never be published by its own submitter.
+  const review = isAdmin(actor)
+    ? { reviewStatus: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date() }
+    : { reviewStatus: "PENDING" as const, status: "DRAFT" as const };
   try {
     const created = await prisma.careerLibraryEntry.create({
       data: {
         ...scalar,
+        ...review,
         createdBy: actor.userId,
         // Dual-write the transitional String[] columns from the resolved names.
         entranceExams: exams.filter((e) => e.level === "UG").map((e) => e.name),
@@ -519,11 +528,12 @@ export async function listCourses(query: ListCoursesQuery) {
 }
 
 // --- Education Path entries (global canonical lookup) ---------------------------
-// Was per-domain (DomainEducationEntry); now a global row like an exam/course/institution,
-// attached to job roles through CareerEducationEntry. Domain scoping survives only as a
-// *usage* filter on the picker, via domainScope() above.
+// A global row like an exam/course/institution, attached to job roles through
+// CareerEducationEntry. Domain scoping survives only as a *usage* filter on the picker,
+// via domainScope() above. No review workflow and no soft delete: `status` is the same
+// DRAFT/ACTIVE publish flag a CareerLibraryEntry carries, and delete is a real delete.
 
-// Ordered by level then programme so the picker groups naturally (10+2 → Graduate → PG →
+// Ordered by level then programme so the picker groups naturally (10+2 -> Graduate -> PG ->
 // certifications), matching the enum's declaration order.
 const educationOrder = [{ level: "asc" }, { programme: "asc" }] as const;
 
@@ -534,7 +544,6 @@ export async function listEducationEntries(query: ListEducationEntriesQuery) {
       level: query.level,
       status: query.status,
       programme: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...(query.includeDeleted ? {} : { deletedAt: null }),
       ...domainScope(query.domainId),
     },
     orderBy: [...educationOrder],
@@ -542,27 +551,27 @@ export async function listEducationEntries(query: ListEducationEntriesQuery) {
   });
 }
 
-async function getLiveEducationEntry(entryId: string) {
+async function getEducationEntry(entryId: string) {
   const entry = await prisma.educationEntry.findUnique({ where: { id: entryId } });
-  if (!entry || entry.deletedAt) throw new NotFoundError("Education path entry not found");
+  if (!entry) throw new NotFoundError("Education path entry not found");
   return entry;
 }
 
-// Unique among *live* rows only, so a soft-deleted programme name can be reused. Now a
-// global check — the same (level, programme) is one row shared by every role that needs it.
+// `(level, programme)` is unique in the DB; this pre-check just turns the constraint
+// violation into a clear 409 instead of a Prisma error.
 async function assertEducationProgrammeFree(
   level: EducationPathLevel,
   programme: string,
   excludeId?: string
 ) {
   const clash = await prisma.educationEntry.findFirst({
-    where: { level, programme, deletedAt: null, ...(excludeId ? { id: { not: excludeId } } : {}) },
+    where: { level, programme, ...(excludeId ? { id: { not: excludeId } } : {}) },
   });
   if (clash) throw new ConflictError("This programme already exists at that level");
 }
 
-// A counsellor's entry lands PENDING and stays out of the pickers until an admin approves
-// it; an admin's is live immediately (and counts as its own approval).
+// An admin's entry is published (ACTIVE) immediately; a counsellor's lands DRAFT and stays
+// out of the pickers until an admin flips it via PATCH.
 export async function createEducationEntry(input: CreateEducationEntryInput, actor: Actor) {
   await assertEducationProgrammeFree(input.level, input.programme);
   const admin = actor.role === "ADMIN" || actor.role === "SUPER_ADMIN";
@@ -572,44 +581,13 @@ export async function createEducationEntry(input: CreateEducationEntryInput, act
       programme: input.programme,
       description: input.description,
       submittedBy: actor.userId,
-      ...(admin
-        ? { status: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date() }
-        : { status: "PENDING" as const }),
+      status: input.status ?? (admin ? "ACTIVE" : "DRAFT"),
     },
   });
 }
-
-// Reviewed in place — the row IS the submission. Re-reviewing a decided row is a 409 (the
-// admin is looking at a stale queue).
-async function reviewEducationEntry(
-  entryId: string,
-  decision: "APPROVED" | "REJECTED",
-  actor: Actor,
-  rejectionReason?: string
-) {
-  const entry = await prisma.educationEntry.findUnique({ where: { id: entryId } });
-  if (!entry || entry.deletedAt) throw new NotFoundError("Education path entry not found");
-  if (entry.status !== "PENDING") {
-    throw new ConflictError(`Education path entry has already been ${entry.status.toLowerCase()}`);
-  }
-  return prisma.educationEntry.update({
-    where: { id: entryId },
-    data: {
-      status: decision,
-      reviewedBy: actor.userId,
-      reviewedAt: new Date(),
-      rejectionReason: decision === "REJECTED" ? rejectionReason ?? null : null,
-    },
-  });
-}
-
-export const approveEducationEntry = (entryId: string, actor: Actor) =>
-  reviewEducationEntry(entryId, "APPROVED", actor);
-export const rejectEducationEntry = (entryId: string, actor: Actor, reason?: string) =>
-  reviewEducationEntry(entryId, "REJECTED", actor, reason);
 
 export async function updateEducationEntry(entryId: string, input: UpdateEducationEntryInput) {
-  const existing = await getLiveEducationEntry(entryId);
+  const existing = await getEducationEntry(entryId);
   const level = input.level ?? existing.level;
   const programme = input.programme ?? existing.programme;
   if (input.level !== undefined || input.programme !== undefined) {
@@ -617,23 +595,21 @@ export async function updateEducationEntry(entryId: string, input: UpdateEducati
   }
   return prisma.educationEntry.update({
     where: { id: entryId },
-    data: { level: input.level, programme: input.programme, description: input.description },
+    data: {
+      level: input.level,
+      programme: input.programme,
+      description: input.description,
+      status: input.status,
+    },
   });
 }
 
-// Soft delete: the row leaves the pickers, but job roles already linked to it keep
-// resolving and still render it.
+// A real delete now that there's no soft-delete column. The CareerEducationEntry rows
+// cascade, so every job role that linked this programme loses it — check usage first.
 export async function deleteEducationEntry(entryId: string) {
-  await getLiveEducationEntry(entryId);
-  return prisma.educationEntry.update({ where: { id: entryId }, data: { deletedAt: new Date() } });
-}
-
-export async function restoreEducationEntry(entryId: string) {
-  const entry = await prisma.educationEntry.findUnique({ where: { id: entryId } });
-  if (!entry) throw new NotFoundError("Education path entry not found");
-  if (!entry.deletedAt) return entry;
-  await assertEducationProgrammeFree(entry.level, entry.programme, entryId);
-  return prisma.educationEntry.update({ where: { id: entryId }, data: { deletedAt: null } });
+  await getEducationEntry(entryId);
+  await prisma.educationEntry.delete({ where: { id: entryId } });
+  return { id: entryId, deleted: true };
 }
 
 // --- Standalone reference-data submissions + review -----------------------------
@@ -766,6 +742,81 @@ export async function deleteCareerEntry(id: string) {
     }),
     prisma.careerLibraryEntry.delete({ where: { id } }),
   ]);
+}
+
+// --- Job role review (counsellor submits a full role, admin decides) ------------
+// The row IS the submission, so approving publishes it in place rather than creating
+// anything. Rejecting hard-deletes it: nothing about an unapproved role is worth keeping,
+// and it keeps the job-role table free of tombstones.
+
+async function findPendingCareerEntry(id: string) {
+  const entry = await prisma.careerLibraryEntry.findUnique({
+    where: { id },
+    select: { id: true, reviewStatus: true },
+  });
+  if (!entry) {
+    throw new NotFoundError("Career library entry not found");
+  }
+  // Anything already decided means the admin is working from a stale queue.
+  if (entry.reviewStatus !== "PENDING") {
+    throw new ConflictError(`Career library entry has already been ${entry.reviewStatus.toLowerCase()}`);
+  }
+  return entry;
+}
+
+// Approve publishes the role: APPROVED review state *and* ACTIVE, so a single admin action
+// puts it in the library rather than leaving a DRAFT nobody remembers to flip.
+export async function approveCareerEntry(id: string, actor: Actor) {
+  await findPendingCareerEntry(id);
+  await prisma.careerLibraryEntry.update({
+    where: { id },
+    data: {
+      reviewStatus: "APPROVED",
+      status: "ACTIVE",
+      reviewedBy: actor.userId,
+      reviewedAt: new Date(),
+    },
+  });
+  return getCareerLibraryEntryById(id);
+}
+
+// Reject deletes. Its link rows (exams/courses/institutions/education) cascade, and any
+// canonical lookup the submission created stays behind — those are reviewed on their own.
+export async function rejectCareerEntry(id: string) {
+  await findPendingCareerEntry(id);
+  await deleteCareerEntry(id);
+  return { id, deleted: true };
+}
+
+// --- Education Path review -----------------------------------------------------
+// Education entries carry DRAFT/ACTIVE rather than a ReviewStatus (see `EducationEntry`),
+// so "pending" here means DRAFT: a counsellor's create lands there, an admin's goes
+// straight to ACTIVE. Approving publishes it into the pickers.
+
+export async function approveEducationEntry(entryId: string) {
+  const existing = await getEducationEntry(entryId);
+  if (existing.status === "ACTIVE") {
+    throw new ConflictError("Education path entry is already active");
+  }
+  return prisma.educationEntry.update({ where: { id: entryId }, data: { status: "ACTIVE" } });
+}
+
+// Reject deletes, matching the job-role flow. Refused when the programme is already linked
+// to job roles: `CareerEducationEntry` cascades, so deleting would silently strip the
+// programme from every one of them. Unpublish it with PATCH ?status=DRAFT instead.
+export async function rejectEducationEntry(entryId: string) {
+  const existing = await getEducationEntry(entryId);
+  if (existing.status === "ACTIVE") {
+    throw new ConflictError("Education path entry is already active — unpublish it before rejecting");
+  }
+  const linked = await prisma.careerEducationEntry.count({ where: { educationEntryId: entryId } });
+  if (linked > 0) {
+    throw new ConflictError(
+      `Education path entry is linked to ${linked} job role(s) — unlink them before rejecting`
+    );
+  }
+  await prisma.educationEntry.delete({ where: { id: entryId } });
+  return { id: entryId, deleted: true };
 }
 
 // --- Ratification requests -----------------------------------------------------

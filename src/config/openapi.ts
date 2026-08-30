@@ -87,7 +87,6 @@ import {
   createEducationEntrySchema,
   educationEntryIdParamsSchema,
   listEducationEntriesQuerySchema,
-  rejectEducationEntrySchema,
   updateEducationEntrySchema,
 } from "../modules/career-library/career-library.schema.js";
 import { previewScoreBodySchema } from "../modules/assessment/assessment.schema.js";
@@ -615,7 +614,9 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/career-library",
   tags: ["Career Library"],
-  summary: "Search/list career library entries",
+  summary:
+    "Search/list career library entries. Defaults to status=ACTIVE + reviewStatus=APPROVED; " +
+    "pass reviewStatus=PENDING (with status=DRAFT) for the admin review queue of counsellor submissions.",
   request: { query: listCareerLibraryQuerySchema },
   responses: {
     200: {
@@ -1137,7 +1138,10 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-library",
   tags: ["Career Library"],
-  summary: "Create a career library entry (defaults to DRAFT; publish by setting ACTIVE). Admin only.",
+  summary:
+    "Create a career library entry. Staff — an admin's is added to the library as submitted " +
+    "(DRAFT by default; publish by setting ACTIVE), while a counsellor's is held as " +
+    "reviewStatus PENDING + DRAFT and stays out of the library until an admin approves it.",
   request: { body: { content: { "application/json": { schema: createCareerEntrySchema } } } },
   responses: {
     201: { description: "Entry created", content: { "application/json": { schema: genericObjectSchema } } },
@@ -1167,6 +1171,32 @@ registry.registerPath({
   responses: {
     204: { description: "Deleted" },
     404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/{id}/approve",
+  tags: ["Career Library"],
+  summary:
+    "Approve a counsellor-submitted job role (admin). Publishes it in one step — reviewStatus APPROVED and status ACTIVE. 409 if it was already decided.",
+  request: { params: careerLibraryIdParamsSchema },
+  responses: {
+    200: { description: "Approved entry", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/{id}/reject",
+  tags: ["Career Library"],
+  summary:
+    "Reject a counsellor-submitted job role (admin). Deletes it permanently — nothing is kept. 409 if it was already decided.",
+  request: { params: careerLibraryIdParamsSchema },
+  responses: {
+    200: { description: "Rejected and deleted", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
   },
 });
 
@@ -1652,7 +1682,7 @@ registry.registerPath({
   path: "/api/v1/career-library/education",
   tags: eduTag,
   summary:
-    "List Education Path entries — the qualifications/programmes a job role can be linked to (?search, ?level, ?status, ?includeDeleted=true; ?domainId scopes to entries already used by roles in that domain). Any authenticated user.",
+    "List Education Path entries — the qualifications/programmes a job role can be linked to (?search, ?level, ?status=DRAFT|ACTIVE defaulting to ACTIVE; ?domainId scopes to entries already used by roles in that domain). Any authenticated user.",
   request: { query: listEducationEntriesQuerySchema },
   responses: {
     200: { description: "Education path entries", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
@@ -1664,7 +1694,7 @@ registry.registerPath({
   path: "/api/v1/career-library/education",
   tags: eduTag,
   summary:
-    "Propose an Education Path entry. Staff — a counsellor's lands PENDING and stays out of the pickers until approved; an admin's is APPROVED immediately. 409 if that programme already exists at that level.",
+    "Add an Education Path entry. Staff — a counsellor's lands DRAFT and stays out of the pickers until an admin publishes it (PATCH status: ACTIVE); an admin's is ACTIVE immediately. 409 if that programme already exists at that level.",
   request: { body: { content: { "application/json": { schema: createEducationEntrySchema } } } },
   responses: { 201: { description: "Created education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1672,23 +1702,15 @@ registry.registerPath({
   method: "patch",
   path: "/api/v1/career-library/education/{entryId}",
   tags: eduTag,
-  summary: "Update an Education Path entry (admin). Send description: null to clear it. 409 on a clash with another live entry at that level.",
+  summary: "Update an Education Path entry (admin) — including the DRAFT→ACTIVE publish step via status. Send description: null to clear it. 409 on a clash with another entry at that level.",
   request: { params: educationEntryIdParamsSchema, body: { content: { "application/json": { schema: updateEducationEntrySchema } } } },
   responses: { 200: { description: "Updated education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
-});
-registry.registerPath({
-  method: "delete",
-  path: "/api/v1/career-library/education/{entryId}",
-  tags: eduTag,
-  summary: "Soft-delete an Education Path entry (admin). Job roles already linked keep resolving it.",
-  request: { params: educationEntryIdParamsSchema },
-  responses: { 200: { description: "Soft-deleted education path entry", content: { "application/json": { schema: genericObjectSchema } } }, 404: errorResponses[404] },
 });
 registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/education/{entryId}/approve",
   tags: eduTag,
-  summary: "Approve a pending Education Path entry (admin). 409 if it was already approved or rejected.",
+  summary: "Approve a proposed Education Path entry (admin) — publishes the DRAFT to ACTIVE so it appears in the pickers. 409 if it is already ACTIVE.",
   request: { params: educationEntryIdParamsSchema },
   responses: { 200: { description: "Approved education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1696,17 +1718,17 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/education/{entryId}/reject",
   tags: eduTag,
-  summary: "Reject a pending Education Path entry (admin), optionally with a reason. 409 if it was already decided.",
-  request: { params: educationEntryIdParamsSchema, body: { content: { "application/json": { schema: rejectEducationEntrySchema } } } },
-  responses: { 200: { description: "Rejected education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+  summary: "Reject a proposed Education Path entry (admin) — deletes it permanently. 409 if it is already ACTIVE, or if job roles still link to it.",
+  request: { params: educationEntryIdParamsSchema },
+  responses: { 200: { description: "Rejected and deleted", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 registry.registerPath({
-  method: "post",
-  path: "/api/v1/career-library/education/{entryId}/restore",
+  method: "delete",
+  path: "/api/v1/career-library/education/{entryId}",
   tags: eduTag,
-  summary: "Restore a soft-deleted Education Path entry (admin). 409 if a live entry now holds that programme at that level.",
+  summary: "Delete an Education Path entry (admin). Permanent — the links from every job role using it cascade away.",
   request: { params: educationEntryIdParamsSchema },
-  responses: { 200: { description: "Restored education path entry", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+  responses: { 200: { description: "Deleted education path entry", content: { "application/json": { schema: genericObjectSchema } } }, 404: errorResponses[404] },
 });
 
 export function generateOpenApiDocument() {

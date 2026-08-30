@@ -24,6 +24,16 @@
 //   CERTIFICATION_STUDENT <- certificationsStudent[] (already a list)
 //   CERTIFICATION_UG      <- certificationsUG[] (already a list)
 //
+// DESCRIPTIONS come from the matching explanation column for the level:
+//   CLASS_10_PLUS_2 <- qualification10th12thExplanation
+//   GRADUATE        <- qualificationGraduationDefined
+//   POST_GRADUATE   <- qualificationPGDefined
+// The certification levels have no explanation column, so those entries carry none. Note
+// this is why qualificationPGDefined is read at all: its boilerplate is unusable as a
+// programme NAME but is fine as descriptive prose. A programme is shared by many roles
+// whose explanation text differs, so the first non-empty one wins and the rest are
+// reported as conflicts by --dry-run.
+//
 // Deliberately NOT used: qualificationPGDefined and qualificationGraduation are generated
 // boilerplate sentences ("a relevant Master's / PG programme building on X, or an
 // equivalent specialization aligned with Y"). Splitting those yields fragments, not
@@ -98,26 +108,43 @@ export function postGraduateProgrammes(value: string | null): string[] {
 interface Derived {
   level: EducationPathLevel;
   programme: string;
+  description: string | null;
 }
 
 export function deriveForEntry(entry: {
-  qualification10th12th: string;
+  qualification10th12th: string | null;
+  qualification10th12thExplanation?: string | null;
   qualificationGraduationDefined: string | null;
   qualificationPG: string | null;
+  qualificationPGDefined?: string | null;
   certificationsStudent: string[];
   certificationsUG: string[];
 }): Derived[] {
   const out: Derived[] = [];
-  const push = (level: EducationPathLevel, programme: string) => {
+  const push = (level: EducationPathLevel, programme: string | null | undefined, description: string | null) => {
     const p = clean(programme);
-    if (usable(p)) out.push({ level, programme: p });
+    if (usable(p)) out.push({ level, programme: p, description });
   };
 
-  push("CLASS_10_PLUS_2", entry.qualification10th12th);
-  for (const p of graduationProgrammes(entry.qualificationGraduationDefined)) push("GRADUATE", p);
-  for (const p of postGraduateProgrammes(entry.qualificationPG)) push("POST_GRADUATE", p);
-  for (const c of entry.certificationsStudent) push("CERTIFICATION_STUDENT", c);
-  for (const c of entry.certificationsUG) push("CERTIFICATION_UG", c);
+  // Descriptions keep their source punctuation — they're prose, not names, so clean()'s
+  // trailing-punctuation trim would be wrong here.
+  const describe = (value: string | null | undefined): string | null => {
+    const v = (value ?? "").trim().replace(/\s+/g, " ");
+    return v && !JUNK.test(v) ? v : null;
+  };
+  const class1012Description = describe(entry.qualification10th12thExplanation);
+  const graduateDescription = describe(entry.qualificationGraduationDefined);
+  const postGraduateDescription = describe(entry.qualificationPGDefined);
+
+  push("CLASS_10_PLUS_2", entry.qualification10th12th, class1012Description);
+  for (const p of graduationProgrammes(entry.qualificationGraduationDefined)) {
+    push("GRADUATE", p, graduateDescription);
+  }
+  for (const p of postGraduateProgrammes(entry.qualificationPG)) {
+    push("POST_GRADUATE", p, postGraduateDescription);
+  }
+  for (const c of entry.certificationsStudent) push("CERTIFICATION_STUDENT", c, null);
+  for (const c of entry.certificationsUG) push("CERTIFICATION_UG", c, null);
 
   // One role can name the same programme twice (e.g. duplicated certs) - dedupe per role
   // so the link insert isn't asked for the same pair twice.
@@ -136,23 +163,40 @@ export async function seedEducationPath({ dryRun = false } = {}) {
       id: true,
       jobRole: true,
       qualification10th12th: true,
+      qualification10th12thExplanation: true,
       qualificationGraduationDefined: true,
       qualificationPG: true,
+      qualificationPGDefined: true,
       certificationsStudent: true,
       certificationsUG: true,
     },
   });
 
   // level -> programme -> job role ids that reference it
-  const wanted = new Map<string, { level: EducationPathLevel; programme: string; careerIds: string[] }>();
+  interface Wanted {
+    level: EducationPathLevel;
+    programme: string;
+    description: string | null;
+    careerIds: string[];
+  }
+  const wanted = new Map<string, Wanted>();
   let rolesWithNothing = 0;
+  // Same programme, different explanation text on another role. First non-empty wins.
+  let descriptionConflicts = 0;
 
   for (const entry of entries) {
     const derived = deriveForEntry(entry);
     if (derived.length === 0) rolesWithNothing++;
     for (const d of derived) {
       const key = `${d.level} ${d.programme}`;
-      const bucket = wanted.get(key) ?? { level: d.level, programme: d.programme, careerIds: [] };
+      const bucket = wanted.get(key) ?? {
+        level: d.level,
+        programme: d.programme,
+        description: null,
+        careerIds: [],
+      };
+      if (bucket.description == null) bucket.description = d.description;
+      else if (d.description != null && d.description !== bucket.description) descriptionConflicts++;
       bucket.careerIds.push(entry.id);
       wanted.set(key, bucket);
     }
@@ -169,7 +213,9 @@ export async function seedEducationPath({ dryRun = false } = {}) {
 
   console.log(`career library entries read: ${entries.length}`);
   console.log(`roles yielding no education path: ${rolesWithNothing}`);
+  const described = [...wanted.values()].filter((w) => w.description != null).length;
   console.log(`distinct programmes: ${wanted.size}  |  role links: ${totalLinks}`);
+  console.log(`with a description: ${described}  |  discarded conflicting descriptions: ${descriptionConflicts}`);
   for (const level of LEVELS) {
     const rows = [...wanted.values()].filter((w) => w.level === level);
     const links = rows.reduce((n, w) => n + w.careerIds.length, 0);
@@ -185,7 +231,8 @@ export async function seedEducationPath({ dryRun = false } = {}) {
         .sort((a, b) => a.careerIds.length - b.careerIds.length);
       console.log(`\n${level} - 10 rarest:`);
       for (const r of rows.slice(0, 10)) {
-        console.log(`   ${String(r.careerIds.length).padStart(4)}x  ${r.programme.slice(0, 90)}`);
+        const desc = r.description ? `  -- ${r.description.slice(0, 60)}` : "";
+        console.log(`   ${String(r.careerIds.length).padStart(4)}x  ${r.programme.slice(0, 60)}${desc}`);
       }
     }
     console.log("\n--dry-run: nothing written.");
@@ -195,18 +242,33 @@ export async function seedEducationPath({ dryRun = false } = {}) {
   // Reuse a live entry if one already exists (an admin may have added it by hand), so this
   // stays idempotent and never duplicates a programme.
   let created = 0;
+  let describedExisting = 0;
   const idByKey = new Map<string, string>();
   for (const w of wanted.values()) {
-    const existing = await prisma.educationEntry.findFirst({
-      where: { level: w.level, programme: w.programme, deletedAt: null },
-      select: { id: true },
+    const existing = await prisma.educationEntry.findUnique({
+      where: { level_programme: { level: w.level, programme: w.programme } },
+      select: { id: true, description: true },
     });
     if (existing) {
+      // Backfill a description onto a row that predates this column being sourced, but
+      // never overwrite one an admin may have edited by hand.
+      if (existing.description == null && w.description != null) {
+        await prisma.educationEntry.update({
+          where: { id: existing.id },
+          data: { description: w.description },
+        });
+        describedExisting++;
+      }
       idByKey.set(`${w.level} ${w.programme}`, existing.id);
       continue;
     }
     const row = await prisma.educationEntry.create({
-      data: { level: w.level, programme: w.programme, status: "APPROVED" },
+      data: {
+        level: w.level,
+        programme: w.programme,
+        description: w.description,
+        status: "ACTIVE",
+      },
       select: { id: true },
     });
     idByKey.set(`${w.level} ${w.programme}`, row.id);
@@ -224,7 +286,10 @@ export async function seedEducationPath({ dryRun = false } = {}) {
     skipDuplicates: true, // re-runs add only what's missing
   });
 
-  console.log(`\nwrote ${created} new education entries, ${linked} new role links.`);
+  console.log(
+    `\nwrote ${created} new education entries, ${linked} new role links` +
+      `, backfilled ${describedExisting} descriptions.`
+  );
   return { programmes: wanted.size, links: totalLinks, created, linked };
 }
 

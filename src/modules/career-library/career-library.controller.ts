@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { UnauthorizedError } from "../../common/errors/AppError.js";
+import { NotFoundError, UnauthorizedError } from "../../common/errors/AppError.js";
 import * as careerLibraryService from "./career-library.service.js";
 import type { Actor } from "./career-library.service.js";
 import type {
@@ -34,6 +34,14 @@ export async function getCareerLibraryFilters(_req: Request, res: Response): Pro
 export async function getCareerLibraryEntry(req: Request, res: Response): Promise<void> {
   const { id } = req.params as unknown as CareerLibraryIdParams;
   const entry = await careerLibraryService.getCareerLibraryEntryById(id);
+  // The list filters to APPROVED for everyone; do the same for a direct fetch so a student
+  // holding an id can't read a role that's still awaiting review. Staff need to see it —
+  // that's the review screen.
+  const { role } = actorOf(req);
+  const staff = role === "COUNSELLOR" || role === "ADMIN" || role === "SUPER_ADMIN";
+  if (entry.reviewStatus !== "APPROVED" && !staff) {
+    throw new NotFoundError("Career library entry not found");
+  }
   res.status(200).json(entry);
 }
 
@@ -54,6 +62,19 @@ export async function deleteCareerLibraryEntry(req: Request, res: Response): Pro
   const { id } = req.params as unknown as CareerLibraryIdParams;
   await careerLibraryService.deleteCareerEntry(id);
   res.status(204).send();
+}
+
+// --- Job role review (admin decides on a counsellor's submission) ---
+
+export async function approveCareerLibraryEntry(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as CareerLibraryIdParams;
+  const entry = await careerLibraryService.approveCareerEntry(id, actorOf(req));
+  res.status(200).json(entry);
+}
+
+export async function rejectCareerLibraryEntry(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as CareerLibraryIdParams;
+  res.status(200).json(await careerLibraryService.rejectCareerEntry(id));
 }
 
 // --- Dropdown / typeahead lookups ---
@@ -156,17 +177,6 @@ export async function createEducationEntry(req: Request, res: Response): Promise
   res.status(201).json(await careerLibraryService.createEducationEntry(req.body, actorOf(req)));
 }
 
-export async function approveEducationEntry(req: Request, res: Response): Promise<void> {
-  const { entryId } = req.params as unknown as EducationEntryIdParams;
-  res.status(200).json(await careerLibraryService.approveEducationEntry(entryId, actorOf(req)));
-}
-
-export async function rejectEducationEntry(req: Request, res: Response): Promise<void> {
-  const { entryId } = req.params as unknown as EducationEntryIdParams;
-  res
-    .status(200)
-    .json(await careerLibraryService.rejectEducationEntry(entryId, actorOf(req), req.body.rejectionReason));
-}
 
 export async function updateEducationEntry(req: Request, res: Response): Promise<void> {
   const { entryId } = req.params as unknown as EducationEntryIdParams;
@@ -178,7 +188,13 @@ export async function deleteEducationEntry(req: Request, res: Response): Promise
   res.status(200).json(await careerLibraryService.deleteEducationEntry(entryId));
 }
 
-export async function restoreEducationEntry(req: Request, res: Response): Promise<void> {
+export async function approveEducationEntry(req: Request, res: Response): Promise<void> {
   const { entryId } = req.params as unknown as EducationEntryIdParams;
-  res.status(200).json(await careerLibraryService.restoreEducationEntry(entryId));
+  res.status(200).json(await careerLibraryService.approveEducationEntry(entryId));
 }
+
+export async function rejectEducationEntry(req: Request, res: Response): Promise<void> {
+  const { entryId } = req.params as unknown as EducationEntryIdParams;
+  res.status(200).json(await careerLibraryService.rejectEducationEntry(entryId));
+}
+

@@ -140,12 +140,22 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
     expect(noLevel.status).toBe(400);
   });
 
-  it("403s a counsellor hitting the admin write path (dropdowns stay open)", async () => {
+  it("holds a counsellor's write for review, and keeps the dropdowns open to them", async () => {
+    // The write path is staff now, but a counsellor's entry is parked PENDING rather than
+    // landing in the library — see career-library-writes.test.ts for the full review flow.
     const write = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", bearer("COUNSELLOR"))
       .send(entryBody({ jobRole: "Test Norm Role NoPerm" }));
-    expect(write.status).toBe(403);
+    expect(write.status).toBe(201);
+    expect(write.body.reviewStatus).toBe("PENDING");
+
+    // Publishing it is not theirs to do.
+    const publish = await request(app)
+      .patch(`/api/v1/career-library/${write.body.id}`)
+      .set("Authorization", bearer("COUNSELLOR"))
+      .send({ status: "ACTIVE" });
+    expect(publish.status).toBe(403);
 
     const dropdown = await request(app)
       .get("/api/v1/career-library/courses")
@@ -242,10 +252,11 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
     const emptyString = await authRequest(app).patch(`/api/v1/career-library/${id}`).send({ roleOverview: "" });
     expect(emptyString.status).toBe(400);
 
-    // NOT NULL columns reject null.
+    // NOT NULL columns reject null. (qualification10th12th is nullable now — see the
+    // dedicated case in career-library-writes.test.ts.)
     const notNull = await authRequest(app)
       .patch(`/api/v1/career-library/${id}`)
-      .send({ qualification10th12th: null });
+      .send({ oneLineDescription: null });
     expect(notNull.status).toBe(400);
   });
 });

@@ -139,9 +139,16 @@ instead. Password change + forgot/reset flows are built (`src/modules/auth/`), a
 Counsellor CRUD (`src/modules/counsellors/` — create/list/get/update/delete + project
 assign/unassign) and Project CRUD (`src/modules/projects/` — create/list/get/update/
 delete; `status:CLOSED` is the soft-close, delete is blocked when students exist) exist.
-Career Library now has writes (`src/modules/career-library/` — admin create/update/delete
-with a `DRAFT`→`ACTIVE` publish step) plus the counsellor ratification-request flow
-(submit → admin approve/reject). Its normalized links (exams/courses/colleges) take the full
+Career Library now has writes (`src/modules/career-library/` — create/update/delete
+with a `DRAFT`→`ACTIVE` publish step). **Adding a job role has two paths through the same
+`POST /career-library` route**: an admin's entry is `reviewStatus:APPROVED` immediately (send
+`status:"ACTIVE"` to publish in one call), while a counsellor's is forced to
+`reviewStatus:PENDING` + `status:DRAFT` and hidden from every read (list defaults to
+`reviewStatus=APPROVED`; a non-staff by-id fetch 404s) until
+`POST /career-library/:id/approve` (→ APPROVED **and** ACTIVE) or `/reject` (→ **hard
+delete**). The older `CareerLibraryRequest` ticket flow (submit → admin approve/reject)
+still exists alongside it as the lightweight "flag a missing career" path — approving one
+still does not create an entry. Its normalized links (exams/courses/colleges) take the full
 canonical field set on an inline "add new" and **blank-fill** rather than overwrite a row that
 already exists; there is deliberately no endpoint yet for editing a canonical lookup row.
 **Education Path** is a global canonical lookup (`EducationEntry`, CRUD under
@@ -152,10 +159,15 @@ dual-written back to the flat `qualification*`/`certifications*` strings. Those 
 are the *source* the table was seeded from — `prisma/seed-education-path.ts`
 (`pnpm db:seed:education`, also the last step of `pnpm db:seed`) derives 439 programmes and
 14,283 role links from them; it's idempotent and leaves the prose columns alone. **Reference data is
-review-gated**: counsellors may propose exams/courses/institutions/education-path entries
-(staff-level POSTs), which land `PENDING` and stay out of the pickers until an admin
-approves/rejects them. Review is *in place* via a shared `ReviewStatus` column on the four
-tables — not a separate ticket like `CareerLibraryRequest` (job roles), which stays as it is. The student assessment **Report** is built
+review-gated**: counsellors may propose exams/courses/institutions (staff-level POSTs), which
+land `PENDING` and stay out of the pickers until an admin approves/rejects them. Review is
+*in place* via a shared `ReviewStatus` column on those three tables, and rejecting one
+*keeps* the row as `REJECTED` so re-proposing reopens it. **Education entries are the
+exception**: they carry the `DRAFT`/`ACTIVE` publish flag instead (counsellor adds → `DRAFT`,
+admin adds → `ACTIVE`), have no reviewer/rejection columns and no soft delete — publish via
+`PATCH status` or the equivalent `POST /education/:entryId/approve`, while
+`POST /education/:entryId/reject` **deletes** (409 if job roles still link to it), and their
+`DELETE` is likewise permanent and cascades the role links. The student assessment **Report** is built
 (`src/modules/reports/` — `GET /reports/students/:id/assessment` assembles the full report
 as JSON for the frontend to render/print) and a dev scoring tester is served at
 `/dev/assessment` (non-prod, `public/assessment-tester.html`, backed by

@@ -2,8 +2,8 @@ import { z } from "zod";
 
 const AI_RESILIENCE_GRADES = ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"] as const;
 const CAREER_LIBRARY_STATUSES = ["DRAFT", "ACTIVE"] as const;
-// Review state of counsellor-proposable reference data (exams/courses/institutions and the
-// domain education path). Mirrors the prisma `ReviewStatus` enum.
+// Review state of anything a counsellor can propose — job roles as well as the reference
+// data (exams/courses/institutions). Mirrors the prisma `ReviewStatus` enum.
 const REVIEW_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
 
 export const listCareerLibraryQuerySchema = z.object({
@@ -16,6 +16,9 @@ export const listCareerLibraryQuerySchema = z.object({
   aiResilienceGrade: z.enum(AI_RESILIENCE_GRADES).optional(),
   // Defaults to ACTIVE-only — callers who need drafts (e.g. Admin review) pass it explicitly.
   status: z.enum(CAREER_LIBRARY_STATUSES).default("ACTIVE"),
+  // Defaults to APPROVED-only so counsellor submissions awaiting review never surface in
+  // the library. The admin review queue passes PENDING (and clears `status` to DRAFT).
+  reviewStatus: z.enum(REVIEW_STATUSES).default("APPROVED"),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 });
@@ -26,7 +29,9 @@ export const careerLibraryIdParamsSchema = z.object({
 });
 export type CareerLibraryIdParams = z.infer<typeof careerLibraryIdParamsSchema>;
 
-// --- Entry writes (admin/super admin) ---
+// --- Entry writes (staff) ---
+// An admin's create is live as submitted; a counsellor's is the same payload but lands
+// PENDING review + DRAFT, and only an admin's approve puts it in the library.
 
 const QUALIFICATION_LEVELS = ["UG", "PG"] as const;
 // Mirrors the prisma `EducationPathLevel` enum (10+2 / Graduate / Post-Graduate /
@@ -137,7 +142,7 @@ export const createCareerEntrySchema = z.object({
   salaryGlobalRangeText: z.string().trim().min(1).nullish(),
   salaryGlobalMinUSD: z.number().nullish(),
   salaryGlobalMaxUSD: z.number().nullish(),
-  qualification10th12th: z.string().trim().min(1),
+  qualification10th12th: z.string().trim().min(1).nullish(),
   qualification10th12thExplanation: z.string().trim().min(1).nullish(),
   qualificationGraduation: z.string().trim().min(1).nullish(),
   qualificationGraduationDefined: z.string().trim().min(1).nullish(),
@@ -155,7 +160,8 @@ export const createCareerEntrySchema = z.object({
   // Domain-level Education Path (see `educationLinkItemSchema`).
   educationEntries: z.array(educationLinkItemSchema).default([]),
   // New entries default to DRAFT — an admin flips them to ACTIVE (the "ratify"/publish
-  // step) once reviewed. ACTIVE-on-create is allowed for trusted bulk additions.
+  // step) once reviewed. ACTIVE-on-create is allowed for trusted bulk additions, but only
+  // for an admin: a counsellor's submission is forced to DRAFT + PENDING in the service.
   status: z.enum(CAREER_LIBRARY_STATUSES).default("DRAFT"),
 });
 export type CreateCareerEntryInput = z.infer<typeof createCareerEntrySchema>;
@@ -212,14 +218,15 @@ export type ListCoursesQuery = z.infer<typeof listCoursesQuerySchema>;
 export const educationEntryIdParamsSchema = z.object({ entryId: z.string().min(1) });
 export type EducationEntryIdParams = z.infer<typeof educationEntryIdParamsSchema>;
 
+const EDUCATION_STATUSES = ["DRAFT", "ACTIVE"] as const;
+
 export const listEducationEntriesQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
   level: z.enum(EDUCATION_PATH_LEVELS).optional(),
-  // Pickers show APPROVED rows only; an admin review queue passes PENDING/REJECTED.
-  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
+  // Pickers show ACTIVE rows only; pass DRAFT to review what's not published yet.
+  status: z.enum(EDUCATION_STATUSES).default("ACTIVE"),
   // Scope to entries already linked to job roles in this domain. Omit for the global list.
   domainId: z.string().min(1).optional(),
-  includeDeleted: z.coerce.boolean().default(false),
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
 export type ListEducationEntriesQuery = z.infer<typeof listEducationEntriesQuerySchema>;
@@ -228,6 +235,8 @@ export const createEducationEntrySchema = z.object({
   level: z.enum(EDUCATION_PATH_LEVELS),
   programme: z.string().trim().min(1),
   description: z.string().trim().min(1).nullish(),
+  // Defaults by role: ACTIVE for an admin, DRAFT for a counsellor. Pass it to override.
+  status: z.enum(EDUCATION_STATUSES).optional(),
 });
 export type CreateEducationEntryInput = z.infer<typeof createEducationEntrySchema>;
 
@@ -235,14 +244,10 @@ export const updateEducationEntrySchema = z.object({
   level: z.enum(EDUCATION_PATH_LEVELS).optional(),
   programme: z.string().trim().min(1).optional(),
   description: z.string().trim().min(1).nullish(), // null clears it
+  // This is the publish step: flip a DRAFT entry to ACTIVE to put it in the pickers.
+  status: z.enum(EDUCATION_STATUSES).optional(),
 });
 export type UpdateEducationEntryInput = z.infer<typeof updateEducationEntrySchema>;
-
-// Reject carries an optional reason back to the submitting counsellor; approve takes no body.
-export const rejectEducationEntrySchema = z.object({
-  rejectionReason: z.string().trim().min(1).optional(),
-});
-export type RejectEducationEntryInput = z.infer<typeof rejectEducationEntrySchema>;
 
 // --- Ratification requests (counsellor-submitted, admin-reviewed) ---
 

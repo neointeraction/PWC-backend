@@ -961,19 +961,27 @@ unknown or soft-deleted `domainId` returns 400.
 the endpoints have moved from `career-taxonomy` to `career-library`). One row per
 `(level, programme)`, shared by every job role that uses it, exactly like exams/courses/colleges:
 
-- `GET /api/v1/career-library/education?search=&level=&status=&includeDeleted=&domainId=&limit=`
-  → entries ordered by level then programme. Pass `domainId` to pre-populate the "add job role"
-  tick-list with what roles in that domain already use; omit it for the full list. An unknown
-  `domainId` returns 400.
-- `POST /api/v1/career-library/education` `{ level, programme, description? }` (**Staff**) —
-  a counsellor's lands `PENDING` and stays out of the picker until an admin approves it; an
-  admin's is live immediately. 409 if that programme already exists at that level.
-- `POST /api/v1/career-library/education/{entryId}/approve` \| `/reject` `{ rejectionReason? }`
-  (**Admin**) — 409 if the entry was already decided.
-- `PATCH /api/v1/career-library/education/{entryId}` `{ level?, programme?, description? }`
-  (**Admin**) — `description: null` clears it.
-- `DELETE /api/v1/career-library/education/{entryId}` — **soft delete**: it leaves the picker,
-  but job roles already linked keep rendering it. `POST …/restore` reverses it.
+- `GET /api/v1/career-library/education?search=&level=&status=&domainId=&limit=`
+  → entries ordered by level then programme. `status` is `DRAFT` \| `ACTIVE` and defaults to
+  `ACTIVE`, so the picker never shows unpublished rows. Pass `domainId` to pre-populate the
+  "add job role" tick-list with what roles in that domain already use; omit it for the full
+  list. An unknown `domainId` returns 400.
+- `POST /api/v1/career-library/education` `{ level, programme, description?, status? }`
+  (**Staff**) — a counsellor's lands `DRAFT` and stays out of the picker; an admin's is
+  `ACTIVE` immediately. 409 if that programme already exists at that level.
+- `PATCH /api/v1/career-library/education/{entryId}` `{ level?, programme?, description?, status? }`
+  (**Admin**) — this is also the **publish** step: send `status: "ACTIVE"` to put a DRAFT entry
+  into the pickers. `description: null` clears it.
+- `DELETE /api/v1/career-library/education/{entryId}` (**Admin**) — **permanent**. Every job
+  role linked to that programme loses the link (cascade), so check usage first.
+
+⚠️ **Also changed:** Education Path no longer uses the approve/reject review flow that
+exams/courses/institutions use — there are no `/approve` or `/reject` endpoints for it, no
+`reviewedBy`/`reviewedAt`/`rejectionReason` fields, and no soft delete/`restore`. It uses the
+same `DRAFT`→`ACTIVE` publish flag a career entry does.
+
+`description` is prose about the requirement at that level (seeded from the workbook's
+explanation columns); certification-level entries have none.
 
 Because entries are global, the same `{ level, programme }` resolves to one row no matter which
 role or domain names it, and an `{ id }` from any domain's picker is linkable to any role — the
@@ -1020,15 +1028,46 @@ Websites are plain strings, not validated URLs — `"www.nta.ac.in"` is accepted
 > across job roles. There is no endpoint yet for editing a canonical row outright, so a
 > value that was entered wrong the first time currently needs a DB fix.
 
+### Adding a job role: the two flows
+
+`POST /api/v1/career-library` is **Staff**, and who calls it decides what happens:
+
+1. **Admin / super admin — straight into the library.** The entry is created with
+   `reviewStatus: "APPROVED"` and whatever `status` was sent, so posting
+   `{ …, "status": "ACTIVE" }` publishes it in one call. Omit `status` and it lands `DRAFT`
+   for the usual publish-later step.
+2. **Counsellor — held for approval.** Same payload, same route, but the response comes back
+   `reviewStatus: "PENDING"` and `status: "DRAFT"` no matter what `status` was sent (a
+   counsellor can't publish their own submission). It's excluded from every read — the list
+   defaults to `reviewStatus=APPROVED`, and a student fetching it by id gets a 404 — until an
+   admin decides:
+   - `POST /api/v1/career-library/{id}/approve` (**Admin**) — flips it to `APPROVED` **and**
+     `ACTIVE` in one action, and returns the assembled entry.
+   - `POST /api/v1/career-library/{id}/reject` (**Admin**, no body) — **deletes it**. Returns
+     `{ id, deleted: true }`. Nothing is retained, so build the UI as a confirm-then-delete,
+     not an "undo later".
+
+   Both are 409 if the entry isn't `PENDING` (already decided, or an admin's own entry that
+   never needed review).
+
+Build the admin review queue off the list endpoint:
+`GET /api/v1/career-library?reviewStatus=PENDING&status=DRAFT`.
+
+Note the separate, older `POST /api/v1/career-library/requests` flow still exists — that's the
+*lightweight* path where a counsellor flags a missing career with a few fields and justification,
+and the admin then builds the entry by hand. Use this section's flow when the counsellor is
+filling in the whole role.
+
 ### Proposing reference data as a counsellor
 
-The job-role form is admin-only, so a counsellor can't reach the inline "add new" above.
-They use the standalone endpoints instead — **Staff**, same field sets:
+A counsellor can also propose the individual reference rows on their own, without a job role —
+**Staff**, same field sets as the inline "add new":
 
 - `POST /api/v1/career-library/entrance-exams` `{ name, level, … }`
 - `POST /api/v1/career-library/courses` `{ name, level?, … }`
 - `POST /api/v1/career-library/institutions` `{ name, … }`
-- `POST /api/v1/career-library/education` `{ level, programme, description? }`
+- `POST /api/v1/career-library/education` `{ level, programme, description? }` — lands `DRAFT`
+  (this one is a publish flag, not the `ReviewStatus` the other three use)
 
 A counsellor's submission comes back `status: "PENDING"` and **won't appear in the pickers**
 until an admin approves it; an admin's own submission is `APPROVED` immediately. Every row
@@ -1037,8 +1076,12 @@ carries `status`, `submittedBy`, `reviewedBy`, `reviewedAt`, `rejectionReason`.
 Admin review (all **Admin**, all 409 if the row was already decided):
 
 - `POST /career-library/{entrance-exams|courses|institutions}/{id}/approve` — and `/reject`
-  with `{ rejectionReason? }`
-- `POST /career-library/education/{entryId}/approve` — and `/reject`
+  with `{ rejectionReason? }`. These two **keep the row** and mark it `REJECTED`; re-proposing
+  it reopens it (see below).
+- `POST /career-library/education/{entryId}/approve` — publishes the `DRAFT` to `ACTIVE`
+  (identical to `PATCH /career-library/education/{entryId}` `{ status: "ACTIVE" }`, just the
+  verb the review screen calls). `POST …/reject` **deletes** the entry, matching the job-role
+  flow, and 409s if it's already `ACTIVE` or if any job role still links to it.
 
 Build the review queue off the existing list endpoints with `?status=PENDING`. Two behaviours
 worth designing around: re-proposing a **rejected** row reopens it (same id, back to
@@ -1078,7 +1121,7 @@ clears it. `null` is accepted for every nullable column:
 
 | Clearable with `null` | Rejects `null` (NOT NULL) |
 |---|---|
-| `roleOverview`, `salaryIndiaRangeText`, `salaryIndiaMinLPA`, `salaryIndiaMaxLPA`, `salaryGlobalRangeText`, `salaryGlobalMinUSD`, `salaryGlobalMaxUSD`, `qualification10th12thExplanation`, `qualificationGraduation(Defined)`, `qualificationPG(Defined)`, `entranceExamsUGDescription` | `domainId`, `jobRole`, `aiResilienceGrade`, `aiResilienceComment`, `oneLineDescription`, `qualification10th12th` |
+| `roleOverview`, `salaryIndiaRangeText`, `salaryIndiaMinLPA`, `salaryIndiaMaxLPA`, `salaryGlobalRangeText`, `salaryGlobalMinUSD`, `salaryGlobalMaxUSD`, `qualification10th12th`, `qualification10th12thExplanation`, `qualificationGraduation(Defined)`, `qualificationPG(Defined)`, `entranceExamsUGDescription` | `domainId`, `jobRole`, `aiResilienceGrade`, `aiResilienceComment`, `oneLineDescription` |
 
 Empty strings are **not** a way to clear — `""` fails validation. Send `null`. Clear a
 list field (`keySkills`, `topCompanies`, `certifications*`) by sending `[]`.
