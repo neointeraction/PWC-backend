@@ -1384,9 +1384,14 @@ before building UI that depends on any of them:
   institution summary** variants. Counsellor Chart is built too — `GET`/`PUT
   /api/v1/counsellor-chart/students/{id}` assemble the chart and save notes/SCRI/ratings,
   and `POST`/`DELETE …/mirror-pair-amendments` let the counsellor amend a flagged answer,
-  which re-runs the full scoring engine. `workflowStatus` stages past
-  `SESSION_2_COMPLETED` still only move via the `PATCH /students/{id}/workflow-status`
-  admin override (§6.1).
+  which re-runs the full scoring engine, plus `POST …/finalize` to close the chart.
+  **All 12 `workflowStatus` stages now advance on their own** — see the trigger table in
+  `docs/api-list.md`. The tail: a chart save with real content →
+  `COUNSELLOR_FEEDBACK_REPORT`, chart finalize → `COUNSELLOR_FEEDBACK`, both feedback
+  forms submitted → `STUDENT_PARENT_FEEDBACK`, and the **student's own** fetch of
+  `GET /reports/students/{id}/assessment` → `CLOSED`. The `PATCH
+  /students/{id}/workflow-status` admin override (§6.1) is now a correction tool rather
+  than the normal path.
 - **Real meeting-link generation** — Sessions' `meetingLink` (§10.6) is a manually
   pasted plain string; no Calendly/Google Meet integration.
 - **Automatic email/reminder triggers** — the Email module (§12) can send any

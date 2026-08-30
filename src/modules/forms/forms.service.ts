@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma, WorkflowStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
@@ -17,11 +17,13 @@ const FORM_TYPE_TO_ROLE: Record<FormType, SubmittedByRole> = {
   FEEDBACK_PARENT: "PARENT",
 };
 
-// The two halves of the pre-counselling pair — once both are submitted for a student,
-// the workflow can advance. Maps each side to the other.
-const PRE_COUNSELLING_COUNTERPART: Partial<Record<FormType, FormType>> = {
-  PRE_COUNSELLING_STUDENT: "PRE_COUNSELLING_PARENT",
-  PRE_COUNSELLING_PARENT: "PRE_COUNSELLING_STUDENT",
+// Each paired form maps to its other half, plus the workflow stage reached once BOTH
+// halves are submitted. Submitting one side alone advances nothing.
+const FORM_PAIRS: Partial<Record<FormType, { counterpart: FormType; reaches: WorkflowStatus }>> = {
+  PRE_COUNSELLING_STUDENT: { counterpart: "PRE_COUNSELLING_PARENT", reaches: "PRE_COUNSELLING_FORMS_SUBMITTED" },
+  PRE_COUNSELLING_PARENT: { counterpart: "PRE_COUNSELLING_STUDENT", reaches: "PRE_COUNSELLING_FORMS_SUBMITTED" },
+  FEEDBACK_STUDENT: { counterpart: "FEEDBACK_PARENT", reaches: "STUDENT_PARENT_FEEDBACK" },
+  FEEDBACK_PARENT: { counterpart: "FEEDBACK_STUDENT", reaches: "STUDENT_PARENT_FEEDBACK" },
 };
 
 async function isFormSubmitted(
@@ -152,9 +154,9 @@ export async function saveFormAnswers(
         data: { submittedAt: new Date() },
       });
 
-      const counterpartFormType = PRE_COUNSELLING_COUNTERPART[formType];
-      if (counterpartFormType && (await isFormSubmitted(tx, studentId, counterpartFormType, input.cohort))) {
-        await advanceWorkflowStatus(tx, studentId, "PRE_COUNSELLING_FORMS_SUBMITTED");
+      const pair = FORM_PAIRS[formType];
+      if (pair && (await isFormSubmitted(tx, studentId, pair.counterpart, input.cohort))) {
+        await advanceWorkflowStatus(tx, studentId, pair.reaches);
       }
     }
   });

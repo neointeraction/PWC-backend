@@ -34,6 +34,13 @@ const noteSchema = z.object({
     .refine((s) => s.split("\n").length <= 10, "A synthesis note may have at most 10 lines"),
 });
 
+// Finalize takes no required input — `finalizedBy` is the same optional audit stamp the
+// PUT accepts as `lastEditedBy`.
+export const finalizeCounsellorChartBodySchema = z
+  .object({ finalizedBy: z.string().trim().min(1) })
+  .partial();
+export type FinalizeCounsellorChartBody = z.infer<typeof finalizeCounsellorChartBodySchema>;
+
 export const putCounsellorChartBodySchema = z
   .object({
     strengths: z.array(z.string().trim().min(1)),

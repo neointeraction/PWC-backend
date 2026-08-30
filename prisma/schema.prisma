@@ -1118,7 +1118,10 @@ model CounsellorChart {
   alignmentRating AlignmentRating? // Academic × Career Alignment
 
   lastEditedBy String? // Counsellor id (audit stamp; not an FK, matching other modules)
-  finalizedAt  DateTime? // set on /finalize, which advances workflow to COUNSELLOR_FEEDBACK
+  // Set by POST /counsellor-chart/students/:id/finalize, which also advances the
+  // student's workflow to COUNSELLOR_FEEDBACK. Idempotent — re-finalizing keeps this
+  // original timestamp.
+  finalizedAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

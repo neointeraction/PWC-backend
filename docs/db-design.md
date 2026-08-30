@@ -257,6 +257,16 @@ PRE_COUNSELLING_FORMS_SUBMITTED → ASSESSMENT_PENDING → ASSESSMENT_COMPLETED 
 SESSION_SCHEDULED → SESSION_1_COMPLETED → COUNSELLOR_FEEDBACK_REPORT →
 SESSION_2_COMPLETED → COUNSELLOR_FEEDBACK → STUDENT_PARENT_FEEDBACK → CLOSED`
 
+Every stage has a real trigger (see the trigger table in `docs/api-list.md`); the admin
+`PATCH /students/{id}/workflow-status` override is a correction tool, not the normal
+path. The tail of the lifecycle is driven by: a counsellor-chart save with real content
+(`COUNSELLOR_FEEDBACK_REPORT`), chart finalize (`COUNSELLOR_FEEDBACK` — this is what
+writes `CounsellorChart.finalizedAt`), both feedback forms submitted
+(`STUDENT_PARENT_FEEDBACK`), and the **student's own** fetch of their assessment report
+(`CLOSED`). Advances are forward-only and idempotent, and the close is additionally
+gated on the student already being at `STUDENT_PARENT_FEEDBACK` so an early report fetch
+can't skip the intervening stages.
+
 ### `Session`
 One row per counselling session (max 2 per student: `SESSION_1`, `SESSION_2`).
 Session 1 is booked **blind** — the student picks an open slot without seeing whose it

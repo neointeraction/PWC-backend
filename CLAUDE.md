@@ -74,12 +74,17 @@ test/
   is `advanceWorkflowStatus()` in `src/common/workflow/workflowStatus.ts` —
   forward-only and idempotent; call it from a module's service layer at the
   point a real action completes a stage (see `students.service.ts`,
-  `forms.service.ts`, `assessment.service.ts`, `sessions.service.ts` for
-  existing call sites), don't hardcode status strings elsewhere. Stages
-  beyond `SESSION_2_COMPLETED` depend on modules that don't exist yet
-  (Counsellor Chart/Feedback, Reports) and are only reachable via the admin
-  override at `PATCH /api/v1/students/:id/workflow-status` until those are
-  built.
+  `forms.service.ts`, `assessment.service.ts`, `sessions.service.ts`,
+  `counsellor-chart.service.ts`, `reports.service.ts` for existing call
+  sites), don't hardcode status strings elsewhere. **All 12 stages now have a
+  real trigger** — the tail is: chart save with real content →
+  `COUNSELLOR_FEEDBACK_REPORT`, chart `/finalize` → `COUNSELLOR_FEEDBACK`,
+  both feedback forms submitted → `STUDENT_PARENT_FEEDBACK`, and the
+  student's own fetch of their assessment report → `CLOSED` (staff fetches
+  don't close, and the close only fires from `STUDENT_PARENT_FEEDBACK` so an
+  early fetch can't skip stages). The admin override at
+  `PATCH /api/v1/students/:id/workflow-status` is a correction tool, not the
+  normal path. Full trigger table in `docs/api-list.md`.
 - **Imports**: this project uses ESM with `NodeNext` module resolution —
   relative imports must include the `.js` extension (even though the
   source file is `.ts`), e.g. `import { env } from "./config/env.js"`.

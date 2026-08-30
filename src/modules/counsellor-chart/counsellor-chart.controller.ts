@@ -4,6 +4,7 @@ import * as assessmentService from "../assessment/assessment.service.js";
 import type {
   AmendmentBody,
   AmendmentParams,
+  FinalizeCounsellorChartBody,
   PutCounsellorChartBody,
   StudentIdParams,
 } from "./counsellor-chart.schema.js";
@@ -18,6 +19,13 @@ export async function updateCounsellorChart(req: Request, res: Response): Promis
   const { studentId } = req.params as unknown as StudentIdParams;
   const body = req.body as PutCounsellorChartBody;
   const chart = await service.updateCounsellorChart(studentId, body);
+  res.status(200).json(chart);
+}
+
+export async function finalizeCounsellorChart(req: Request, res: Response): Promise<void> {
+  const { studentId } = req.params as unknown as StudentIdParams;
+  const { finalizedBy } = (req.body ?? {}) as FinalizeCounsellorChartBody;
+  const chart = await service.finalizeCounsellorChart(studentId, finalizedBy);
   res.status(200).json(chart);
 }
 

@@ -91,6 +91,17 @@ import {
 import { previewScoreBodySchema } from "../modules/assessment/assessment.schema.js";
 import { reportStudentParamsSchema } from "../modules/reports/reports.schema.js";
 import {
+  amendmentBodySchema,
+  amendmentParamsSchema,
+  finalizeCounsellorChartBodySchema,
+  putCounsellorChartBodySchema,
+  studentIdParamsSchema as chartStudentIdParamsSchema,
+} from "../modules/counsellor-chart/counsellor-chart.schema.js";
+import {
+  counsellorIdParamsSchema as feedbackCounsellorIdParamsSchema,
+  studentIdParamsSchema as feedbackStudentIdParamsSchema,
+} from "../modules/feedback/feedback.schema.js";
+import {
   adminIdParamsSchema,
   createAdminSchema,
   listAdminsQuerySchema,
@@ -1388,6 +1399,105 @@ registry.registerPath({
   responses: {
     200: { description: "Assembled report", content: { "application/json": { schema: genericObjectSchema } } },
     404: errorResponses[404],
+  },
+});
+
+// --- Counsellor Chart ---
+
+const chartTag = ["Counsellor Chart"];
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/counsellor-chart/students/{studentId}",
+  tags: chartTag,
+  summary: "Assemble a student's full counsellor chart (profile + both pre-counselling forms + assessment result + flagged mirror pairs + saved counsellor content). Staff.",
+  request: { params: chartStudentIdParamsSchema },
+  responses: {
+    200: { description: "Assembled chart", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "put",
+  path: "/api/v1/counsellor-chart/students/{studentId}",
+  tags: chartTag,
+  summary: "Partial save of counsellor-authored chart content (recomputes the SCRI band). Saving real content advances the workflow to COUNSELLOR_FEEDBACK_REPORT. Staff.",
+  request: {
+    params: chartStudentIdParamsSchema,
+    body: { content: { "application/json": { schema: putCounsellorChartBodySchema } } },
+  },
+  responses: {
+    200: { description: "Updated chart", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/counsellor-chart/students/{studentId}/finalize",
+  tags: chartTag,
+  summary: "Finalize the chart — stamps finalizedAt and advances the workflow to COUNSELLOR_FEEDBACK. Idempotent; 400 on an empty chart. Staff.",
+  request: {
+    params: chartStudentIdParamsSchema,
+    body: { content: { "application/json": { schema: finalizeCounsellorChartBodySchema } } },
+  },
+  responses: {
+    200: { description: "Finalized chart", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/counsellor-chart/students/{studentId}/mirror-pair-amendments",
+  tags: chartTag,
+  summary: "Amend a flagged mirror-pair answer (student's original is preserved) and re-score the attempt. Staff.",
+  request: {
+    params: chartStudentIdParamsSchema,
+    body: { content: { "application/json": { schema: amendmentBodySchema } } },
+  },
+  responses: {
+    200: { description: "Recomputed AssessmentResult", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/counsellor-chart/students/{studentId}/mirror-pair-amendments/{questionCode}",
+  tags: chartTag,
+  summary: "Revert an amendment to the student's original answer, then re-score. Staff.",
+  request: { params: amendmentParamsSchema },
+  responses: {
+    200: { description: "Recomputed AssessmentResult", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+// --- Feedback ---
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/feedback/students/{studentId}/score",
+  tags: ["Feedback"],
+  summary: "Counsellor Satisfaction Final Score % for one student. Returns { complete: false, missingForms } when the student/parent pair is incomplete. Staff.",
+  request: { params: feedbackStudentIdParamsSchema },
+  responses: {
+    200: { description: "Feedback score", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/feedback/counsellors/{counsellorId}/score",
+  tags: ["Feedback"],
+  summary: "A counsellor's Overall Score % — the average of their students' complete-pair Final Scores, with Performance Band and incentive. Staff.",
+  request: { params: feedbackCounsellorIdParamsSchema },
+  responses: {
+    200: { description: "Counsellor feedback score", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
   },
 });
 

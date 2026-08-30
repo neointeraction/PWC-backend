@@ -157,7 +157,29 @@ are all scoped to a Project. Reads = staff; writes/management = admin.
 | PATCH | `/api/v1/students/{id}` | Update a student (partial body; validates `divisionId` still belongs to the student's project institute if changed). |
 | DELETE | `/api/v1/students/{id}` | Delete a student (deletes the linked `User` too, which cascades). Also releases any `CounsellorSlot` still `BOOKED` by the student's sessions back to `OPEN` before the cascade deletes those `Session` rows — otherwise the slot would be stranded (`ON DELETE SET NULL` clears its `sessionId` but not its `status`), permanently unbookable. |
 | POST | `/api/v1/students/{id}/confirm-profile` | Student confirms **their own** profile data (father/mother details, parent contact) is correct — or staff on their behalf (a student confirming another student's profile is `403`). Advances `workflowStatus` `DRAFT → PROFILE_COMPLETED`. 409 if not currently `DRAFT`. |
-| PATCH | `/api/v1/students/{id}/workflow-status` | Admin/ops override — sets `workflowStatus` directly (not forward-only, unlike the automatic triggers below). Body: `{ workflowStatus }`. Covers the stages not yet wired to a real trigger (Sessions, Counsellor Chart/Feedback, Reports don't exist as modules yet). |
+| PATCH | `/api/v1/students/{id}/workflow-status` | Admin/ops override — sets `workflowStatus` directly (**not** forward-only, unlike the automatic triggers in the table below). Body: `{ workflowStatus }`. Every stage now has a real trigger, so this is a correction tool, not the normal path. |
+
+### Workflow stage triggers
+
+All 12 `WorkflowStatus` stages advance automatically. The helper
+(`advanceWorkflowStatus`, `src/common/workflow/workflowStatus.ts`) is **forward-only and
+idempotent** — it no-ops if the student is already at or past the target, and it jumps
+straight to the target rather than stepping through intermediate stages.
+
+| Stage | What advances it |
+|---|---|
+| `DRAFT` | initial state on `POST /students` |
+| `PROFILE_COMPLETED` | `POST /students/{id}/confirm-profile` |
+| `PRE_COUNSELLING_FORMS_SUBMITTED` | **both** pre-counselling forms submitted (student + parent) |
+| `ASSESSMENT_PENDING` | `POST /assessment/attempts` (attempt started) |
+| `ASSESSMENT_COMPLETED` | `POST /assessment/attempts/{id}/submit` |
+| `SESSION_SCHEDULED` | session booked / rebooked |
+| `SESSION_1_COMPLETED` | Session 1 marked joined |
+| `COUNSELLOR_FEEDBACK_REPORT` | `PUT /counsellor-chart/students/{id}` with real content |
+| `SESSION_2_COMPLETED` | Session 2 marked joined |
+| `COUNSELLOR_FEEDBACK` | `POST /counsellor-chart/students/{id}/finalize` |
+| `STUDENT_PARENT_FEEDBACK` | **both** feedback forms submitted (student + parent) |
+| `CLOSED` | the **student** fetches their own report (`GET /reports/students/{id}/assessment`) — a staff fetch never closes a case, and the close only fires from `STUDENT_PARENT_FEEDBACK`, so an early fetch can't skip the tail of the lifecycle |
 
 ### Student stage & ageing (`stageInfo`)
 
@@ -216,7 +238,7 @@ see `docs/db-design.md` for the full schema notes).
 | GET | `/api/v1/forms/{formType}` | Get a form template with its questions, ordered. `formType`: `PRE_COUNSELLING_STUDENT` \| `PRE_COUNSELLING_PARENT` \| `FEEDBACK_STUDENT` \| `FEEDBACK_PARENT` (the student profile is captured at `POST /students`, not via the forms API — `STUDENT_PROFILE` is rejected with 400). Query: `cohort` (required, e.g. `CLASS_9_10`), `version?` (defaults to the active version). 404 if no template exists for that formType+cohort. |
 | GET | `/api/v1/forms/{formType}/students/{studentId}` | Get a student's (or parent's) submission for a form, with answers. Query: `cohort` (required), `version?`. 404 if no submission exists yet. |
 | PUT | `/api/v1/forms/{formType}/students/{studentId}` | Save/update in-progress answers ("Save as Draft"). Body: `cohort, version?, answers: [{ fieldKey, answer }]`. Upserts a `FormSubmission` + `FormAnswer` rows; idempotent, callable repeatedly. 400 on an unknown `fieldKey`. 409 if the form was already submitted (locked). |
-| POST | `/api/v1/forms/{formType}/students/{studentId}/submit` | Finalize a submission. Same body shape as the draft `PUT` (answers here are merged with any existing draft). Validates every `isRequired` question has a non-empty answer — 400 with `{ missingFieldKeys }` if not — then sets `submittedAt` and locks the submission. 409 if already submitted. |
+| POST | `/api/v1/forms/{formType}/students/{studentId}/submit` | Finalize a submission. Same body shape as the draft `PUT` (answers here are merged with any existing draft). Validates every `isRequired` question has a non-empty answer — 400 with `{ missingFieldKeys }` if not — then sets `submittedAt` and locks the submission. 409 if already submitted. Submitting **both** halves of a pair advances the workflow: pre-counselling → `PRE_COUNSELLING_FORMS_SUBMITTED`, feedback → `STUDENT_PARENT_FEEDBACK`. |
 | GET | `/api/v1/forms/students/{studentId}/status` | Per-form submission flags for reminder/link logic (e.g. "has the parent submitted their forms?"). Returns `forms.{preCounsellingStudent, preCounsellingParent, feedbackStudent, feedbackParent}` — each `{ submitted, submittedAt }` (a form counts only once **finalized**, not while a draft) — plus roll-ups `preCounsellingComplete` and `feedbackComplete` (both student+parent submitted). 404 if the student doesn't exist. |
 
 `submittedByRole` (`STUDENT` vs `PARENT`) is derived automatically from `formType` —
@@ -441,7 +463,8 @@ result, and flagged mirror pairs — plus the counsellor's own saved inputs. See
 | Method | Path | Description |
 |---|---|---|
 | GET | `/api/v1/counsellor-chart/students/{studentId}` | Assemble the full chart: `ourChampion` (profile), `academicRecord`, `preCounselling` (4 sections of student-vs-parent parameter rows), `assessment` (the computed report), `flaggedMirrorPairs` (strong/gap-0 contradictions only), and `counsellor` (saved notes/SCRI/ratings). Lazily creates an empty chart row if none exists. 404 if the student doesn't exist. |
-| PUT | `/api/v1/counsellor-chart/students/{studentId}` | Partial save of counsellor-authored content. Body (all optional): `notes` (`[{ code: "A1".."H4", body }]`, ≤10 lines each), `scri` (`{ confidence, reasonedThinking, reducedAnxiety, selfAwareness, careerCuriosity, decisionOwnership }`, each 1–4 — band recomputed), `academicTrend`, `alignmentRating`, `strengths`/`hobbies`/`careerShortlist`, `lastEditedBy`. |
+| PUT | `/api/v1/counsellor-chart/students/{studentId}` | Partial save of counsellor-authored content. Body (all optional): `notes` (`[{ code: "A1".."H4", body }]`, ≤10 lines each), `scri` (`{ confidence, reasonedThinking, reducedAnxiety, selfAwareness, careerCuriosity, decisionOwnership }`, each 1–4 — band recomputed), `academicTrend`, `alignmentRating`, `strengths`/`hobbies`/`careerShortlist`, `lastEditedBy`. A save carrying **real content** advances the student's workflow to `COUNSELLOR_FEEDBACK_REPORT` (a save with only `lastEditedBy` does not). |
+| POST | `/api/v1/counsellor-chart/students/{studentId}/finalize` | Finalize the chart: stamps `finalizedAt` (surfaced as `meta.finalized` on the report) and advances the workflow to `COUNSELLOR_FEEDBACK`. Body (optional): `{ finalizedBy }` — same audit stamp as `lastEditedBy`. **Idempotent** — re-finalizing keeps the original timestamp. 400 if the chart has no counsellor content yet. |
 | POST | `/api/v1/counsellor-chart/students/{studentId}/mirror-pair-amendments` | Amend a flagged mirror-pair answer. Body: `{ questionCode, amendedOption (1–5), counsellorId? }`. Overrides the student's response (original preserved) and **re-runs the full scoring engine**, returning the recomputed `AssessmentResult`. 400 if `questionCode` isn't a mirror-pair question; 404 if the student has no submitted assessment. |
 | DELETE | `/api/v1/counsellor-chart/students/{studentId}/mirror-pair-amendments/{questionCode}` | Revert an amendment to the student's original answer and re-score. Returns the recomputed `AssessmentResult`. |
 
@@ -472,7 +495,7 @@ token may only read their own (it's the student-facing deliverable).
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/reports/students/{studentId}/assessment` | The full student assessment report. Returns `student` (name, code, institute/class/division, workflowStatus), `championProfile` (DCS + DPS), `traitMap` (RIASEC / Big Five / Aptitude / Cognitive layers + flat 18-trait map), `careerCompass` (Career Fit top-6 domains with representative careers + top-3 industries), `streamFit`, `graduationPathways`, `reliability` (RVS/ACI/ORI/DC), `counsellorNarrative` (chart strengths/hobbies/shortlist/SCRI/notes, or `null` if none authored), `feedback` (score or `{ complete:false }`), and `meta` (cohort, `assessmentSubmittedAt`, `finalized`, engine `pending` list). **404 until the student has a computed assessment result.** |
+| GET | `/api/v1/reports/students/{studentId}/assessment` | The full student assessment report. Returns `student` (name, code, institute/class/division, workflowStatus), `championProfile` (DCS + DPS), `traitMap` (RIASEC / Big Five / Aptitude / Cognitive layers + flat 18-trait map), `careerCompass` (Career Fit top-6 domains with representative careers + top-3 industries), `streamFit`, `graduationPathways`, `reliability` (RVS/ACI/ORI/DC), `counsellorNarrative` (chart strengths/hobbies/shortlist/SCRI/notes, or `null` if none authored), `feedback` (score or `{ complete:false }`), and `meta` (cohort, `assessmentSubmittedAt`, `finalized`, engine `pending` list). **404 until the student has a computed assessment result.** When the **student** fetches their own report and they are at `STUDENT_PARENT_FEEDBACK`, the case is closed (`workflowStatus` → `CLOSED`) — receiving the report is the last step. A staff fetch is a read, and never closes a case. |
 
 ## Email
 

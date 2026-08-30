@@ -6,6 +6,7 @@ import * as controller from "./counsellor-chart.controller.js";
 import {
   amendmentBodySchema,
   amendmentParamsSchema,
+  finalizeCounsellorChartBodySchema,
   putCounsellorChartBodySchema,
   studentIdParamsSchema,
 } from "./counsellor-chart.schema.js";
@@ -29,6 +30,15 @@ counsellorChartRouter.put(
   ...requireStaff,
   validate({ params: studentIdParamsSchema, body: putCounsellorChartBodySchema }),
   asyncHandler(controller.updateCounsellorChart)
+);
+
+// Finalize the chart — stamps `finalizedAt` and advances the student's workflow to
+// COUNSELLOR_FEEDBACK. Idempotent; 400 if the chart has no counsellor content yet.
+counsellorChartRouter.post(
+  "/students/:studentId/finalize",
+  ...requireStaff,
+  validate({ params: studentIdParamsSchema, body: finalizeCounsellorChartBodySchema }),
+  asyncHandler(controller.finalizeCounsellorChart)
 );
 
 // Amend a flagged mirror-pair answer — overrides the student's response (original kept)

@@ -1,5 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { NotFoundError } from "../../common/errors/AppError.js";
+import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import type { AssessmentReport } from "../assessment/scoring/index.js";
 import { getStudentFeedbackScore } from "../feedback/feedback.service.js";
 
@@ -111,4 +112,25 @@ export async function assembleStudentAssessmentReport(studentId: string) {
       pending: report.meta?.pending ?? [],
     },
   };
+}
+
+// The student receiving their own report is the last step of the case, so it closes it.
+// Two deliberate guards:
+//   • only the student's own fetch counts — a counsellor or admin opening the report is
+//     reviewing it, not receiving it;
+//   • only from STUDENT_PARENT_FEEDBACK. advanceWorkflowStatus jumps straight to the
+//     target, so without this an early fetch (the report is readable as soon as the
+//     assessment is scored) would skip the whole tail of the lifecycle.
+// Best-effort: the report is the deliverable, so a failure here is logged, not raised.
+export async function markReportDeliveredToStudent(studentId: string): Promise<void> {
+  try {
+    const student = await prisma.student.findUnique({
+      where: { id: studentId },
+      select: { workflowStatus: true },
+    });
+    if (student?.workflowStatus !== "STUDENT_PARENT_FEEDBACK") return;
+    await advanceWorkflowStatus(prisma, studentId, "CLOSED");
+  } catch (err) {
+    console.error(`Closing case on report delivery failed for student ${studentId}:`, err);
+  }
 }
