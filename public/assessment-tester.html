@@ -49,6 +49,7 @@
   <header>
     <h1>Assessment Scoring Tester <span class="muted">— dev only</span></h1>
     <div class="sub">Answer the question bank and preview the full computed report. No student / attempt / persistence — pure scoring engine.</div>
+    <div class="sub">Time-Consistency and the composite ARI need per-question <code>timeTakenMs</code> on <b>every</b> aptitude answer — pick a timing mode to exercise them, or leave it Off to see the deferred (<code>meta.pending</code>) path.</div>
   </header>
   <main>
     <div class="card">
@@ -71,6 +72,15 @@
         <button id="randomAll" class="secondary" disabled>Randomise all</button>
         <button id="clearAll" class="secondary" disabled>Clear</button>
         <div><label>Duration (min)</label><input id="duration" type="number" value="30" min="1" max="600" style="min-width:90px" /></div>
+        <div><label>Per-question timing</label>
+          <select id="timingMode" style="min-width:180px">
+            <option value="off" selected>Off — send no timing</option>
+            <option value="measured">Measured — your own clicks</option>
+            <option value="unhurried">Unhurried — 20s each</option>
+            <option value="rushed">Rushed — 2s each</option>
+            <option value="mixed">Mixed — random 1–15s</option>
+          </select>
+        </div>
         <span id="loadStatus" class="status"></span>
       </div>
     </div>
@@ -126,6 +136,7 @@
         questions = await api("/api/v1/assessment/questions?cohort=" + encodeURIComponent($("cohort").value));
         questions.sort((a, b) => (a.displayOrder ?? a.order) - (b.displayOrder ?? b.order));
         renderQuestions();
+        resetTiming();
         setStatus($("loadStatus"), questions.length + " questions loaded", true);
         ["fillLikert", "randomAll", "clearAll"].forEach((id) => ($(id).disabled = false));
         $("questions").classList.remove("hide");
@@ -178,6 +189,37 @@
       if (el) el.checked = true;
     }
 
+    // --- per-question timing -------------------------------------------------------
+    // "Measured" mode charges each answer the gap since the previous interaction (or
+    // since the questions rendered, for the first one) — a fair approximation of dwell
+    // time for a single-page form filled top-down. Bulk fills (Fill Likert / Randomise)
+    // are instant, so they'd all land under the 5s threshold; use a synthetic mode with
+    // those instead of pretending the timings are real.
+    let measured = {};
+    let lastTick = 0;
+
+    function resetTiming() { measured = {}; lastTick = Date.now(); }
+
+    document.addEventListener("change", (e) => {
+      const input = e.target;
+      if (!input || input.type !== "radio" || !input.closest("#questions")) return;
+      const now = Date.now();
+      measured[input.name] = Math.max(0, now - lastTick);
+      lastTick = now;
+    });
+
+    function syntheticTiming(mode) {
+      if (mode === "unhurried") return 20000;
+      if (mode === "rushed") return 2000;
+      return 1000 + Math.floor(Math.random() * 14000); // mixed: straddles the 5s threshold
+    }
+
+    function timingFor(fieldKey, mode) {
+      if (mode === "off") return undefined;
+      if (mode === "measured") return measured[fieldKey];
+      return syntheticTiming(mode);
+    }
+
     $("fillLikert").onclick = () => {
       const v = $("likertVal").value;
       for (const q of questions) if (q.format !== "MCQ_SINGLE") setAnswer(q.fieldKey, v);
@@ -189,15 +231,34 @@
         setAnswer(q.fieldKey, opts[Math.floor(Math.random() * opts.length)].value);
       }
     };
-    $("clearAll").onclick = () => { document.querySelectorAll('#questions input[type=radio]').forEach((r) => (r.checked = false)); };
+    $("clearAll").onclick = () => {
+      document.querySelectorAll('#questions input[type=radio]').forEach((r) => (r.checked = false));
+      resetTiming();
+    };
 
     function collectAnswers() {
+      const mode = $("timingMode").value;
       const out = [];
       for (const q of questions) {
         const sel = document.querySelector('input[name="' + CSS.escape(q.fieldKey) + '"]:checked');
-        if (sel) out.push({ fieldKey: q.fieldKey, response: sel.value });
+        if (!sel) continue;
+        const answer = { fieldKey: q.fieldKey, response: sel.value };
+        const ms = timingFor(q.fieldKey, mode);
+        if (ms != null) answer.timeTakenMs = ms;
+        out.push(answer);
       }
       return out;
+    }
+
+    // ARI needs timing on every APTITUDE answer — anything less and the engine returns
+    // null. Reported up front so a partial "Measured" run doesn't look like a bug.
+    function timingSummary(answers) {
+      const timed = answers.filter((a) => a.timeTakenMs != null).length;
+      if (!timed) return "no timing";
+      const aptitude = questions.filter((q) => q.section === "APTITUDE").map((q) => q.fieldKey);
+      const timedAptitude = answers.filter((a) => a.timeTakenMs != null && aptitude.includes(a.fieldKey)).length;
+      const full = timedAptitude === aptitude.length;
+      return "timing on " + timed + " (" + timedAptitude + "/" + aptitude.length + " aptitude" + (full ? " → ARI computes" : " → ARI stays null") + ")";
     }
 
     $("scoreBtn").onclick = async () => {
@@ -208,7 +269,7 @@
           method: "POST",
           body: JSON.stringify({ cohort: $("cohort").value, durationMinutes: Number($("duration").value) || 30, answers }),
         });
-        setStatus($("scoreStatus"), answers.length + "/" + questions.length + " answered · scored", true);
+        setStatus($("scoreStatus"), answers.length + "/" + questions.length + " answered · " + timingSummary(answers) + " · scored", true);
         renderReport(report);
       } catch (e) { setStatus($("scoreStatus"), e.message, false); }
     };
@@ -270,7 +331,7 @@
       let h = "<h2>Reliability</h2><table><tr><th>Index</th><th>Value</th><th>Band</th></tr>";
       h += "<tr><td>Difficulty-Consistency (DC)</td><td>" + fmt(r.ari && r.ari.dc) + "</td><td></td></tr>";
       h += "<tr><td>Time-Consistency (TC)</td><td>" + fmt(r.ari && r.ari.tc) + (r.ari && !r.ari.timingAvailable ? ' <span class="muted">(no timing)</span>' : "") + "</td><td></td></tr>";
-      h += "<tr><td>Aptitude Reliability (ARI)</td><td>" + fmt(r.ari && r.ari.ari) + "</td><td>" + pill(r.ari && r.ari.level) + "</td></tr>";
+      h += "<tr><td>Aptitude Reliability (ARI)</td><td>" + fmt(r.ari && r.ari.ari && r.ari.ari.score) + "</td><td>" + pill(r.ari && r.ari.ari && r.ari.ari.level) + "</td></tr>";
       h += "<tr><td>Aptitude Confidence (ACI)</td><td>" + fmt(r.aci && r.aci.dkPercent) + "% DK</td><td>" + pill(r.aci && r.aci.level) + "</td></tr>";
       h += "<tr><td>Overall Reliability (ORI)</td><td>" + fmt(r.ori && r.ori.minutes) + " min</td><td>" + pill(r.ori && r.ori.level) + "</td></tr>";
       h += "<tr><td>Response Validity (RVS)</td><td>" + fmt(r.rvs && r.rvs.score) + "</td><td>" + pill(r.rvs && r.rvs.level) + "</td></tr>";

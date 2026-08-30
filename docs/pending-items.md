@@ -54,9 +54,16 @@ that case. Docs: `docs/api-list.md`, `docs/frontend-integration-guide.md`, OpenA
   guide already *documented* `timeTakenMs` before it worked — the field was silently
   dropped; that contract is now real.
 
-**Not done (optional follow-up):** the dev tester at `public/assessment-tester.html`
-doesn't send timing, so exercising ARI by hand still means crafting a `score-preview`
-call. A "simulate timing" toggle there would close that gap.
+**Follow-up — DONE 2026-08-30:** the dev tester at `public/assessment-tester.html` now
+sends timing. A **Per-question timing** selector offers `off` (the deferred
+`meta.pending` path), `measured` (real dwell time between successive answer clicks) and
+three synthetic modes — `unhurried` (20s, no TC penalty), `rushed` (2s, penalties fire on
+hard/wrong items) and `mixed` (random 1–15s, straddling the 5s threshold). The score
+status line reports how many aptitude answers carried timing and whether that's enough
+for ARI to compute. Also fixed a latent bug in the same file: the ARI row read
+`reliability.ari.ari` as a scalar and the band as `reliability.ari.level`, so a computed
+ARI would have rendered `[object Object]` with a blank band — invisible while ARI was
+always null.
 
 ### 1.2 Workflow: the last four lifecycle stages never advance on their own
 
@@ -222,8 +229,6 @@ These described the codebase as it was, not as it is:
   routes) and feedback (2 routes) had no `registry.registerPath(...)`, so they never
   appeared in Swagger. Fixed as part of 1.2. Worth a periodic audit: the spec is
   hand-maintained, and nothing fails when a route is forgotten.
-- **`public/assessment-tester.html` doesn't send `timeTakenMs`** — see 1.1's follow-up
-  note. Small QA gap, not a product gap.
 - **Report access is not gated on feedback completion.** `docs/db-design.md` records an
   unresolved source-doc conflict: one spec gates report *generation* on both student and
   parent feedback, another gates only the *download* on parent feedback. Today
