@@ -27,10 +27,7 @@ Counsellor
  ├─ User (1:1, role=COUNSELLOR)
  ├─ CounsellorSlot (per project — discrete bookable slots)
  ├─ ProjectCounsellor (assigned projects)
- ├─ Session (as the assigned counsellor)
- └─ CareerLibraryRequest (submitted by)
-
-CareerLibraryEntry ← CareerLibraryRequest (ratification workflow)
+ └─ Session (as the assigned counsellor)
 ```
 
 ## Why `Project` sits between `Institute` and `Student`
@@ -353,29 +350,28 @@ cross-table mapping.
 | entranceExamsPG | String[] | PG level |
 | certificationsStudent, certificationsUG | String[] | source distinguishes pre-UG vs. during-UG certification recommendations |
 | topCourses | String[] | tag-style multi-value |
-| status | `CareerLibraryStatus` enum | DRAFT / ACTIVE — the publish flag |
-| reviewStatus | `ReviewStatus` enum | PENDING / APPROVED / REJECTED — orthogonal to `status`: `status` is "is it published", `reviewStatus` is "has an admin agreed it belongs". Defaults to `APPROVED`, so seeded and admin-created rows need no review. A counsellor creating a role gets `PENDING` + `status:DRAFT`, filtered out of every read until an admin approves. **REJECTED is never persisted here** — rejecting a job role deletes the row; the value exists only because the enum is shared with the reference tables. Indexed |
-| reviewedBy, reviewedAt | String?, DateTime? | who approved it, when. `createdBy` doubles as the submitter stamp, so there's no separate `submittedBy` |
-| createdBy, updatedBy | String | User id, or `"seed:career-library-import"` for bulk-imported rows |
+| status | `CareerLibraryStatus` enum | DRAFT / ACTIVE — the publish flag. A counsellor never writes this table directly (see `CareerLibraryEntryProposal` below), so every row here was either admin-authored or copied in on proposal approval — there's no separate review state to track |
+| createdBy, updatedBy | String | User id, or `"seed:career-library-import"` for bulk-imported rows. On a proposal-approved row, `createdBy` is the counsellor who submitted it, not the admin who approved it |
 
-### `CareerLibraryRequest`
-Counsellor-submitted request to add an unlisted career; reviewed by Admin/Super Admin
-before becoming a permanent `CareerLibraryEntry`. This is the **lightweight** proposal path —
-a few fields plus a justification, with the admin building the real entry by hand afterwards
-(approving a request never creates one). A counsellor who wants to submit a *complete* role
-posts it to `CareerLibraryEntry` directly and it's held via `reviewStatus` above; both paths
-are live.
+### `CareerLibraryEntryProposal`
+A counsellor's proposed job role, staged **entirely outside** `CareerLibraryEntry` — the
+real table only ever holds admin-authored or admin-approved rows, with no `PENDING`/`DRAFT`
+rows to filter out of reads. Mirrors `CareerLibraryEntry`'s scalar columns; the exam/course/
+institution/education-entry links are recorded as plain id arrays (`examIds`, `courseIds`,
+`institutionIds`, `educationEntryIds`) rather than join-table rows, since there's no real
+`CareerLibraryEntry.id` to join against yet. Approving copies the row into a **new**
+`CareerLibraryEntry` (fresh id, `status:ACTIVE`) and materializes the join-table rows from
+those id arrays, then deletes the proposal; rejecting just deletes it. No DB-level FK on
+`domainId` — validated against the live taxonomy in the service instead, since the row is
+meant to be short-lived. See `POST/GET /career-library/proposals` and
+`/proposals/{id}/approve`\|`reject` in `docs/api-list.md`.
 
 | Field | Type | Notes |
 |---|---|---|
-| requestedById | String | Counsellor id |
-| jobTitle, suggestedCluster, suggestedIndustry | String | |
-| suggestedDomain | String? | optional |
-| oneLineDescription, justification | String | |
-| referenceLinks | String[] | optional sources |
-| status | `CareerRequestStatus` enum | PENDING / APPROVED / REJECTED |
-| reviewedBy, reviewedAt | nullable | who approved/rejected, when |
-| resultingEntryId | String? | FK → CareerLibraryEntry, once approved |
+| (scalar fields) | — | same as `CareerLibraryEntry` minus `entranceExams`/`entranceExamsPG`/`topCourses`/`status`/`createdBy`/`updatedBy` — those three String[] columns and the join rows are derived from the id arrays below at approval time |
+| examIds, courseIds, institutionIds, educationEntryIds | String[] | ids of already-resolved `EntranceExam`/`Course`/`Institution`/`EducationEntry` rows (find-or-create against those real tables happens at submit time, same as the admin-only inline "add new") |
+| submittedBy | String | User id (counsellor) |
+| createdAt, updatedAt | DateTime | |
 
 ### Career Library workbook import — UG/PG reference tables
 
@@ -456,28 +452,33 @@ course is reference data, not a second place to curate per-career links. When an
 "add new" names a row that already exists, only **blank** columns are filled — canonical
 rows are shared across job roles, so linking one must never overwrite another role's data.
 
-### Reference-data review — `ReviewStatus`
+### Reference-data review — `CareerLibraryStatus`
 
-`EntranceExam`, `Course` and `Institution` each carry the same five
-review columns: `status` (`ReviewStatus` = `PENDING`/`APPROVED`/`REJECTED`, **default
-`APPROVED`**), `submittedBy`, `reviewedBy`, `reviewedAt`, `rejectionReason`, plus an index on
-`status`.
+`EntranceExam`, `Course` and `Institution` each carry `status`
+(`CareerLibraryStatus` = `DRAFT`/`ACTIVE`, **default `ACTIVE`**) and `submittedBy`, plus an
+index on `status` — the same two-state publish flag `EducationEntry`/`CareerLibraryEntry`
+use, not a separate three-state review enum.
 
-Counsellors may propose any of these three; admins approve or reject. Review is **in place** —
-the row *is* the submission, so approving flips a status rather than creating anything.
+Counsellors may propose any of these three; admins publish or reject. Review is **in
+place** — the row *is* the submission, so approving is a plain `DRAFT`→`ACTIVE` flip rather
+than creating anything. There is deliberately no rejected-but-kept state: reject hard-deletes
+the row (refused with a 409 if it's already `ACTIVE`, or still linked to a job role — the
+join table would cascade the link away silently), so a mistaken name doesn't block reuse and
+there's no `reviewedBy`/`reviewedAt`/`rejectionReason` audit trail to carry.
 
-Two tables reach the same outcome by other means:
+This table previously used a 3-state `ReviewStatus` (`PENDING`/`APPROVED`/`REJECTED`) with a
+rejected-but-kept row that could be reopened by re-proposing the same name, plus the audit
+columns above. That was collapsed to the current 2-state flag when job-role proposals moved
+to their own table (`CareerLibraryEntryProposal`, see above) — keeping a 3-state enum here
+only for these three tables stopped pulling its weight once nothing else needed it.
 
-- `CareerLibraryEntry` carries its own `reviewStatus` (added later, see above) so a counsellor
-  can submit a **complete job role** through the ordinary create route and have it held for
-  approval. Same in-place idea, separate column because the entry already had a `status` that
-  means something else (published vs. not).
-- `EducationEntry` opts out of `ReviewStatus` entirely — its `DRAFT`/`ACTIVE` publish flag
-  already expresses "not in the pickers yet", so its approve/reject endpoints operate on that
-  instead of a fourth status column (see below).
+Two tables reach the same publish-flag outcome for a different kind of submission:
 
-`CareerLibraryRequest` remains a separate ticket, and stays that way: it's a short suggestion
-an admin re-keys into an entry, not a submission that can be published in place.
+- `CareerLibraryEntry` doesn't carry a review column of its own any more — a counsellor's
+  **complete job role** submission is staged entirely in `CareerLibraryEntryProposal` instead
+  of ever landing in this table with a pending flag (see above).
+- `EducationEntry` uses the identical `DRAFT`/`ACTIVE` flag for the same reason these three
+  do — see below.
 
 - The column default is `APPROVED` so the migration leaves the already-seeded library
   (166 exams / 677 institutions / 1,319 courses) visible.
@@ -502,7 +503,7 @@ once per domain.
 
 | Model | Key fields | Notes |
 |---|---|---|
-| `EducationEntry` | `level` (`EducationPathLevel`), `programme`, `description?`, `status` (`CareerLibraryStatus`), `submittedBy?` | `(level, programme)` **unique in the DB**. Indexed on `programme` (typeahead) and `status`. No `ReviewStatus` columns and no `deletedAt`: `status` is the same `DRAFT`/`ACTIVE` publish flag `CareerLibraryEntry` uses, and delete is permanent. Its `/approve` endpoint publishes `DRAFT`→`ACTIVE`; `/reject` deletes, and refuses while any `CareerEducationEntry` still points at it (those cascade, so it would silently strip the programme from live roles) |
+| `EducationEntry` | `level` (`EducationPathLevel`), `programme`, `description?`, `status` (`CareerLibraryStatus`), `submittedBy?` | `(level, programme)` **unique in the DB**. Indexed on `programme` (typeahead) and `status`. No reviewer/rejection audit columns and no `deletedAt`: `status` is the same `DRAFT`/`ACTIVE` publish flag `CareerLibraryEntry`/`EntranceExam`/`Course`/`Institution` use, and delete is permanent. Its `/approve` endpoint publishes `DRAFT`→`ACTIVE`; `/reject` deletes, and refuses while any `CareerEducationEntry` still points at it (those cascade, so it would silently strip the programme from live roles) |
 | `CareerEducationEntry` | `careerEntryId` + `educationEntryId` (composite PK, cascade) | many-to-many; which entries this job role uses. **The only link between an education entry and the taxonomy** — a domain relates to entries transitively, through its roles |
 
 `EducationPathLevel` = `CLASS_10_PLUS_2` \| `GRADUATE` \| `POST_GRADUATE` \|

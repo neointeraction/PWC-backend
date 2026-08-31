@@ -1,19 +1,17 @@
 import { Prisma } from "@prisma/client";
-import type { EducationPathLevel, ReviewStatus, UserRole } from "@prisma/client";
+import type { CareerLibraryStatus, EducationPathLevel, UserRole } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { assertLiveDomain } from "../career-taxonomy/career-taxonomy.service.js";
 import type {
-  ApproveCareerRequestInput,
   CourseLinkItem,
   CreateCareerEntryInput,
-  CreateCareerRequestInput,
   EducationLinkItem,
   ExamLinkItem,
   InstitutionLinkItem,
+  ListCareerEntryProposalsQuery,
   ListCareerLibraryQuery,
-  ListCareerRequestsQuery,
   ListCoursesQuery,
   ListEducationEntriesQuery,
   CreateEducationEntryInput,
@@ -34,27 +32,19 @@ export interface Actor {
 
 const isAdmin = (actor: Actor): boolean => actor.role === "ADMIN" || actor.role === "SUPER_ADMIN";
 
-// Review state for a reference row this actor is creating. An admin's addition is live
-// immediately (and counts as its own approval); a counsellor's waits for review.
+// Publish state for a reference row this actor is creating. An admin's addition is live
+// (ACTIVE) immediately; a counsellor's lands DRAFT and is hidden from the pickers.
 function reviewOnCreate(actor: Actor) {
   return isAdmin(actor)
-    ? { status: "APPROVED" as const, submittedBy: actor.userId, reviewedBy: actor.userId, reviewedAt: new Date() }
-    : { status: "PENDING" as const, submittedBy: actor.userId };
+    ? { status: "ACTIVE" as const, submittedBy: actor.userId }
+    : { status: "DRAFT" as const, submittedBy: actor.userId };
 }
 
-// What to do when a find-or-create lands on a row that already exists:
-//   - an ADMIN naming a row a counsellor proposed is an implicit approval;
-//   - anyone re-proposing a REJECTED row reopens it for review;
-//   - otherwise leave the review state alone.
-// Returned as an update patch, merged with the blank-fill patch by the callers below.
-function reviewOnReuse(existing: { status: ReviewStatus }, actor: Actor) {
-  if (existing.status === "PENDING" && isAdmin(actor)) {
-    return { status: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date() };
-  }
-  if (existing.status === "REJECTED") {
-    return isAdmin(actor)
-      ? { status: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date(), rejectionReason: null }
-      : { status: "PENDING" as const, submittedBy: actor.userId, reviewedBy: null, reviewedAt: null, rejectionReason: null };
+// What to do when a find-or-create lands on a row that already exists: an admin naming a
+// row a counsellor proposed is an implicit publish. Otherwise leave the status alone.
+function reviewOnReuse(existing: { status: CareerLibraryStatus }, actor: Actor) {
+  if (existing.status === "DRAFT" && isAdmin(actor)) {
+    return { status: "ACTIVE" as const };
   }
   return {};
 }
@@ -73,6 +63,14 @@ const domainChainInclude = {
   },
 } satisfies Prisma.CareerLibraryEntryInclude;
 
+const domainChainSelect = {
+  id: true,
+  name: true,
+  industry: {
+    select: { id: true, name: true, cluster: { select: { id: true, name: true } } },
+  },
+} satisfies Prisma.CareerDomainSelect;
+
 export async function listCareerLibraryEntries(query: ListCareerLibraryQuery) {
   const search = query.search;
   // Taxonomy filters at any level, traversed through the leaf domain relation. Merged into one
@@ -83,9 +81,6 @@ export async function listCareerLibraryEntries(query: ListCareerLibraryQuery) {
 
   const where: Prisma.CareerLibraryEntryWhereInput = {
     status: query.status,
-    // APPROVED unless the caller asked otherwise, so a counsellor's pending submission is
-    // invisible to the library (students included) until an admin approves it.
-    reviewStatus: query.reviewStatus,
     aiResilienceGrade: query.aiResilienceGrade,
     ...(query.domainId ? { domainId: query.domainId } : {}),
     ...(Object.keys(domainFilter).length ? { domain: domainFilter } : {}),
@@ -162,18 +157,64 @@ export async function getCareerLibraryFilters() {
 // UG entrance exams by the extracted exam-name list. Plain value matches, not FKs.
 // Selects the curated normalized links (the per-career exams/courses/colleges), flattened
 // onto the entry as `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions`.
+const entranceExamDetailSelect = {
+  id: true,
+  name: true,
+  level: true,
+  fullForm: true,
+  conductingBody: true,
+  officialWebsite: true,
+  examMode: true,
+  frequency: true,
+  applicableFor: true,
+  subjectRequirements12th: true,
+  applicationWindow: true,
+  status: true,
+  submittedBy: true,
+} satisfies Prisma.EntranceExamSelect;
+
+const courseDetailSelect = {
+  id: true,
+  name: true,
+  level: true,
+  fullForm: true,
+  durationYears: true,
+  stream12thRequirements: true,
+  relevantEntranceExams: true,
+  programmesOffered: true,
+  topColleges: true,
+  furtherStudyOptions: true,
+  status: true,
+  submittedBy: true,
+} satisfies Prisma.CourseSelect;
+
+const institutionDetailSelect = {
+  id: true,
+  name: true,
+  shortName: true,
+  city: true,
+  state: true,
+  type: true,
+  website: true,
+  entranceExamsRequired: true,
+  programmesOffered: true,
+  ranking: true,
+  status: true,
+  submittedBy: true,
+} satisfies Prisma.InstitutionSelect;
+
 const entryLinkInclude = {
   ...domainChainInclude,
   entranceExamLinks: {
-    select: { entranceExam: { select: { id: true, name: true, level: true, fullForm: true, status: true } } },
+    select: { entranceExam: { select: entranceExamDetailSelect } },
     orderBy: { entranceExam: { name: "asc" } },
   },
   courseLinks: {
-    select: { course: { select: { id: true, name: true, level: true, status: true } } },
+    select: { course: { select: courseDetailSelect } },
     orderBy: { course: { name: "asc" } },
   },
   institutionLinks: {
-    select: { institution: { select: { id: true, name: true, city: true, state: true, status: true } } },
+    select: { institution: { select: institutionDetailSelect } },
     orderBy: { institution: { name: "asc" } },
   },
   educationLinks: {
@@ -334,11 +375,10 @@ async function resolveInstitutions(items: InstitutionLinkItem[], actor: Actor): 
   return [...resolved.values()];
 }
 
-// Education Path items are scoped to the entry's own domain: a new `{ level, programme }`
-// Education entries are global, so a `{ level, programme }` item find-or-creates one shared
-// row and an `{ id }` may be any existing entry. Unlike the exam/course/institution lookups
-// there is no review status to reconcile — an admin adding one inline publishes it ACTIVE,
-// which is what the job-role form (admin-only) implies.
+// Education Path items are global canonical rows: a new `{ level, programme }` item
+// find-or-creates one shared row and an `{ id }` may be any existing entry. Unlike the
+// exam/course/institution lookups there is no review status to reconcile — an admin adding
+// one inline publishes it ACTIVE, which is what the job-role form (admin-only) implies.
 async function resolveEducationEntries(
   items: EducationLinkItem[],
   actor: Actor
@@ -381,6 +421,9 @@ async function resolveEducationEntries(
   return [...resolved.values()];
 }
 
+// An admin's submission goes straight into the real table (as before); a counsellor's is
+// staged in `CareerLibraryEntryProposal` instead of ever touching career_library_entries —
+// see docs/career-library-normalization-spec.md for why the tables are split.
 export async function createCareerEntry(input: CreateCareerEntryInput, actor: Actor) {
   const { entranceExams = [], courses = [], institutions = [], educationEntries = [], ...scalar } = input;
   await assertLiveDomain(scalar.domainId); // 400 if domainId isn't a live taxonomy leaf
@@ -390,17 +433,26 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
     resolveInstitutions(institutions, actor),
     resolveEducationEntries(educationEntries, actor),
   ]);
-  // An admin's addition is live as submitted and counts as its own approval; a
-  // counsellor's is held for review and forced to DRAFT regardless of what it asked for,
-  // so an unapproved role can never be published by its own submitter.
-  const review = isAdmin(actor)
-    ? { reviewStatus: "APPROVED" as const, reviewedBy: actor.userId, reviewedAt: new Date() }
-    : { reviewStatus: "PENDING" as const, status: "DRAFT" as const };
+
+  if (!isAdmin(actor)) {
+    const { status: _status, ...proposalScalar } = scalar;
+    const proposal = await prisma.careerLibraryEntryProposal.create({
+      data: {
+        ...proposalScalar,
+        examIds: exams.map((e) => e.id),
+        courseIds: crs.map((c) => c.id),
+        institutionIds: insts.map((i) => i.id),
+        educationEntryIds: edu.map((e) => e.id),
+        submittedBy: actor.userId,
+      },
+    });
+    return getCareerEntryProposalById(proposal.id);
+  }
+
   try {
     const created = await prisma.careerLibraryEntry.create({
       data: {
         ...scalar,
-        ...review,
         createdBy: actor.userId,
         // Dual-write the transitional String[] columns from the resolved names.
         entranceExams: exams.filter((e) => e.level === "UG").map((e) => e.name),
@@ -616,7 +668,7 @@ export async function deleteEducationEntry(entryId: string) {
 // The inline "add new" inside the job-role form is admin-only (that form is), so this is
 // the path a counsellor uses to propose reference data on its own. Same find-or-create
 // semantics as the link items: an existing row is reused and blank-filled rather than
-// duplicated, and `reviewOnReuse` decides whether that reuse approves or reopens it.
+// duplicated, and `reviewOnReuse` decides whether that reuse publishes it.
 
 export async function submitEntranceExam(input: SubmitEntranceExamInput, actor: Actor) {
   const { name, level, ...detail } = input;
@@ -660,138 +712,208 @@ export async function submitInstitution(input: SubmitInstitutionInput, actor: Ac
   return prisma.institution.create({ data: { name, ...detail, ...reviewOnCreate(actor) } });
 }
 
-// Review is in place: the row IS the submission, so approving flips its status rather than
-// creating anything. Re-reviewing a row that was already decided is a 409 — the admin is
-// looking at a stale queue.
-// Every reviewable table carries the same five review columns, so one helper serves all
-// of them — but Prisma's per-model delegates don't unify, so each entity supplies its own
-// find/update closures rather than being reached through an index.
-type ReviewPatch = {
-  status: ReviewStatus;
-  reviewedBy: string;
-  reviewedAt: Date;
-  rejectionReason: string | null;
-};
-
+// Review is in place: the row IS the submission, so approving flips DRAFT -> ACTIVE rather
+// than creating anything. Rejecting hard-deletes it (no REJECTED-but-kept state, unlike the
+// old 3-state ReviewStatus) — refused when the row is already linked to a job role, since
+// the join tables cascade-delete and would silently strip it from every role that used it.
+// Every reviewable table carries the same status column plus one join table, so one helper
+// pair serves all of them — but Prisma's per-model delegates don't unify, so each entity
+// supplies its own find/update/countLinks/remove closures rather than being reached through
+// an index.
 interface Reviewable {
   label: string;
-  find: (id: string) => Promise<{ id: string; status: ReviewStatus } | null>;
-  update: (id: string, data: ReviewPatch) => Promise<unknown>;
+  find: (id: string) => Promise<{ id: string; status: CareerLibraryStatus } | null>;
+  publish: (id: string) => Promise<unknown>;
+  countLinks: (id: string) => Promise<number>;
+  remove: (id: string) => Promise<unknown>;
 }
 
 const reviewables = {
   entranceExam: {
     label: "Entrance exam",
-    find: (id) => prisma.entranceExam.findUnique({ where: { id } }),
-    update: (id, data) => prisma.entranceExam.update({ where: { id }, data }),
+    find: (id) => prisma.entranceExam.findUnique({ where: { id }, select: { id: true, status: true } }),
+    publish: (id) => prisma.entranceExam.update({ where: { id }, data: { status: "ACTIVE" } }),
+    countLinks: (id) => prisma.careerEntranceExam.count({ where: { entranceExamId: id } }),
+    remove: (id) => prisma.entranceExam.delete({ where: { id } }),
   },
   course: {
     label: "Course",
-    find: (id) => prisma.course.findUnique({ where: { id } }),
-    update: (id, data) => prisma.course.update({ where: { id }, data }),
+    find: (id) => prisma.course.findUnique({ where: { id }, select: { id: true, status: true } }),
+    publish: (id) => prisma.course.update({ where: { id }, data: { status: "ACTIVE" } }),
+    countLinks: (id) => prisma.careerCourse.count({ where: { courseId: id } }),
+    remove: (id) => prisma.course.delete({ where: { id } }),
   },
   institution: {
     label: "Institution",
-    find: (id) => prisma.institution.findUnique({ where: { id } }),
-    update: (id, data) => prisma.institution.update({ where: { id }, data }),
+    find: (id) => prisma.institution.findUnique({ where: { id }, select: { id: true, status: true } }),
+    publish: (id) => prisma.institution.update({ where: { id }, data: { status: "ACTIVE" } }),
+    countLinks: (id) => prisma.careerInstitution.count({ where: { institutionId: id } }),
+    remove: (id) => prisma.institution.delete({ where: { id } }),
   },
 } satisfies Record<string, Reviewable>;
 
-async function reviewLookup(
-  kind: keyof typeof reviewables,
-  id: string,
-  decision: "APPROVED" | "REJECTED",
-  actor: Actor,
-  rejectionReason?: string
-) {
-  const { label, find, update } = reviewables[kind];
+async function approveLookup(kind: keyof typeof reviewables, id: string) {
+  const { label, find, publish } = reviewables[kind];
   const existing = await find(id);
   if (!existing) throw new NotFoundError(`${label} not found`);
-  if (existing.status !== "PENDING") {
-    throw new ConflictError(`${label} has already been ${existing.status.toLowerCase()}`);
-  }
-  return update(id, {
-    status: decision,
-    reviewedBy: actor.userId,
-    reviewedAt: new Date(),
-    rejectionReason: decision === "REJECTED" ? rejectionReason ?? null : null,
-  });
+  if (existing.status === "ACTIVE") throw new ConflictError(`${label} is already active`);
+  return publish(id);
 }
 
-export const approveEntranceExam = (id: string, actor: Actor) => reviewLookup("entranceExam", id, "APPROVED", actor);
-export const rejectEntranceExam = (id: string, actor: Actor, reason?: string) =>
-  reviewLookup("entranceExam", id, "REJECTED", actor, reason);
-export const approveCourse = (id: string, actor: Actor) => reviewLookup("course", id, "APPROVED", actor);
-export const rejectCourse = (id: string, actor: Actor, reason?: string) =>
-  reviewLookup("course", id, "REJECTED", actor, reason);
-export const approveInstitution = (id: string, actor: Actor) => reviewLookup("institution", id, "APPROVED", actor);
-export const rejectInstitution = (id: string, actor: Actor, reason?: string) =>
-  reviewLookup("institution", id, "REJECTED", actor, reason);
+async function rejectLookup(kind: keyof typeof reviewables, id: string) {
+  const { label, find, countLinks, remove } = reviewables[kind];
+  const existing = await find(id);
+  if (!existing) throw new NotFoundError(`${label} not found`);
+  if (existing.status === "ACTIVE") {
+    throw new ConflictError(`${label} is already active — unpublish it before rejecting`);
+  }
+  const linked = await countLinks(id);
+  if (linked > 0) {
+    throw new ConflictError(`${label} is linked to ${linked} job role(s) — unlink them before rejecting`);
+  }
+  await remove(id);
+  return { id, deleted: true };
+}
+
+export const approveEntranceExam = (id: string) => approveLookup("entranceExam", id);
+export const rejectEntranceExam = (id: string) => rejectLookup("entranceExam", id);
+export const approveCourse = (id: string) => approveLookup("course", id);
+export const rejectCourse = (id: string) => rejectLookup("course", id);
+export const approveInstitution = (id: string) => approveLookup("institution", id);
+export const rejectInstitution = (id: string) => rejectLookup("institution", id);
 
 export async function deleteCareerEntry(id: string) {
   const entry = await prisma.careerLibraryEntry.findUnique({ where: { id } });
   if (!entry) {
     throw new NotFoundError("Career library entry not found");
   }
-  // A ratification request may point at this entry (resultingEntryId, ON DELETE RESTRICT).
-  // Detach those links first so the delete can proceed without orphaning the request.
-  await prisma.$transaction([
-    prisma.careerLibraryRequest.updateMany({
-      where: { resultingEntryId: id },
-      data: { resultingEntryId: null },
-    }),
-    prisma.careerLibraryEntry.delete({ where: { id } }),
+  await prisma.careerLibraryEntry.delete({ where: { id } });
+}
+
+// --- Job role proposals (counsellor submits, admin decides) --------------------
+// A counsellor's job role is staged entirely in `CareerLibraryEntryProposal`, never touching
+// career_library_entries. Approving copies it into a fresh CareerLibraryEntry (new id,
+// status ACTIVE) and materializes the join-table rows from the proposal's resolved id
+// arrays; rejecting just deletes the proposal. Nothing about an unapproved role is worth
+// keeping, and it keeps the real table free of tombstones or PENDING rows to filter out.
+
+async function hydrateProposal<
+  T extends {
+    domainId: string;
+    examIds: string[];
+    courseIds: string[];
+    institutionIds: string[];
+    educationEntryIds: string[];
+  },
+>(proposal: T) {
+  const [domain, linkedEntranceExams, linkedCourses, linkedInstitutions, linkedEducationEntries] = await Promise.all([
+    prisma.careerDomain.findUnique({ where: { id: proposal.domainId }, select: domainChainSelect }),
+    proposal.examIds.length
+      ? prisma.entranceExam.findMany({ where: { id: { in: proposal.examIds } }, select: entranceExamDetailSelect })
+      : Promise.resolve([]),
+    proposal.courseIds.length
+      ? prisma.course.findMany({ where: { id: { in: proposal.courseIds } }, select: courseDetailSelect })
+      : Promise.resolve([]),
+    proposal.institutionIds.length
+      ? prisma.institution.findMany({ where: { id: { in: proposal.institutionIds } }, select: institutionDetailSelect })
+      : Promise.resolve([]),
+    proposal.educationEntryIds.length
+      ? prisma.educationEntry.findMany({
+          where: { id: { in: proposal.educationEntryIds } },
+          select: { id: true, level: true, programme: true, description: true, status: true },
+        })
+      : Promise.resolve([]),
   ]);
+  return { ...proposal, domain, linkedEntranceExams, linkedCourses, linkedInstitutions, linkedEducationEntries };
 }
 
-// --- Job role review (counsellor submits a full role, admin decides) ------------
-// The row IS the submission, so approving publishes it in place rather than creating
-// anything. Rejecting hard-deletes it: nothing about an unapproved role is worth keeping,
-// and it keeps the job-role table free of tombstones.
-
-async function findPendingCareerEntry(id: string) {
-  const entry = await prisma.careerLibraryEntry.findUnique({
-    where: { id },
-    select: { id: true, reviewStatus: true },
-  });
-  if (!entry) {
-    throw new NotFoundError("Career library entry not found");
-  }
-  // Anything already decided means the admin is working from a stale queue.
-  if (entry.reviewStatus !== "PENDING") {
-    throw new ConflictError(`Career library entry has already been ${entry.reviewStatus.toLowerCase()}`);
-  }
-  return entry;
-}
-
-// Approve publishes the role: APPROVED review state *and* ACTIVE, so a single admin action
-// puts it in the library rather than leaving a DRAFT nobody remembers to flip.
-export async function approveCareerEntry(id: string, actor: Actor) {
-  await findPendingCareerEntry(id);
-  await prisma.careerLibraryEntry.update({
-    where: { id },
-    data: {
-      reviewStatus: "APPROVED",
-      status: "ACTIVE",
-      reviewedBy: actor.userId,
-      reviewedAt: new Date(),
+export async function listCareerEntryProposals(query: ListCareerEntryProposalsQuery) {
+  const where: Prisma.CareerLibraryEntryProposalWhereInput = {
+    ...(query.domainId ? { domainId: query.domainId } : {}),
+    ...(query.search ? { jobRole: { contains: query.search, mode: "insensitive" } } : {}),
+  };
+  const [total, proposals] = await Promise.all([
+    prisma.careerLibraryEntryProposal.count({ where }),
+    prisma.careerLibraryEntryProposal.findMany({
+      where,
+      orderBy: { createdAt: "asc" },
+      skip: (query.page - 1) * query.pageSize,
+      take: query.pageSize,
+    }),
+  ]);
+  return {
+    data: await Promise.all(proposals.map(hydrateProposal)),
+    pagination: {
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      totalPages: Math.ceil(total / query.pageSize),
     },
-  });
-  return getCareerLibraryEntryById(id);
+  };
 }
 
-// Reject deletes. Its link rows (exams/courses/institutions/education) cascade, and any
-// canonical lookup the submission created stays behind — those are reviewed on their own.
-export async function rejectCareerEntry(id: string) {
-  await findPendingCareerEntry(id);
-  await deleteCareerEntry(id);
+async function findCareerEntryProposal(id: string) {
+  const proposal = await prisma.careerLibraryEntryProposal.findUnique({ where: { id } });
+  if (!proposal) throw new NotFoundError("Career library entry proposal not found");
+  return proposal;
+}
+
+export async function getCareerEntryProposalById(id: string) {
+  return hydrateProposal(await findCareerEntryProposal(id));
+}
+
+export async function approveCareerEntryProposal(id: string, actor: Actor) {
+  const proposal = await findCareerEntryProposal(id);
+  const { id: _id, examIds, courseIds, institutionIds, educationEntryIds, submittedBy, createdAt, updatedAt, domainId, ...scalar } =
+    proposal;
+  await assertLiveDomain(domainId); // taxonomy may have moved on since the submission
+
+  const [exams, courses] = await Promise.all([
+    examIds.length
+      ? prisma.entranceExam.findMany({ where: { id: { in: examIds } }, select: { id: true, name: true, level: true } })
+      : Promise.resolve([]),
+    courseIds.length
+      ? prisma.course.findMany({ where: { id: { in: courseIds } }, select: { id: true, name: true } })
+      : Promise.resolve([]),
+  ]);
+
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const entry = await tx.careerLibraryEntry.create({
+        data: {
+          ...scalar,
+          domainId,
+          status: "ACTIVE",
+          createdBy: submittedBy,
+          entranceExams: exams.filter((e) => e.level === "UG").map((e) => e.name),
+          entranceExamsPG: exams.filter((e) => e.level === "PG").map((e) => e.name),
+          topCourses: courses.map((c) => c.name),
+          entranceExamLinks: { create: examIds.map((entranceExamId) => ({ entranceExamId })) },
+          courseLinks: { create: courseIds.map((courseId) => ({ courseId })) },
+          institutionLinks: { create: institutionIds.map((institutionId) => ({ institutionId })) },
+          educationLinks: { create: educationEntryIds.map((educationEntryId) => ({ educationEntryId })) },
+        },
+        select: { id: true },
+      });
+      await tx.careerLibraryEntryProposal.delete({ where: { id } });
+      return entry;
+    });
+    return getCareerLibraryEntryById(created.id);
+  } catch (err) {
+    handlePrismaError(err);
+  }
+}
+
+export async function rejectCareerEntryProposal(id: string) {
+  await findCareerEntryProposal(id);
+  await prisma.careerLibraryEntryProposal.delete({ where: { id } });
   return { id, deleted: true };
 }
 
 // --- Education Path review -----------------------------------------------------
-// Education entries carry DRAFT/ACTIVE rather than a ReviewStatus (see `EducationEntry`),
-// so "pending" here means DRAFT: a counsellor's create lands there, an admin's goes
-// straight to ACTIVE. Approving publishes it into the pickers.
+// Education entries carry DRAFT/ACTIVE (see `EducationEntry`), so "pending" here means
+// DRAFT: a counsellor's create lands there, an admin's goes straight to ACTIVE. Approving
+// publishes it into the pickers.
 
 export async function approveEducationEntry(entryId: string) {
   const existing = await getEducationEntry(entryId);
@@ -819,103 +941,3 @@ export async function rejectEducationEntry(entryId: string) {
   return { id: entryId, deleted: true };
 }
 
-// --- Ratification requests -----------------------------------------------------
-
-// Resolves the Counsellor id that owns a new request. Counsellors file as themselves
-// (resolved from their token); an admin/super admin may file on behalf of a counsellor by
-// passing `requestedById` explicitly.
-async function resolveRequesterCounsellorId(actor: Actor, requestedById?: string): Promise<string> {
-  if (actor.role === "COUNSELLOR") {
-    const counsellor = await prisma.counsellor.findUnique({
-      where: { userId: actor.userId },
-      select: { id: true },
-    });
-    if (!counsellor) {
-      throw new BadRequestError("No counsellor profile is linked to this account");
-    }
-    return counsellor.id;
-  }
-  // Admin/super admin acting on behalf of a counsellor.
-  if (!requestedById) {
-    throw new BadRequestError("requestedById is required when an admin submits a request");
-  }
-  const counsellor = await prisma.counsellor.findUnique({ where: { id: requestedById }, select: { id: true } });
-  if (!counsellor) {
-    throw new BadRequestError("requestedById does not match a counsellor");
-  }
-  return counsellor.id;
-}
-
-export async function createCareerRequest(input: CreateCareerRequestInput, actor: Actor) {
-  const requestedById = await resolveRequesterCounsellorId(actor, input.requestedById);
-  return prisma.careerLibraryRequest.create({
-    data: {
-      requestedById,
-      jobTitle: input.jobTitle,
-      suggestedCluster: input.suggestedCluster,
-      suggestedIndustry: input.suggestedIndustry,
-      suggestedDomain: input.suggestedDomain,
-      oneLineDescription: input.oneLineDescription,
-      justification: input.justification,
-      referenceLinks: input.referenceLinks,
-    },
-  });
-}
-
-export async function listCareerRequests(query: ListCareerRequestsQuery) {
-  return prisma.careerLibraryRequest.findMany({
-    where: { status: query.status, requestedById: query.requestedById },
-    include: { resultingEntry: { select: { id: true, jobRole: true, status: true } } },
-    orderBy: { createdAt: "desc" },
-  });
-}
-
-export async function getCareerRequestById(requestId: string) {
-  const request = await prisma.careerLibraryRequest.findUnique({
-    where: { id: requestId },
-    include: { resultingEntry: { select: { id: true, jobRole: true, status: true } } },
-  });
-  if (!request) {
-    throw new NotFoundError("Career library request not found");
-  }
-  return request;
-}
-
-async function reviewRequest(
-  requestId: string,
-  status: "APPROVED" | "REJECTED",
-  actor: Actor,
-  resultingEntryId?: string
-) {
-  const request = await prisma.careerLibraryRequest.findUnique({ where: { id: requestId } });
-  if (!request) {
-    throw new NotFoundError("Career library request not found");
-  }
-  if (request.status !== "PENDING") {
-    throw new ConflictError(`Request has already been ${request.status.toLowerCase()}`);
-  }
-  if (resultingEntryId) {
-    const entry = await prisma.careerLibraryEntry.findUnique({ where: { id: resultingEntryId } });
-    if (!entry) {
-      throw new BadRequestError("resultingEntryId does not match a career library entry");
-    }
-  }
-  return prisma.careerLibraryRequest.update({
-    where: { id: requestId },
-    data: {
-      status,
-      reviewedBy: actor.userId,
-      reviewedAt: new Date(),
-      resultingEntryId: status === "APPROVED" ? resultingEntryId ?? null : null,
-    },
-    include: { resultingEntry: { select: { id: true, jobRole: true, status: true } } },
-  });
-}
-
-export async function approveCareerRequest(requestId: string, input: ApproveCareerRequestInput, actor: Actor) {
-  return reviewRequest(requestId, "APPROVED", actor, input.resultingEntryId);
-}
-
-export async function rejectCareerRequest(requestId: string, actor: Actor) {
-  return reviewRequest(requestId, "REJECTED", actor);
-}

@@ -3,16 +3,15 @@ import { NotFoundError, UnauthorizedError } from "../../common/errors/AppError.j
 import * as careerLibraryService from "./career-library.service.js";
 import type { Actor } from "./career-library.service.js";
 import type {
-  ApproveCareerRequestInput,
   CareerLibraryIdParams,
-  CareerRequestIdParams,
+  ListCareerEntryProposalsQuery,
   ListCareerLibraryQuery,
-  ListCareerRequestsQuery,
   ListCoursesQuery,
   ListEducationEntriesQuery,
   EducationEntryIdParams,
   ListEntranceExamsQuery,
   ListInstitutionsQuery,
+  LookupIdParams,
 } from "./career-library.schema.js";
 
 function actorOf(req: Request): Actor {
@@ -34,12 +33,11 @@ export async function getCareerLibraryFilters(_req: Request, res: Response): Pro
 export async function getCareerLibraryEntry(req: Request, res: Response): Promise<void> {
   const { id } = req.params as unknown as CareerLibraryIdParams;
   const entry = await careerLibraryService.getCareerLibraryEntryById(id);
-  // The list filters to APPROVED for everyone; do the same for a direct fetch so a student
-  // holding an id can't read a role that's still awaiting review. Staff need to see it —
-  // that's the review screen.
+  // The list filters to ACTIVE for everyone; do the same for a direct fetch so a student
+  // holding an id can't read an admin's still-unpublished draft. Staff need to see it.
   const { role } = actorOf(req);
   const staff = role === "COUNSELLOR" || role === "ADMIN" || role === "SUPER_ADMIN";
-  if (entry.reviewStatus !== "APPROVED" && !staff) {
+  if (entry.status !== "ACTIVE" && !staff) {
     throw new NotFoundError("Career library entry not found");
   }
   res.status(200).json(entry);
@@ -64,17 +62,27 @@ export async function deleteCareerLibraryEntry(req: Request, res: Response): Pro
   res.status(204).send();
 }
 
-// --- Job role review (admin decides on a counsellor's submission) ---
+// --- Job role proposals (counsellor submits, admin decides) ---
 
-export async function approveCareerLibraryEntry(req: Request, res: Response): Promise<void> {
+export async function listCareerEntryProposals(req: Request, res: Response): Promise<void> {
+  const query = req.query as unknown as ListCareerEntryProposalsQuery;
+  res.status(200).json(await careerLibraryService.listCareerEntryProposals(query));
+}
+
+export async function getCareerEntryProposal(req: Request, res: Response): Promise<void> {
   const { id } = req.params as unknown as CareerLibraryIdParams;
-  const entry = await careerLibraryService.approveCareerEntry(id, actorOf(req));
+  res.status(200).json(await careerLibraryService.getCareerEntryProposalById(id));
+}
+
+export async function approveCareerEntryProposal(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as CareerLibraryIdParams;
+  const entry = await careerLibraryService.approveCareerEntryProposal(id, actorOf(req));
   res.status(200).json(entry);
 }
 
-export async function rejectCareerLibraryEntry(req: Request, res: Response): Promise<void> {
+export async function rejectCareerEntryProposal(req: Request, res: Response): Promise<void> {
   const { id } = req.params as unknown as CareerLibraryIdParams;
-  res.status(200).json(await careerLibraryService.rejectCareerEntry(id));
+  res.status(200).json(await careerLibraryService.rejectCareerEntryProposal(id));
 }
 
 // --- Dropdown / typeahead lookups ---
@@ -94,40 +102,6 @@ export async function listCourses(req: Request, res: Response): Promise<void> {
   res.status(200).json(rows);
 }
 
-// --- Ratification requests ---
-
-export async function createCareerRequest(req: Request, res: Response): Promise<void> {
-  const request = await careerLibraryService.createCareerRequest(req.body, actorOf(req));
-  res.status(201).json(request);
-}
-
-export async function listCareerRequests(req: Request, res: Response): Promise<void> {
-  const request = await careerLibraryService.listCareerRequests(req.query as unknown as ListCareerRequestsQuery);
-  res.status(200).json(request);
-}
-
-export async function getCareerRequest(req: Request, res: Response): Promise<void> {
-  const { requestId } = req.params as unknown as CareerRequestIdParams;
-  const request = await careerLibraryService.getCareerRequestById(requestId);
-  res.status(200).json(request);
-}
-
-export async function approveCareerRequest(req: Request, res: Response): Promise<void> {
-  const { requestId } = req.params as unknown as CareerRequestIdParams;
-  const request = await careerLibraryService.approveCareerRequest(
-    requestId,
-    req.body as ApproveCareerRequestInput,
-    actorOf(req)
-  );
-  res.status(200).json(request);
-}
-
-export async function rejectCareerRequest(req: Request, res: Response): Promise<void> {
-  const { requestId } = req.params as unknown as CareerRequestIdParams;
-  const request = await careerLibraryService.rejectCareerRequest(requestId, actorOf(req));
-  res.status(200).json(request);
-}
-
 // --- Standalone reference-data submissions + review ---
 // Counsellors propose; admins approve/reject. The service decides PENDING vs APPROVED from
 // the actor's role, so these controllers stay dumb.
@@ -142,28 +116,28 @@ export async function submitInstitution(req: Request, res: Response): Promise<vo
 }
 
 export async function approveEntranceExam(req: Request, res: Response): Promise<void> {
-  res.status(200).json(await careerLibraryService.approveEntranceExam(req.params.id as string, actorOf(req)));
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.approveEntranceExam(id));
 }
 export async function rejectEntranceExam(req: Request, res: Response): Promise<void> {
-  res
-    .status(200)
-    .json(await careerLibraryService.rejectEntranceExam(req.params.id as string, actorOf(req), req.body.rejectionReason));
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.rejectEntranceExam(id));
 }
 export async function approveCourse(req: Request, res: Response): Promise<void> {
-  res.status(200).json(await careerLibraryService.approveCourse(req.params.id as string, actorOf(req)));
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.approveCourse(id));
 }
 export async function rejectCourse(req: Request, res: Response): Promise<void> {
-  res
-    .status(200)
-    .json(await careerLibraryService.rejectCourse(req.params.id as string, actorOf(req), req.body.rejectionReason));
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.rejectCourse(id));
 }
 export async function approveInstitution(req: Request, res: Response): Promise<void> {
-  res.status(200).json(await careerLibraryService.approveInstitution(req.params.id as string, actorOf(req)));
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.approveInstitution(id));
 }
 export async function rejectInstitution(req: Request, res: Response): Promise<void> {
-  res
-    .status(200)
-    .json(await careerLibraryService.rejectInstitution(req.params.id as string, actorOf(req), req.body.rejectionReason));
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.rejectInstitution(id));
 }
 
 // ---- Education Path entries (global canonical lookup) ----

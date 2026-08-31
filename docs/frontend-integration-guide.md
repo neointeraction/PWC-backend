@@ -379,8 +379,12 @@ student:
 }
 ```
 **`tempPassword` is shown exactly once**, in this response — there's no "forgot
-password"/resend flow yet (§2.4). If you lose it, someone will need to regenerate it
-directly against the DB for now.
+password"/resend flow yet (§2.4). Creation also sends the `LOGIN_CREDENTIALS_STUDENT`
+email (login ID + this same temp password) to the student's own email, best-effort —
+it doesn't fail the request if the send fails. There's no equivalent to the parent
+(parents have no login), and no resend endpoint yet — if both the on-screen value and
+the email are lost, someone will need to regenerate the password directly against the
+DB for now.
 
 `workflowStatus` is one of: `DRAFT`, `PROFILE_COMPLETED`,
 `PRE_COUNSELLING_FORMS_SUBMITTED`, `ASSESSMENT_PENDING`, `ASSESSMENT_COMPLETED`,
@@ -1028,70 +1032,76 @@ Websites are plain strings, not validated URLs — `"www.nta.ac.in"` is accepted
 > across job roles. There is no endpoint yet for editing a canonical row outright, so a
 > value that was entered wrong the first time currently needs a DB fix.
 
-### Adding a job role: the two flows
+### Adding a job role: two different destinations
 
-`POST /api/v1/career-library` is **Staff**, and who calls it decides what happens:
+`POST /api/v1/career-library` is **Staff**, and who calls it decides where the row lands —
+this is the part that changed: a counsellor's submission is no longer a `PENDING` row sitting
+in the same table as published ones, it's a wholly separate object.
 
-1. **Admin / super admin — straight into the library.** The entry is created with
-   `reviewStatus: "APPROVED"` and whatever `status` was sent, so posting
+1. **Admin / super admin — straight into the library.** The entry is created in
+   `career_library_entries` with whatever `status` was sent, so posting
    `{ …, "status": "ACTIVE" }` publishes it in one call. Omit `status` and it lands `DRAFT`
-   for the usual publish-later step.
-2. **Counsellor — held for approval.** Same payload, same route, but the response comes back
-   `reviewStatus: "PENDING"` and `status: "DRAFT"` no matter what `status` was sent (a
-   counsellor can't publish their own submission). It's excluded from every read — the list
-   defaults to `reviewStatus=APPROVED`, and a student fetching it by id gets a 404 — until an
-   admin decides:
-   - `POST /api/v1/career-library/{id}/approve` (**Admin**) — flips it to `APPROVED` **and**
-     `ACTIVE` in one action, and returns the assembled entry.
-   - `POST /api/v1/career-library/{id}/reject` (**Admin**, no body) — **deletes it**. Returns
-     `{ id, deleted: true }`. Nothing is retained, so build the UI as a confirm-then-delete,
-     not an "undo later".
+   for the usual publish-later step. The response is the entry, same shape as `GET /{id}`.
+2. **Counsellor — staged as a proposal.** Same payload, same route, but nothing is written to
+   `career_library_entries` at all — the response is a `CareerLibraryEntryProposal` instead
+   (`status` in the payload is ignored). It has its own id space, so **don't reuse a proposal
+   id as a career-library entry id** — `GET /career-library/{id}` will 404 on one. An admin
+   decides its fate:
+   - `GET /api/v1/career-library/proposals` (**Staff**) — the review queue. Query:
+     `search?, domainId?, page?, pageSize?`. Each row is hydrated with `domain` and
+     `linkedEntranceExams`/`linkedCourses`/`linkedInstitutions`/`linkedEducationEntries`
+     resolved from the ids the counsellor picked (see the normalized-links section above),
+     plus `submittedBy`. `GET /api/v1/career-library/proposals/{id}` fetches one the same way.
+   - `POST /api/v1/career-library/proposals/{id}/approve` (**Admin**) — copies it into a
+     **new** `career_library_entries` row (a fresh id, not the proposal's id) with
+     `status: "ACTIVE"`, and deletes the proposal. Returns the newly created entry.
+   - `POST /api/v1/career-library/proposals/{id}/reject` (**Admin**, no body) — **deletes the
+     proposal**. Returns `{ id, deleted: true }`. Nothing is retained, so build the UI as a
+     confirm-then-delete, not an "undo later".
 
-   Both are 409 if the entry isn't `PENDING` (already decided, or an admin's own entry that
-   never needed review).
-
-Build the admin review queue off the list endpoint:
-`GET /api/v1/career-library?reviewStatus=PENDING&status=DRAFT`.
-
-Note the separate, older `POST /api/v1/career-library/requests` flow still exists — that's the
-*lightweight* path where a counsellor flags a missing career with a few fields and justification,
-and the admin then builds the entry by hand. Use this section's flow when the counsellor is
-filling in the whole role.
+   Both 404 if the id isn't a live proposal — either already decided, or it was never a
+   proposal (e.g. you passed an admin-created entry's id by mistake).
 
 ### Proposing reference data as a counsellor
 
 A counsellor can also propose the individual reference rows on their own, without a job role —
-**Staff**, same field sets as the inline "add new":
+**Staff**, same field sets as the inline "add new". Unlike the job-role flow above, these three
+stay in their real tables (`EntranceExam`/`Course`/`Institution`) — only the job role itself
+gets staged separately:
 
 - `POST /api/v1/career-library/entrance-exams` `{ name, level, … }`
 - `POST /api/v1/career-library/courses` `{ name, level?, … }`
 - `POST /api/v1/career-library/institutions` `{ name, … }`
-- `POST /api/v1/career-library/education` `{ level, programme, description? }` — lands `DRAFT`
-  (this one is a publish flag, not the `ReviewStatus` the other three use)
+- `POST /api/v1/career-library/education` `{ level, programme, description? }` — lands `DRAFT`,
+  the same flag the three above use (all four are on one `CareerLibraryStatus` flag now)
 
-A counsellor's submission comes back `status: "PENDING"` and **won't appear in the pickers**
-until an admin approves it; an admin's own submission is `APPROVED` immediately. Every row
-carries `status`, `submittedBy`, `reviewedBy`, `reviewedAt`, `rejectionReason`.
+A counsellor's submission comes back `status: "DRAFT"` and **won't appear in the pickers**
+until an admin publishes it; an admin's own submission is `ACTIVE` immediately. Every row
+carries `status` and `submittedBy` — no reviewer/rejection audit columns, since a rejected row
+is deleted, not kept.
 
-Admin review (all **Admin**, all 409 if the row was already decided):
+Admin review (all **Admin**):
 
-- `POST /career-library/{entrance-exams|courses|institutions}/{id}/approve` — and `/reject`
-  with `{ rejectionReason? }`. These two **keep the row** and mark it `REJECTED`; re-proposing
-  it reopens it (see below).
+- `POST /career-library/{entrance-exams|courses|institutions}/{id}/approve` — flips `DRAFT` to
+  `ACTIVE`. 409 if already active.
+- `POST /career-library/{entrance-exams|courses|institutions}/{id}/reject` — no body,
+  **deletes the row**. 409 if it's already `ACTIVE` (unpublish first) or still linked to a
+  job role (unlink first — the join table would cascade the link away silently). Re-proposing
+  the same name after a rejection creates a **fresh** row, not the same id — there's nothing
+  left to reopen.
 - `POST /career-library/education/{entryId}/approve` — publishes the `DRAFT` to `ACTIVE`
   (identical to `PATCH /career-library/education/{entryId}` `{ status: "ACTIVE" }`, just the
-  verb the review screen calls). `POST …/reject` **deletes** the entry, matching the job-role
-  flow, and 409s if it's already `ACTIVE` or if any job role still links to it.
+  verb the review screen calls). `POST …/reject` **deletes** the entry and 409s if it's
+  already `ACTIVE` or if any job role still links to it.
 
-Build the review queue off the existing list endpoints with `?status=PENDING`. Two behaviours
-worth designing around: re-proposing a **rejected** row reopens it (same id, back to
-`PENDING`, reason cleared) rather than erroring, and an admin naming a **pending** row while
-adding a job role implicitly approves it. Submitting a name that already exists never creates
-a duplicate — it reuses the row and fills its blank columns.
+Build the review queue off the existing list endpoints with `?status=DRAFT`. One behaviour
+worth designing around: an admin naming a **draft** row while adding a job role implicitly
+publishes it. Submitting a name that already exists never creates a duplicate — it reuses the
+row and fills its blank columns.
 
 The career entry's `linkedEntranceExams` / `linkedCourses` / `linkedInstitutions` /
-`linkedEducationEntries` each include `status`, so if an admin links something still pending,
-flag it in the UI rather than assuming everything linked is approved.
+`linkedEducationEntries` each include `status`, so if an admin links something still `DRAFT`,
+flag it in the UI rather than assuming everything linked is published.
 
 **Education entries are domain-scoped.** A `{ level, programme }` item is created under the
 job role's own domain and immediately appears in that domain's tick-list (§9.4) for every

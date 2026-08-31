@@ -1,10 +1,12 @@
 import { z } from "zod";
 
 const AI_RESILIENCE_GRADES = ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"] as const;
+// Publish state shared by CareerLibraryEntry, EntranceExam, Institution, Course, and
+// EducationEntry. Mirrors the prisma `CareerLibraryStatus` enum. A counsellor-submitted job
+// role never reaches career_library_entries at all (see `CareerLibraryEntryProposal`), so
+// unlike the other four tables this one has no PENDING-equivalent queue built from a status
+// filter — that's GET /career-library/proposals instead.
 const CAREER_LIBRARY_STATUSES = ["DRAFT", "ACTIVE"] as const;
-// Review state of anything a counsellor can propose — job roles as well as the reference
-// data (exams/courses/institutions). Mirrors the prisma `ReviewStatus` enum.
-const REVIEW_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
 
 export const listCareerLibraryQuerySchema = z.object({
   // Free-text search across jobRole, oneLineDescription, and the taxonomy names.
@@ -14,15 +16,22 @@ export const listCareerLibraryQuerySchema = z.object({
   industryId: z.string().min(1).optional(),
   domainId: z.string().min(1).optional(),
   aiResilienceGrade: z.enum(AI_RESILIENCE_GRADES).optional(),
-  // Defaults to ACTIVE-only — callers who need drafts (e.g. Admin review) pass it explicitly.
+  // Defaults to ACTIVE-only — callers who need drafts (e.g. an admin's own WIP entries)
+  // pass it explicitly.
   status: z.enum(CAREER_LIBRARY_STATUSES).default("ACTIVE"),
-  // Defaults to APPROVED-only so counsellor submissions awaiting review never surface in
-  // the library. The admin review queue passes PENDING (and clears `status` to DRAFT).
-  reviewStatus: z.enum(REVIEW_STATUSES).default("APPROVED"),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 });
 export type ListCareerLibraryQuery = z.infer<typeof listCareerLibraryQuerySchema>;
+
+// --- Job role proposals (counsellor submits, admin reviews) ---
+export const listCareerEntryProposalsQuerySchema = z.object({
+  search: z.string().trim().min(1).optional(),
+  domainId: z.string().min(1).optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().positive().max(100).default(20),
+});
+export type ListCareerEntryProposalsQuery = z.infer<typeof listCareerEntryProposalsQuerySchema>;
 
 export const careerLibraryIdParamsSchema = z.object({
   id: z.string().cuid(),
@@ -161,7 +170,8 @@ export const createCareerEntrySchema = z.object({
   educationEntries: z.array(educationLinkItemSchema).default([]),
   // New entries default to DRAFT — an admin flips them to ACTIVE (the "ratify"/publish
   // step) once reviewed. ACTIVE-on-create is allowed for trusted bulk additions, but only
-  // for an admin: a counsellor's submission is forced to DRAFT + PENDING in the service.
+  // for an admin: a counsellor posting this same payload never reaches this table at all —
+  // the service stages it as a CareerLibraryEntryProposal instead, where `status` is ignored.
   status: z.enum(CAREER_LIBRARY_STATUSES).default("DRAFT"),
 });
 export type CreateCareerEntryInput = z.infer<typeof createCareerEntrySchema>;
@@ -177,8 +187,8 @@ export type UpdateCareerEntryInput = z.infer<typeof updateCareerEntrySchema>;
 
 export const listEntranceExamsQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
-  // Pickers show APPROVED rows only; an admin review queue passes PENDING/REJECTED.
-  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
+  // Pickers show ACTIVE rows only; pass DRAFT to review what's not published yet.
+  status: z.enum(CAREER_LIBRARY_STATUSES).default("ACTIVE"),
   level: z.enum(QUALIFICATION_LEVELS).optional(),
   // Scope to exams/courses/institutions already linked to job roles in this domain
   // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
@@ -189,8 +199,8 @@ export type ListEntranceExamsQuery = z.infer<typeof listEntranceExamsQuerySchema
 
 export const listInstitutionsQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
-  // Pickers show APPROVED rows only; an admin review queue passes PENDING/REJECTED.
-  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
+  // Pickers show ACTIVE rows only; pass DRAFT to review what's not published yet.
+  status: z.enum(CAREER_LIBRARY_STATUSES).default("ACTIVE"),
   // Scope to exams/courses/institutions already linked to job roles in this domain
   // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
   domainId: z.string().min(1).optional(),
@@ -200,8 +210,8 @@ export type ListInstitutionsQuery = z.infer<typeof listInstitutionsQuerySchema>;
 
 export const listCoursesQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
-  // Pickers show APPROVED rows only; an admin review queue passes PENDING/REJECTED.
-  status: z.enum(REVIEW_STATUSES).default("APPROVED"),
+  // Pickers show ACTIVE rows only; pass DRAFT to review what's not published yet.
+  status: z.enum(CAREER_LIBRARY_STATUSES).default("ACTIVE"),
   level: z.enum(QUALIFICATION_LEVELS).optional(),
   // Scope to exams/courses/institutions already linked to job roles in this domain
   // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
@@ -248,41 +258,6 @@ export const updateEducationEntrySchema = z.object({
   status: z.enum(EDUCATION_STATUSES).optional(),
 });
 export type UpdateEducationEntryInput = z.infer<typeof updateEducationEntrySchema>;
-
-// --- Ratification requests (counsellor-submitted, admin-reviewed) ---
-
-const CAREER_REQUEST_STATUSES = ["PENDING", "APPROVED", "REJECTED"] as const;
-
-export const createCareerRequestSchema = z.object({
-  // Counsellors are resolved from their auth token; an admin filing on behalf of a
-  // counsellor supplies the counsellor id explicitly.
-  requestedById: z.string().cuid().optional(),
-  jobTitle: z.string().trim().min(1),
-  suggestedCluster: z.string().trim().min(1),
-  suggestedIndustry: z.string().trim().min(1),
-  suggestedDomain: z.string().trim().min(1).optional(),
-  oneLineDescription: z.string().trim().min(1),
-  justification: z.string().trim().min(1),
-  referenceLinks: z.array(z.string().url()).default([]),
-});
-export type CreateCareerRequestInput = z.infer<typeof createCareerRequestSchema>;
-
-export const listCareerRequestsQuerySchema = z.object({
-  status: z.enum(CAREER_REQUEST_STATUSES).optional(),
-  requestedById: z.string().cuid().optional(),
-});
-export type ListCareerRequestsQuery = z.infer<typeof listCareerRequestsQuerySchema>;
-
-export const careerRequestIdParamsSchema = z.object({
-  requestId: z.string().cuid(),
-});
-export type CareerRequestIdParams = z.infer<typeof careerRequestIdParamsSchema>;
-
-// Approve may link the request to the entry the admin created from it.
-export const approveCareerRequestSchema = z.object({
-  resultingEntryId: z.string().cuid().optional(),
-});
-export type ApproveCareerRequestInput = z.infer<typeof approveCareerRequestSchema>;
 
 // --- Standalone reference-data submissions (counsellor proposes, admin reviews) ---
 // Same shape as the inline "add new" link items, minus the `id` branch: this path always
@@ -332,8 +307,5 @@ export const submitInstitutionSchema = z.object({
 });
 export type SubmitInstitutionInput = z.infer<typeof submitInstitutionSchema>;
 
-// Reject carries an optional reason back to the submitting counsellor; approve takes no body.
-export const rejectLookupSchema = z.object({
-  rejectionReason: z.string().trim().min(1).optional(),
-});
-export type RejectLookupInput = z.infer<typeof rejectLookupSchema>;
+// Reject hard-deletes the row (no REJECTED-but-kept state), so there's nothing to carry in
+// the body — same as approve.

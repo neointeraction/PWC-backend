@@ -140,9 +140,6 @@ export async function seedCareerLibraryData(prisma: PrismaClient): Promise<void>
 
   // Replace, not upsert — this is a bulk reference-data import with no natural
   // per-row unique key, so each run clears and reinserts from the latest export.
-  // CareerLibraryRequest.resultingEntryId references CareerLibraryEntry; clear it
-  // first so the delete below doesn't hit the FK constraint.
-  await prisma.careerLibraryRequest.deleteMany({ where: { resultingEntryId: { not: null } } });
   await prisma.careerLibraryEntry.deleteMany({});
   // Taxonomy, deleted after the entries that reference it (domain → industry → cluster).
   await prisma.careerDomain.deleteMany({});

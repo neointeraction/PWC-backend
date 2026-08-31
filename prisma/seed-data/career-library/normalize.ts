@@ -80,8 +80,26 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
         applicationWindow: true,
       },
     }),
-    prisma.pgEntranceExam.findMany({ select: { examName: true, officialWebsite: true } }),
+    prisma.pgEntranceExam.findMany({ select: { examName: true, officialWebsite: true, coursesForExam: true } }),
   ]);
+
+  // Some job roles' raw "Entrance Exams (PG Level)" text names an exam by a spelling/format
+  // that doesn't match its PgEntranceExam row verbatim (hyphen vs space, or a whole phrase
+  // where only part of it is a real exam name) — verified by hand against the workbook, see
+  // docs/db-design.md. Without this, the backfill below would create a second, detail-less
+  // canonical row for each variant instead of reusing the one PG Entrance_IND already
+  // describes. "CAT/XAT" names two exams in one cell, so it expands to both.
+  const PG_EXAM_ALIASES: Record<string, string[]> = {
+    "CUET-PG": ["CUET PG"],
+    "CUET-PG / University PG Entrances": ["CUET PG"],
+    "NEET-PG": ["NEET PG"],
+    "CLAT-PG": ["CLAT PG"],
+    "AILET-PG": ["AILET PG"],
+    "CAT/XAT": ["CAT", "XAT"],
+  };
+  const expandPgExamNames = (names: string[]): string[] =>
+    names.flatMap((n) => PG_EXAM_ALIASES[clean(n)] ?? [n]);
+
   const examMap = new Map<string, Prisma.EntranceExamCreateManyInput>();
   const addExam = (name: unknown, level: QualificationLevel, extra: Partial<Prisma.EntranceExamCreateManyInput> = {}) => {
     const n = clean(name);
@@ -101,10 +119,13 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       applicationWindow: e.applicationWindow,
     });
   }
-  for (const e of pgExams) addExam(e.examName, "PG", { officialWebsite: e.officialWebsite });
+  // PG Entrance_IND has no conductingBody/examMode/frequency/subjectRequirements12th columns
+  // at all — only name, the courses it's for, and a website — so `applicableFor` (fed from
+  // "Courses for which the exam is meant") is the only detail a PG exam can ever carry.
+  for (const e of pgExams) addExam(e.examName, "PG", { officialWebsite: e.officialWebsite, applicableFor: e.coursesForExam });
   for (const e of entries) {
     for (const n of e.entranceExams) addExam(n, "UG");
-    for (const n of e.entranceExamsPG) addExam(n, "PG");
+    for (const n of expandPgExamNames(e.entranceExamsPG)) addExam(n, "PG");
   }
   await createManyBatched((a) => prisma.entranceExam.createMany(a), [...examMap.values()]);
   await fillCanonicalBlanks(
@@ -169,6 +190,7 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       durationYears: true,
       stream12thRequirements: true,
       entranceExamsPrimary: true,
+      entranceExamsAlternate: true,
       topSpecialisations: true,
       topGovtColleges: true,
       topPrivateColleges: true,
@@ -185,11 +207,17 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
   for (const c of ugCourses) {
     // The source splits top colleges into govt/private columns; the canonical row keeps one list.
     const topColleges = [c.topGovtColleges, c.topPrivateColleges].map(clean).filter(Boolean).join("; ") || null;
+    // Same for primary/alternate entrance exams — "No alternative" is a placeholder, not data.
+    const relevantEntranceExams =
+      [c.entranceExamsPrimary, clean(c.entranceExamsAlternate).toLowerCase() === "no alternative" ? "" : c.entranceExamsAlternate]
+        .map(clean)
+        .filter(Boolean)
+        .join("; ") || null;
     addCourse(c.courseName, {
       fullForm: c.fullForm,
       durationYears: c.durationYears,
       stream12thRequirements: c.stream12thRequirements,
-      relevantEntranceExams: c.entranceExamsPrimary,
+      relevantEntranceExams,
       programmesOffered: c.topSpecialisations,
       topColleges,
       furtherStudyOptions: c.furtherStudyOptions,
@@ -233,7 +261,7 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       const id = examId.get(`${clean(n)}||UG`);
       if (id) examJoins.push({ careerEntryId: e.id, entranceExamId: id });
     }
-    for (const n of e.entranceExamsPG) {
+    for (const n of expandPgExamNames(e.entranceExamsPG)) {
       const id = examId.get(`${clean(n)}||PG`);
       if (id) examJoins.push({ careerEntryId: e.id, entranceExamId: id });
     }

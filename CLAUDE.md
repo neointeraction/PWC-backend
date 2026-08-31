@@ -146,9 +146,7 @@ with a `DRAFT`→`ACTIVE` publish step). **Adding a job role has two paths throu
 `reviewStatus:PENDING` + `status:DRAFT` and hidden from every read (list defaults to
 `reviewStatus=APPROVED`; a non-staff by-id fetch 404s) until
 `POST /career-library/:id/approve` (→ APPROVED **and** ACTIVE) or `/reject` (→ **hard
-delete**). The older `CareerLibraryRequest` ticket flow (submit → admin approve/reject)
-still exists alongside it as the lightweight "flag a missing career" path — approving one
-still does not create an entry. Its normalized links (exams/courses/colleges) take the full
+delete**). Its normalized links (exams/courses/colleges) take the full
 canonical field set on an inline "add new" and **blank-fill** rather than overwrite a row that
 already exists; there is deliberately no endpoint yet for editing a canonical lookup row.
 **Education Path** is a global canonical lookup (`EducationEntry`, CRUD under

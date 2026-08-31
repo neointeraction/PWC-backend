@@ -203,17 +203,18 @@ model Project {
 
 // Counsellor belongs to one institute; assigned to specific projects via ProjectCounsellor.
 model Counsellor {
-  id             String    @id @default(cuid())
-  userId         String    @unique
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  counsellorCode String    @unique // admin-generated human-readable id, e.g. "CN1"
-  // Nullable: a counsellor can be created into the pool with no institute yet, then
-  // assigned to one later via POST /counsellors/:id/projects (which backfills this).
+  id             String     @id @default(cuid())
+  userId         String     @unique
+  user           User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  counsellorCode String     @unique // admin-generated human-readable id, e.g. "CN1"
+  // Nullable and informational only: counsellors are a flat, tenant-wide directory, not
+  // scoped to one institute. Assignment (POST /counsellors/:id/projects) never checks or
+  // backfills this — the same counsellor can be assigned to projects across institutes.
   instituteId    String?
   institute      Institute? @relation(fields: [instituteId], references: [id])
-  mobile         String    @unique
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  mobile         String     @unique
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   slots            CounsellorSlot[]
   projects         ProjectCounsellor[]
@@ -395,18 +396,13 @@ enum CareerLibraryStatus {
 }
 
 // UG vs PG, used to scope the canonical entrance-exam / course lookups.
-// Counsellors may propose new reference data (exams / courses / institutions / education
-// path entries); an admin approves or rejects it. Admin-created rows are APPROVED on the
-// spot, and the column default is APPROVED so the migration doesn't hide the already-seeded
-// library. Unlike `CareerLibraryRequest` (a ticket for a whole job role, reviewed and then
-// re-keyed by the admin), these are reviewed **in place** — the row IS the submission, so
-// approving costs one call and nothing is retyped.
-enum ReviewStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
+// Counsellors may propose new reference data (exams / courses / institutions). Unlike
+// `CareerLibraryEntryProposal` (a fully separate staging table for job roles), these three
+// stay in their real tables and carry the same DRAFT/ACTIVE publish flag as
+// `EducationEntry`/`CareerLibraryEntry`: a counsellor's row lands DRAFT and is hidden from
+// the pickers, an admin's own addition is ACTIVE on the spot, and approving is a plain
+// DRAFT->ACTIVE flip in place. There is deliberately no rejected-but-kept state here — reject
+// hard-deletes (see `rejectLookup` in the service), so a mistaken name doesn't block reuse.
 enum QualificationLevel {
   UG
   PG
@@ -463,23 +459,14 @@ model CareerLibraryEntry {
   certificationsUG      String[]
 
   topCourses String[]
+  // A counsellor never writes this table directly (see `CareerLibraryEntryProposal`), so
+  // every row here was either added by an admin or copied in on proposal approval — `status`
+  // is just the DRAFT/ACTIVE publish flag, with no separate review state to track.
   status     CareerLibraryStatus @default(ACTIVE)
-  createdBy  String // User id (admin/super admin/counsellor), or a seed/import label
+  createdBy  String // User id (admin/super admin), or a seed/import label
   updatedBy  String?
   createdAt  DateTime            @default(now())
   updatedAt  DateTime            @updatedAt
-
-  // Review workflow (see `ReviewStatus`), mirroring the reference-data tables. A
-  // counsellor may submit a full job role: it lands PENDING (and DRAFT) and stays out of
-  // the library until an admin approves it. An admin's own addition is APPROVED on the
-  // spot. Rejection hard-deletes the row, so REJECTED is never persisted here — the
-  // enum value exists only because the enum is shared.
-  // `createdBy` doubles as the submitter stamp; these two record who decided.
-  reviewStatus ReviewStatus @default(APPROVED)
-  reviewedBy   String?
-  reviewedAt   DateTime?
-
-  requests CareerLibraryRequest[]
 
   // Normalized many-to-many links (the String[] columns above are kept transitionally and
   // dropped once these are verified — see docs/career-library-normalization-spec.md).
@@ -489,8 +476,62 @@ model CareerLibraryEntry {
   educationLinks    CareerEducationEntry[]
 
   @@index([domainId])
-  @@index([reviewStatus])
   @@map("career_library_entries")
+}
+
+// A counsellor's proposed job role, staged entirely outside `CareerLibraryEntry` so the real
+// table only ever holds admin-authored or admin-approved rows (no PENDING/DRAFT rows mixed
+// in, no reviewStatus filter needed on reads). Mirrors CareerLibraryEntry's scalar columns;
+// the four `*Ids` arrays record which already-resolved EntranceExam/Course/Institution/
+// EducationEntry rows the counsellor picked (find-or-create against those real tables still
+// happens at submit time — see career-library.service.ts). Approving copies this row into a
+// fresh CareerLibraryEntry (new id, status ACTIVE) and materializes the join-table rows from
+// the id arrays, then deletes the proposal; rejecting just deletes it. No relation to
+// CareerDomain — domainId is validated against the live taxonomy in the service instead of a
+// DB-level FK, since this row is meant to be short-lived.
+model CareerLibraryEntryProposal {
+  id                  String            @id @default(cuid())
+  domainId            String
+  jobRole             String
+  aiResilienceGrade   AiResilienceGrade
+  aiResilienceComment String
+  oneLineDescription  String
+  roleOverview        String?
+  keySkills           String[]
+  topCompanies        String[]
+
+  salaryIndiaRangeText  String?
+  salaryIndiaMinLPA     Float?
+  salaryIndiaMaxLPA     Float?
+  salaryGlobalRangeText String?
+  salaryGlobalMinUSD    Float?
+  salaryGlobalMaxUSD    Float?
+
+  qualification10th12th            String?
+  qualification10th12thExplanation String?
+  qualificationGraduation          String?
+  qualificationGraduationDefined   String?
+  qualificationPG                  String?
+  qualificationPGDefined           String?
+
+  entranceExamsUGDescription String?
+  certificationsStudent      String[]
+  certificationsUG           String[]
+
+  // Resolved ids of already-existing (or just find-or-created) EntranceExam / Course /
+  // Institution / EducationEntry rows — the join-table equivalent while there is no real
+  // CareerLibraryEntry id to join against yet.
+  examIds           String[]
+  courseIds         String[]
+  institutionIds    String[]
+  educationEntryIds String[]
+
+  submittedBy String // User id (counsellor)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([domainId])
+  @@map("career_library_entry_proposals")
 }
 
 // --- Career taxonomy: a fixed 3-level hierarchy (Cluster → Industry → Domain), admin-managed.
@@ -727,7 +768,7 @@ model PgEntranceExam {
 // below. See docs/career-library-normalization-spec.md.
 
 model EntranceExam {
-  id                      String             @id @default(cuid())
+  id                      String              @id @default(cuid())
   name                    String
   level                   QualificationLevel
   fullForm                String?
@@ -740,15 +781,12 @@ model EntranceExam {
   applicableFor           String? // which courses/streams the exam gates
   subjectRequirements12th String?
   applicationWindow       String?
-  // Review workflow (see `ReviewStatus`). `submittedBy` is the proposing user; the reviewer
-  // fields are stamped when an admin approves or rejects it.
-  status                  ReviewStatus       @default(APPROVED)
+  // DRAFT/ACTIVE publish flag (see the enum comment above). `submittedBy` is the proposing
+  // user; there's no reviewer/rejection audit trail since a rejected row is deleted, not kept.
+  status                  CareerLibraryStatus @default(ACTIVE)
   submittedBy             String?
-  reviewedBy              String?
-  reviewedAt              DateTime?
-  rejectionReason         String?
-  createdAt               DateTime           @default(now())
-  updatedAt               DateTime           @updatedAt
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 
   careerLinks CareerEntranceExam[]
 
@@ -759,8 +797,8 @@ model EntranceExam {
 }
 
 model Institution {
-  id                    String       @id @default(cuid())
-  name                  String       @unique
+  id                    String              @id @default(cuid())
+  name                  String              @unique
   shortName             String? // abbreviation, e.g. "IIT-B"
   city                  String?
   state                 String?
@@ -770,15 +808,12 @@ model Institution {
   entranceExamsRequired String?
   programmesOffered     String?
   ranking               String?
-  // Review workflow (see `ReviewStatus`). `submittedBy` is the proposing user; the reviewer
-  // fields are stamped when an admin approves or rejects it.
-  status                ReviewStatus @default(APPROVED)
+  // DRAFT/ACTIVE publish flag (see the enum comment above). `submittedBy` is the proposing
+  // user; there's no reviewer/rejection audit trail since a rejected row is deleted, not kept.
+  status                CareerLibraryStatus @default(ACTIVE)
   submittedBy           String?
-  reviewedBy            String?
-  reviewedAt            DateTime?
-  rejectionReason       String?
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
 
   careerLinks CareerInstitution[]
 
@@ -788,7 +823,7 @@ model Institution {
 }
 
 model Course {
-  id                     String             @id @default(cuid())
+  id                     String              @id @default(cuid())
   name                   String
   level                  QualificationLevel
   fullForm               String?
@@ -801,15 +836,12 @@ model Course {
   programmesOffered      String?
   topColleges            String?
   furtherStudyOptions    String?
-  // Review workflow (see `ReviewStatus`). `submittedBy` is the proposing user; the reviewer
-  // fields are stamped when an admin approves or rejects it.
-  status                 ReviewStatus       @default(APPROVED)
+  // DRAFT/ACTIVE publish flag (see the enum comment above). `submittedBy` is the proposing
+  // user; there's no reviewer/rejection audit trail since a rejected row is deleted, not kept.
+  status                 CareerLibraryStatus @default(ACTIVE)
   submittedBy            String?
-  reviewedBy             String?
-  reviewedAt             DateTime?
-  rejectionReason        String?
-  createdAt              DateTime           @default(now())
-  updatedAt              DateTime           @updatedAt
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
 
   careerLinks CareerCourse[]
 
@@ -855,35 +887,6 @@ model CareerCourse {
   @@id([careerEntryId, courseId])
   @@index([courseId])
   @@map("career_courses")
-}
-
-enum CareerRequestStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-// Counsellor-submitted request to add an unlisted career; reviewed by Admin/Super Admin.
-model CareerLibraryRequest {
-  id                 String              @id @default(cuid())
-  requestedById      String // Counsellor id
-  jobTitle           String
-  suggestedCluster   String
-  suggestedIndustry  String
-  suggestedDomain    String?
-  oneLineDescription String
-  justification      String
-  referenceLinks     String[]
-  status             CareerRequestStatus @default(PENDING)
-  reviewedBy         String? // User id (admin/super admin)
-  reviewedAt         DateTime?
-  resultingEntryId   String?
-  resultingEntry     CareerLibraryEntry? @relation(fields: [resultingEntryId], references: [id])
-  createdAt          DateTime            @default(now())
-
-  @@index([requestedById])
-  @@index([status])
-  @@map("career_library_requests")
 }
 
 enum FormType {

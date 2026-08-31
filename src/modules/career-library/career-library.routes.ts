@@ -4,13 +4,10 @@ import { validate } from "../../common/middlewares/validate.js";
 import { requireAuth, requireStaff, requireAdmin } from "../../common/middlewares/auth.js";
 import * as careerLibraryController from "./career-library.controller.js";
 import {
-  approveCareerRequestSchema,
   careerLibraryIdParamsSchema,
-  careerRequestIdParamsSchema,
   createCareerEntrySchema,
-  createCareerRequestSchema,
+  listCareerEntryProposalsQuerySchema,
   listCareerLibraryQuerySchema,
-  listCareerRequestsQuerySchema,
   listCoursesQuerySchema,
   createEducationEntrySchema,
   educationEntryIdParamsSchema,
@@ -19,7 +16,6 @@ import {
   listEntranceExamsQuerySchema,
   listInstitutionsQuerySchema,
   lookupIdParamsSchema,
-  rejectLookupSchema,
   submitCourseSchema,
   submitEntranceExamSchema,
   submitInstitutionSchema,
@@ -28,8 +24,8 @@ import {
 
 export const careerLibraryRouter = Router();
 
-// Reads = any authenticated user (students browse too). Entry writes = admin. The
-// ratification request flow: counsellors submit, admins review.
+// Reads = any authenticated user (students browse too). Entry writes = admin; a
+// counsellor's write is staged as a CareerLibraryEntryProposal instead (see below).
 careerLibraryRouter.get(
   "/",
   ...requireAuth,
@@ -103,7 +99,7 @@ careerLibraryRouter.delete(
 
 // Create a library entry (staff). Two paths through the same payload:
 //   - admin/super admin: added straight to the library (DRAFT by default, ACTIVE if asked);
-//   - counsellor: held as PENDING + DRAFT until an admin approves or rejects it below.
+//   - counsellor: staged as a CareerLibraryEntryProposal (below) — never written here.
 careerLibraryRouter.post(
   "/",
   ...requireStaff,
@@ -111,19 +107,31 @@ careerLibraryRouter.post(
   asyncHandler(careerLibraryController.createCareerLibraryEntry)
 );
 
-// Review of a counsellor-submitted job role (admin). Approve publishes it; reject deletes
-// it. Declared before "/:id" so the literal sub-paths win.
-careerLibraryRouter.post(
-  "/:id/approve",
-  ...requireAdmin,
+// --- Job role proposals (counsellor submits, admin reviews) ---
+// Declared before "/:id" so the literal "proposals" segment wins.
+careerLibraryRouter.get(
+  "/proposals",
+  ...requireStaff,
+  validate({ query: listCareerEntryProposalsQuerySchema }),
+  asyncHandler(careerLibraryController.listCareerEntryProposals)
+);
+careerLibraryRouter.get(
+  "/proposals/:id",
+  ...requireStaff,
   validate({ params: careerLibraryIdParamsSchema }),
-  asyncHandler(careerLibraryController.approveCareerLibraryEntry)
+  asyncHandler(careerLibraryController.getCareerEntryProposal)
 );
 careerLibraryRouter.post(
-  "/:id/reject",
+  "/proposals/:id/approve",
   ...requireAdmin,
   validate({ params: careerLibraryIdParamsSchema }),
-  asyncHandler(careerLibraryController.rejectCareerLibraryEntry)
+  asyncHandler(careerLibraryController.approveCareerEntryProposal)
+);
+careerLibraryRouter.post(
+  "/proposals/:id/reject",
+  ...requireAdmin,
+  validate({ params: careerLibraryIdParamsSchema }),
+  asyncHandler(careerLibraryController.rejectCareerEntryProposal)
 );
 
 // --- Reference data proposed on its own (counsellor) + review (admin) ---
@@ -157,7 +165,7 @@ careerLibraryRouter.post(
 careerLibraryRouter.post(
   "/entrance-exams/:id/reject",
   ...requireAdmin,
-  validate({ params: lookupIdParamsSchema, body: rejectLookupSchema }),
+  validate({ params: lookupIdParamsSchema }),
   asyncHandler(careerLibraryController.rejectEntranceExam)
 );
 careerLibraryRouter.post(
@@ -169,7 +177,7 @@ careerLibraryRouter.post(
 careerLibraryRouter.post(
   "/courses/:id/reject",
   ...requireAdmin,
-  validate({ params: lookupIdParamsSchema, body: rejectLookupSchema }),
+  validate({ params: lookupIdParamsSchema }),
   asyncHandler(careerLibraryController.rejectCourse)
 );
 careerLibraryRouter.post(
@@ -181,40 +189,8 @@ careerLibraryRouter.post(
 careerLibraryRouter.post(
   "/institutions/:id/reject",
   ...requireAdmin,
-  validate({ params: lookupIdParamsSchema, body: rejectLookupSchema }),
+  validate({ params: lookupIdParamsSchema }),
   asyncHandler(careerLibraryController.rejectInstitution)
-);
-
-// --- Ratification requests (declared before "/:id" so "requests" isn't parsed as an id) ---
-careerLibraryRouter.post(
-  "/requests",
-  ...requireStaff,
-  validate({ body: createCareerRequestSchema }),
-  asyncHandler(careerLibraryController.createCareerRequest)
-);
-careerLibraryRouter.get(
-  "/requests",
-  ...requireStaff,
-  validate({ query: listCareerRequestsQuerySchema }),
-  asyncHandler(careerLibraryController.listCareerRequests)
-);
-careerLibraryRouter.get(
-  "/requests/:requestId",
-  ...requireStaff,
-  validate({ params: careerRequestIdParamsSchema }),
-  asyncHandler(careerLibraryController.getCareerRequest)
-);
-careerLibraryRouter.post(
-  "/requests/:requestId/approve",
-  ...requireAdmin,
-  validate({ params: careerRequestIdParamsSchema, body: approveCareerRequestSchema }),
-  asyncHandler(careerLibraryController.approveCareerRequest)
-);
-careerLibraryRouter.post(
-  "/requests/:requestId/reject",
-  ...requireAdmin,
-  validate({ params: careerRequestIdParamsSchema }),
-  asyncHandler(careerLibraryController.rejectCareerRequest)
 );
 
 // --- Single entry by id (must be last: "/:id" is a catch-all) ---

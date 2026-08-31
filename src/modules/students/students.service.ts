@@ -2,10 +2,12 @@ import crypto from "node:crypto";
 import argon2 from "argon2";
 import type { WorkflowStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
+import { env } from "../../config/env.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { nextCode } from "../../common/utils/codeSequence.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
+import { sendTemplateEmail } from "../email/email.service.js";
 import { computeStageInfo, stageRelationsInclude, type StudentForStage } from "./studentStage.js";
 import type {
   CreateStudentInput,
@@ -26,6 +28,14 @@ const studentInclude = {
 
 function generateTempPassword(): string {
   return crypto.randomBytes(12).toString("base64url");
+}
+
+// Fire-and-forget: email failures never fail student creation (same pattern as
+// sessions.service.ts's sendEmailBestEffort — no persisted notification log).
+function sendEmailBestEffort(to: string, templateKey: Parameters<typeof sendTemplateEmail>[1], data: unknown): void {
+  sendTemplateEmail(to, templateKey, data).catch((err) => {
+    console.error(`[students] failed to send ${templateKey} to ${to}:`, err);
+  });
 }
 
 // Attaches the derived stage + ageing/flag (computeStageInfo) to a student loaded with
@@ -99,6 +109,13 @@ export async function createStudent(input: CreateStudentInput) {
         },
         include: studentInclude,
       });
+    });
+
+    sendEmailBestEffort(student.user.email, "LOGIN_CREDENTIALS_STUDENT", {
+      studentName: `${student.user.firstName} ${student.user.lastName}`,
+      loginId: student.user.email,
+      defaultPassword: tempPassword,
+      loginLink: env.APP_WEB_URL,
     });
 
     return { student, tempPassword };

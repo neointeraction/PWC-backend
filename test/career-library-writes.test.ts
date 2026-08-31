@@ -6,7 +6,6 @@ import { authRequest, bearer } from "./helpers/http.js";
 
 const app = createApp();
 
-let counsellorId: string; // Counsellor.id
 let counsellorToken: string; // Bearer for the counsellor's own user
 let testDomainId: string; // live taxonomy leaf the created entries point at
 
@@ -22,7 +21,7 @@ function entryBody(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe("Career Library writes + ratification", () => {
+describe("Career Library writes", () => {
   beforeAll(async () => {
     // A live Cluster → Industry → Domain the created entries can reference.
     const cluster = await prisma.careerCluster.create({ data: { name: "Test CL Cluster" } });
@@ -48,13 +47,12 @@ describe("Career Library writes + ratification", () => {
       counsellorCode: "CLCN1",
       instituteId: institute.body.id,
     });
-    counsellorId = counsellor.body.counsellor.id;
     counsellorToken = bearer("COUNSELLOR", { userId: counsellor.body.counsellor.user.id });
   });
 
   afterAll(async () => {
-    await prisma.careerLibraryRequest.deleteMany({ where: { jobTitle: { startsWith: "Test CL" } } });
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test CL Role" } } });
+    await prisma.careerLibraryEntryProposal.deleteMany({ where: { jobRole: { startsWith: "Test CL Role" } } });
     await prisma.careerDomain.deleteMany({ where: { name: "Test CL Domain" } });
     await prisma.careerIndustry.deleteMany({ where: { name: "Test CL Industry" } });
     await prisma.careerCluster.deleteMany({ where: { name: "Test CL Cluster" } });
@@ -70,88 +68,88 @@ describe("Career Library writes + ratification", () => {
     expect(res.body.createdBy).toBeTypeOf("string");
   });
 
-  it("holds a counsellor's submitted job role as PENDING + DRAFT", async () => {
+  it("stages a counsellor's submitted job role as a proposal, never touching the real table", async () => {
     const res = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", counsellorToken)
-      // ACTIVE is ignored for a counsellor — they can't publish their own submission.
+      // status is meaningless for a proposal — it's ignored either way.
       .send(entryBody({ jobRole: "Test CL Role Pending", status: "ACTIVE" }));
     expect(res.status).toBe(201);
-    expect(res.body.reviewStatus).toBe("PENDING");
-    expect(res.body.status).toBe("DRAFT");
-    expect(res.body.reviewedBy).toBeNull();
+    expect(res.body.jobRole).toBe("Test CL Role Pending");
+    expect(res.body.submittedBy).toBeTypeOf("string");
+    expect(await prisma.careerLibraryEntry.findFirst({ where: { jobRole: "Test CL Role Pending" } })).toBeNull();
+    expect(await prisma.careerLibraryEntryProposal.findUnique({ where: { id: res.body.id } })).not.toBeNull();
 
     // Invisible in the library, even to an admin browsing the default list.
     const list = await authRequest(app).get("/api/v1/career-library").query({ search: "Test CL Role Pending" });
     expect(list.body.data.some((e: { id: string }) => e.id === res.body.id)).toBe(false);
   });
 
-  it("marks an admin's own entry APPROVED on the spot", async () => {
+  it("marks an admin's own entry ACTIVE on the spot", async () => {
     const res = await authRequest(app)
       .post("/api/v1/career-library")
       .send(entryBody({ jobRole: "Test CL Role AdminDirect", status: "ACTIVE" }));
     expect(res.status).toBe(201);
-    expect(res.body.reviewStatus).toBe("APPROVED");
     expect(res.body.status).toBe("ACTIVE");
-    expect(res.body.reviewedBy).toBeTypeOf("string");
 
     // Use case 1: one call and it's in the library.
     const list = await authRequest(app).get("/api/v1/career-library").query({ search: "Test CL Role AdminDirect" });
     expect(list.body.data.some((e: { id: string }) => e.id === res.body.id)).toBe(true);
   });
 
-  it("surfaces pending submissions to the admin review queue", async () => {
+  it("surfaces pending submissions to the admin proposals queue", async () => {
     const created = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", counsellorToken)
       .send(entryBody({ jobRole: "Test CL Role Queue" }));
 
     const queue = await authRequest(app)
-      .get("/api/v1/career-library")
-      .query({ reviewStatus: "PENDING", status: "DRAFT", search: "Test CL Role Queue" });
+      .get("/api/v1/career-library/proposals")
+      .query({ search: "Test CL Role Queue" });
     expect(queue.status).toBe(200);
     expect(queue.body.data.some((e: { id: string }) => e.id === created.body.id)).toBe(true);
   });
 
-  it("publishes a counsellor's job role when an admin approves it", async () => {
+  it("publishes a counsellor's job role when an admin approves the proposal", async () => {
     const created = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", counsellorToken)
       .send(entryBody({ jobRole: "Test CL Role Approve" }));
     const id = created.body.id;
 
-    const approved = await authRequest(app).post(`/api/v1/career-library/${id}/approve`);
+    const approved = await authRequest(app).post(`/api/v1/career-library/proposals/${id}/approve`);
     expect(approved.status).toBe(200);
-    expect(approved.body.reviewStatus).toBe("APPROVED");
-    // Approve publishes in one action rather than leaving a DRAFT behind.
+    // Approve creates a brand-new career_library_entries row — different id, status ACTIVE.
+    expect(approved.body.id).not.toBe(id);
     expect(approved.body.status).toBe("ACTIVE");
-    expect(approved.body.reviewedBy).toBeTypeOf("string");
+    expect(approved.body.jobRole).toBe("Test CL Role Approve");
 
+    expect(await prisma.careerLibraryEntryProposal.findUnique({ where: { id } })).toBeNull();
     const list = await authRequest(app).get("/api/v1/career-library").query({ search: "Test CL Role Approve" });
-    expect(list.body.data.some((e: { id: string }) => e.id === id)).toBe(true);
+    expect(list.body.data.some((e: { id: string }) => e.id === approved.body.id)).toBe(true);
 
-    // Re-reviewing a decided entry is a stale-queue 409.
-    const again = await authRequest(app).post(`/api/v1/career-library/${id}/approve`);
-    expect(again.status).toBe(409);
+    // The proposal is gone, so re-approving is a 404, not a stale-queue 409.
+    const again = await authRequest(app).post(`/api/v1/career-library/proposals/${id}/approve`);
+    expect(again.status).toBe(404);
   });
 
-  it("deletes a counsellor's job role when an admin rejects it", async () => {
+  it("deletes a counsellor's job role proposal when an admin rejects it", async () => {
     const created = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", counsellorToken)
       .send(entryBody({ jobRole: "Test CL Role Reject" }));
     const id = created.body.id;
 
-    const rejected = await authRequest(app).post(`/api/v1/career-library/${id}/reject`);
+    const rejected = await authRequest(app).post(`/api/v1/career-library/proposals/${id}/reject`);
     expect(rejected.status).toBe(200);
     expect(rejected.body).toEqual({ id, deleted: true });
 
-    expect(await prisma.careerLibraryEntry.findUnique({ where: { id } })).toBeNull();
-    const got = await authRequest(app).get(`/api/v1/career-library/${id}`);
+    expect(await prisma.careerLibraryEntryProposal.findUnique({ where: { id } })).toBeNull();
+    const got = await authRequest(app).get(`/api/v1/career-library/proposals/${id}`);
     expect(got.status).toBe(404);
   });
 
-  it("403s a counsellor trying to approve or reject a job role", async () => {
+  it("403s a counsellor trying to approve or reject a job role proposal", async () => {
     const created = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", counsellorToken)
@@ -159,22 +157,23 @@ describe("Career Library writes + ratification", () => {
     const id = created.body.id;
 
     const approve = await request(app)
-      .post(`/api/v1/career-library/${id}/approve`)
+      .post(`/api/v1/career-library/proposals/${id}/approve`)
       .set("Authorization", counsellorToken);
     expect(approve.status).toBe(403);
 
     const reject = await request(app)
-      .post(`/api/v1/career-library/${id}/reject`)
+      .post(`/api/v1/career-library/proposals/${id}/reject`)
       .set("Authorization", counsellorToken);
     expect(reject.status).toBe(403);
   });
 
-  it("409s when reviewing an entry that was never submitted for review", async () => {
+  it("404s reviewing a proposal id that doesn't exist", async () => {
     const created = await authRequest(app)
       .post("/api/v1/career-library")
       .send(entryBody({ jobRole: "Test CL Role NotPending" }));
-    const res = await authRequest(app).post(`/api/v1/career-library/${created.body.id}/approve`);
-    expect(res.status).toBe(409);
+    // The admin's own submission went straight to the real table, so it was never a proposal.
+    const res = await authRequest(app).post(`/api/v1/career-library/proposals/${created.body.id}/approve`);
+    expect(res.status).toBe(404);
   });
 
   it("treats qualification10th12th as optional, and lets PATCH clear it", async () => {
@@ -228,78 +227,4 @@ describe("Career Library writes + ratification", () => {
     expect(got.status).toBe(404);
   });
 
-  it("lets a counsellor submit a ratification request (self, resolved from token)", async () => {
-    const res = await request(app)
-      .post("/api/v1/career-library/requests")
-      .set("Authorization", counsellorToken)
-      .send({
-        jobTitle: "Test CL Prompt Engineer",
-        suggestedCluster: "Technology",
-        suggestedIndustry: "AI",
-        oneLineDescription: "Designs prompts",
-        justification: "Growing field",
-        referenceLinks: ["https://example.com/role"],
-      });
-    expect(res.status).toBe(201);
-    expect(res.body.status).toBe("PENDING");
-    expect(res.body.requestedById).toBe(counsellorId);
-  });
-
-  it("runs the approve flow: link a resulting entry, then can't re-review", async () => {
-    const submitted = await request(app)
-      .post("/api/v1/career-library/requests")
-      .set("Authorization", counsellorToken)
-      .send({
-        jobTitle: "Test CL Robotics Tech",
-        suggestedCluster: "Engineering",
-        suggestedIndustry: "Robotics",
-        oneLineDescription: "Builds robots",
-        justification: "In demand",
-      });
-    const requestId = submitted.body.id;
-
-    // Admin creates the real entry, then approves the request linked to it.
-    const entry = await authRequest(app).post("/api/v1/career-library").send(entryBody({ jobRole: "Test CL Role Robotics", status: "ACTIVE" }));
-
-    const approved = await authRequest(app)
-      .post(`/api/v1/career-library/requests/${requestId}/approve`)
-      .send({ resultingEntryId: entry.body.id });
-    expect(approved.status).toBe(200);
-    expect(approved.body.status).toBe("APPROVED");
-    expect(approved.body.reviewedBy).toBeTypeOf("string");
-    expect(approved.body.resultingEntry.id).toBe(entry.body.id);
-
-    // Already reviewed -> 409.
-    const again = await authRequest(app).post(`/api/v1/career-library/requests/${requestId}/approve`).send({});
-    expect(again.status).toBe(409);
-  });
-
-  it("rejects a request, and forbids a counsellor from reviewing", async () => {
-    const submitted = await request(app)
-      .post("/api/v1/career-library/requests")
-      .set("Authorization", counsellorToken)
-      .send({
-        jobTitle: "Test CL Astrologer",
-        suggestedCluster: "Misc",
-        suggestedIndustry: "Misc",
-        oneLineDescription: "Reads stars",
-        justification: "Requested by parent",
-      });
-    const requestId = submitted.body.id;
-
-    const asCounsellor = await request(app)
-      .post(`/api/v1/career-library/requests/${requestId}/reject`)
-      .set("Authorization", counsellorToken);
-    expect(asCounsellor.status).toBe(403); // review is admin-only
-
-    const rejected = await authRequest(app).post(`/api/v1/career-library/requests/${requestId}/reject`);
-    expect(rejected.status).toBe(200);
-    expect(rejected.body.status).toBe("REJECTED");
-  });
-
-  it("lists requests filtered by status", async () => {
-    const pending = await authRequest(app).get("/api/v1/career-library/requests").query({ status: "PENDING" });
-    expect(pending.status).toBe(200);
-    expect(pending.body.every((r: { status: string }) => r.status === "PENDING")).toBe(true);
-  });
 });

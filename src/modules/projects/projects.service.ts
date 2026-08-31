@@ -5,7 +5,7 @@ import { nextCode } from "../../common/utils/codeSequence.js";
 import type { CreateProjectInput, ListProjectsQuery, UpdateProjectInput } from "./projects.schema.js";
 
 const projectInclude = {
-  institute: { select: { id: true, name: true } },
+  institute: { select: { id: true, name: true, address: true } },
   language: { select: { id: true, code: true, name: true } },
   _count: { select: { students: true, counsellors: true, counsellorSlots: true } },
 } as const;

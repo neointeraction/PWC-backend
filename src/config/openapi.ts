@@ -33,18 +33,14 @@ import {
   startAttemptBodySchema,
 } from "../modules/assessment/assessment.schema.js";
 import {
-  approveCareerRequestSchema,
   careerLibraryIdParamsSchema,
-  careerRequestIdParamsSchema,
   createCareerEntrySchema,
-  createCareerRequestSchema,
   listCareerLibraryQuerySchema,
-  listCareerRequestsQuerySchema,
   listCoursesQuerySchema,
   listEntranceExamsQuerySchema,
   listInstitutionsQuerySchema,
+  listCareerEntryProposalsQuerySchema,
   lookupIdParamsSchema,
-  rejectLookupSchema,
   submitCourseSchema,
   submitEntranceExamSchema,
   submitInstitutionSchema,
@@ -615,8 +611,9 @@ registry.registerPath({
   path: "/api/v1/career-library",
   tags: ["Career Library"],
   summary:
-    "Search/list career library entries. Defaults to status=ACTIVE + reviewStatus=APPROVED; " +
-    "pass reviewStatus=PENDING (with status=DRAFT) for the admin review queue of counsellor submissions.",
+    "Search/list career library entries. Defaults to status=ACTIVE; pass status=DRAFT to see " +
+    "an admin's own unpublished entries. Counsellor-submitted job roles awaiting review live " +
+    "in GET /api/v1/career-library/proposals instead — they're never in this table.",
   request: { query: listCareerLibraryQuerySchema },
   responses: {
     200: {
@@ -1132,7 +1129,7 @@ registry.registerPath({
   },
 });
 
-// --- Career Library (writes + ratification) ---
+// --- Career Library (writes) ---
 
 registry.registerPath({
   method: "post",
@@ -1140,8 +1137,9 @@ registry.registerPath({
   tags: ["Career Library"],
   summary:
     "Create a career library entry. Staff — an admin's is added to the library as submitted " +
-    "(DRAFT by default; publish by setting ACTIVE), while a counsellor's is held as " +
-    "reviewStatus PENDING + DRAFT and stays out of the library until an admin approves it.",
+    "(DRAFT by default; publish by setting ACTIVE), while a counsellor's is staged as a " +
+    "CareerLibraryEntryProposal (see GET/approve/reject /career-library/proposals) and never " +
+    "touches this table until an admin approves it.",
   request: { body: { content: { "application/json": { schema: createCareerEntrySchema } } } },
   responses: {
     201: { description: "Entry created", content: { "application/json": { schema: genericObjectSchema } } },
@@ -1175,88 +1173,50 @@ registry.registerPath({
 });
 
 registry.registerPath({
-  method: "post",
-  path: "/api/v1/career-library/{id}/approve",
+  method: "get",
+  path: "/api/v1/career-library/proposals",
   tags: ["Career Library"],
-  summary:
-    "Approve a counsellor-submitted job role (admin). Publishes it in one step — reviewStatus APPROVED and status ACTIVE. 409 if it was already decided.",
+  summary: "List counsellor-submitted job role proposals awaiting review. Staff.",
+  request: { query: listCareerEntryProposalsQuerySchema },
+  responses: {
+    200: { description: "Paginated proposals", content: { "application/json": { schema: genericObjectSchema } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/career-library/proposals/{id}",
+  tags: ["Career Library"],
+  summary: "Get a job role proposal by id, with its linked exam/course/institution/education entries resolved. Staff.",
   request: { params: careerLibraryIdParamsSchema },
   responses: {
-    200: { description: "Approved entry", content: { "application/json": { schema: genericObjectSchema } } },
+    200: { description: "Proposal", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/career-library/proposals/{id}/approve",
+  tags: ["Career Library"],
+  summary:
+    "Approve a counsellor-submitted job role proposal (admin). Copies it into a new career_library_entries row (status ACTIVE) and deletes the proposal.",
+  request: { params: careerLibraryIdParamsSchema },
+  responses: {
+    200: { description: "The newly created entry", content: { "application/json": { schema: genericObjectSchema } } },
     ...errorResponses,
   },
 });
 
 registry.registerPath({
   method: "post",
-  path: "/api/v1/career-library/{id}/reject",
+  path: "/api/v1/career-library/proposals/{id}/reject",
   tags: ["Career Library"],
-  summary:
-    "Reject a counsellor-submitted job role (admin). Deletes it permanently — nothing is kept. 409 if it was already decided.",
+  summary: "Reject a job role proposal (admin). Deletes it permanently — nothing is kept.",
   request: { params: careerLibraryIdParamsSchema },
   responses: {
     200: { description: "Rejected and deleted", content: { "application/json": { schema: genericObjectSchema } } },
     ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "post",
-  path: "/api/v1/career-library/requests",
-  tags: ["Career Library"],
-  summary: "Submit a ratification request to add a career (counsellor resolved from token; admin passes requestedById). Staff.",
-  request: { body: { content: { "application/json": { schema: createCareerRequestSchema } } } },
-  responses: {
-    201: { description: "Request created (PENDING)", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "get",
-  path: "/api/v1/career-library/requests",
-  tags: ["Career Library"],
-  summary: "List ratification requests (filter by status/requestedById). Staff.",
-  request: { query: listCareerRequestsQuerySchema },
-  responses: {
-    200: { description: "List of requests", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
-  },
-});
-
-registry.registerPath({
-  method: "get",
-  path: "/api/v1/career-library/requests/{requestId}",
-  tags: ["Career Library"],
-  summary: "Get a ratification request by id. Staff.",
-  request: { params: careerRequestIdParamsSchema },
-  responses: {
-    200: { description: "Request", content: { "application/json": { schema: genericObjectSchema } } },
-    404: errorResponses[404],
-  },
-});
-
-registry.registerPath({
-  method: "post",
-  path: "/api/v1/career-library/requests/{requestId}/approve",
-  tags: ["Career Library"],
-  summary: "Approve a ratification request (optionally link the resulting entry). Admin only. 409 if already reviewed.",
-  request: { params: careerRequestIdParamsSchema, body: { content: { "application/json": { schema: approveCareerRequestSchema } } } },
-  responses: {
-    200: { description: "Approved request", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "post",
-  path: "/api/v1/career-library/requests/{requestId}/reject",
-  tags: ["Career Library"],
-  summary: "Reject a ratification request. Admin only. 409 if already reviewed.",
-  request: { params: careerRequestIdParamsSchema },
-  responses: {
-    200: { description: "Rejected request", content: { "application/json": { schema: genericObjectSchema } } },
-    409: errorResponses[409],
-    404: errorResponses[404],
   },
 });
 
@@ -1305,7 +1265,7 @@ registry.registerPath({
   path: "/api/v1/career-library/entrance-exams",
   tags: ["Career Library"],
   summary:
-    "Propose a canonical entrance exam. Staff. A counsellor's submission lands PENDING and stays out of the pickers until approved; an admin's is APPROVED immediately. An existing row is reused and blank-filled rather than duplicated.",
+    "Propose a canonical entrance exam. Staff. A counsellor's submission lands DRAFT and stays out of the pickers until approved; an admin's is ACTIVE immediately. An existing row is reused and blank-filled rather than duplicated.",
   request: { body: { content: { "application/json": { schema: submitEntranceExamSchema } } } },
   responses: { 201: { description: "Submitted entrance exam", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1314,7 +1274,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/entrance-exams/{id}/approve",
   tags: ["Career Library"],
-  summary: "Approve a pending entrance exam (admin). 409 if it was already approved or rejected.",
+  summary: "Publish a DRAFT entrance exam (admin). 409 if it is already active.",
   request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Approved entrance exam", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1323,8 +1283,8 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/entrance-exams/{id}/reject",
   tags: ["Career Library"],
-  summary: "Reject a pending entrance exam (admin), optionally with a reason. 409 if it was already decided.",
-  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: rejectLookupSchema } } } },
+  summary: "Reject a DRAFT entrance exam (admin) — hard delete. 409 if active, or linked to a job role.",
+  request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Rejected entrance exam", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 registry.registerPath({
@@ -1332,7 +1292,7 @@ registry.registerPath({
   path: "/api/v1/career-library/courses",
   tags: ["Career Library"],
   summary:
-    "Propose a canonical course. Staff. A counsellor's submission lands PENDING and stays out of the pickers until approved; an admin's is APPROVED immediately. An existing row is reused and blank-filled rather than duplicated.",
+    "Propose a canonical course. Staff. A counsellor's submission lands DRAFT and stays out of the pickers until approved; an admin's is ACTIVE immediately. An existing row is reused and blank-filled rather than duplicated.",
   request: { body: { content: { "application/json": { schema: submitCourseSchema } } } },
   responses: { 201: { description: "Submitted course", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1341,7 +1301,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/courses/{id}/approve",
   tags: ["Career Library"],
-  summary: "Approve a pending course (admin). 409 if it was already approved or rejected.",
+  summary: "Publish a DRAFT course (admin). 409 if it is already active.",
   request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Approved course", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1350,8 +1310,8 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/courses/{id}/reject",
   tags: ["Career Library"],
-  summary: "Reject a pending course (admin), optionally with a reason. 409 if it was already decided.",
-  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: rejectLookupSchema } } } },
+  summary: "Reject a DRAFT course (admin) — hard delete. 409 if active, or linked to a job role.",
+  request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Rejected course", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 registry.registerPath({
@@ -1359,7 +1319,7 @@ registry.registerPath({
   path: "/api/v1/career-library/institutions",
   tags: ["Career Library"],
   summary:
-    "Propose a canonical institution. Staff. A counsellor's submission lands PENDING and stays out of the pickers until approved; an admin's is APPROVED immediately. An existing row is reused and blank-filled rather than duplicated.",
+    "Propose a canonical institution. Staff. A counsellor's submission lands DRAFT and stays out of the pickers until approved; an admin's is ACTIVE immediately. An existing row is reused and blank-filled rather than duplicated.",
   request: { body: { content: { "application/json": { schema: submitInstitutionSchema } } } },
   responses: { 201: { description: "Submitted institution", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1368,7 +1328,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/institutions/{id}/approve",
   tags: ["Career Library"],
-  summary: "Approve a pending institution (admin). 409 if it was already approved or rejected.",
+  summary: "Publish a DRAFT institution (admin). 409 if it is already active.",
   request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Approved institution", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
@@ -1377,8 +1337,8 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/institutions/{id}/reject",
   tags: ["Career Library"],
-  summary: "Reject a pending institution (admin), optionally with a reason. 409 if it was already decided.",
-  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: rejectLookupSchema } } } },
+  summary: "Reject a DRAFT institution (admin) — hard delete. 409 if active, or linked to a job role.",
+  request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Rejected institution", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 

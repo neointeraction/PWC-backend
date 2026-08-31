@@ -97,7 +97,7 @@ describe("Counsellors API", () => {
     expect(res.status).toBe(409);
   });
 
-  it("creates a counsellor with no instituteId (unassigned pool) and later assigns one via a project", async () => {
+  it("creates a counsellor with no instituteId (unassigned pool) and assigns it to projects across institutes", async () => {
     const res = await authRequest(app).post("/api/v1/counsellors").send({
       firstName: "Pool",
       lastName: "Counsellor",
@@ -111,15 +111,19 @@ describe("Counsellors API", () => {
 
     const assign = await authRequest(app).post(`/api/v1/counsellors/${id}/projects`).send({ projectId });
     expect(assign.status).toBe(200);
-    expect(assign.body.institute.id).toBe(instituteId);
+    // instituteId is informational only and is never backfilled by assignment.
+    expect(assign.body.institute).toBeNull();
 
-    // Now that it has a home institute, an assignment to a project in a different
-    // institute is rejected.
-    const badAssign = await authRequest(app).post(`/api/v1/counsellors/${id}/projects`).send({ projectId: otherProjectId });
-    expect(badAssign.status).toBe(400);
+    // Counsellors are tenant-wide, not institute-scoped: assignment to a project under a
+    // different institute succeeds too, and both assignments coexist.
+    const otherAssign = await authRequest(app).post(`/api/v1/counsellors/${id}/projects`).send({ projectId: otherProjectId });
+    expect(otherAssign.status).toBe(200);
+    expect(otherAssign.body.projects.map((p: { projectId: string }) => p.projectId).sort()).toEqual(
+      [projectId, otherProjectId].sort()
+    );
   });
 
-  it("rejects projectIds on creation without instituteId with 400", async () => {
+  it("allows projectIds on creation without instituteId", async () => {
     const res = await authRequest(app).post("/api/v1/counsellors").send({
       firstName: "Bad",
       lastName: "NoInstitute",
@@ -128,10 +132,10 @@ describe("Counsellors API", () => {
       counsellorCode: "CN-BAD",
       projectIds: [projectId],
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
   });
 
-  it("rejects a projectId from another institute with 400", async () => {
+  it("allows a projectId from a different institute than instituteId on creation", async () => {
     const res = await authRequest(app).post("/api/v1/counsellors").send({
       firstName: "Bad",
       lastName: "Project",
@@ -141,7 +145,7 @@ describe("Counsellors API", () => {
       instituteId,
       projectIds: [otherProjectId],
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
   });
 
   it("lists counsellors, filterable by project", async () => {

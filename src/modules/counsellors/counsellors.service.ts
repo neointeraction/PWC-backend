@@ -23,20 +23,16 @@ function generateTempPassword(): string {
   return crypto.randomBytes(12).toString("base64url");
 }
 
-// Ensures every project in `projectIds` exists and belongs to `instituteId` — a
-// counsellor can only be assigned to projects run by their own institute.
-async function assertProjectsBelongToInstitute(projectIds: string[], instituteId: string) {
+// Ensures every project in `projectIds` exists. Counsellors are a flat, tenant-wide
+// directory (not institute-scoped), so a project's institute is irrelevant here.
+async function assertProjectsExist(projectIds: string[]) {
   if (projectIds.length === 0) return;
   const projects = await prisma.project.findMany({
     where: { id: { in: projectIds } },
-    select: { id: true, instituteId: true },
+    select: { id: true },
   });
   if (projects.length !== projectIds.length) {
     throw new BadRequestError("One or more projectIds do not exist");
-  }
-  const foreign = projects.filter((p) => p.instituteId !== instituteId);
-  if (foreign.length > 0) {
-    throw new BadRequestError("One or more projectIds do not belong to the counsellor's institute");
   }
 }
 
@@ -47,10 +43,8 @@ export async function createCounsellor(input: CreateCounsellorInput) {
     if (!institute) {
       throw new BadRequestError("instituteId does not exist");
     }
-    await assertProjectsBelongToInstitute(projectIds, input.instituteId);
-  } else if (projectIds.length > 0) {
-    throw new BadRequestError("projectIds requires instituteId to be set");
   }
+  await assertProjectsExist(projectIds);
 
   // Import sheets may carry the temp password; otherwise generate one. mustChangePassword
   // defaults to true either way, so it's changed at first login.
@@ -155,25 +149,17 @@ export async function deleteCounsellor(id: string) {
 }
 
 export async function assignProject(id: string, input: AssignProjectBody) {
-  const counsellor = await getCounsellorById(id);
+  await getCounsellorById(id);
   const project = await prisma.project.findUnique({ where: { id: input.projectId } });
   if (!project) {
     throw new BadRequestError("projectId does not exist");
   }
-  if (counsellor.instituteId !== null && project.instituteId !== counsellor.instituteId) {
-    throw new BadRequestError("Project does not belong to the counsellor's institute");
-  }
 
   try {
-    await prisma.$transaction(async (tx) => {
-      // A counsellor created without an institute (pool) picks up its home institute
-      // from the first project it's assigned to.
-      if (counsellor.instituteId === null) {
-        await tx.counsellor.update({ where: { id }, data: { instituteId: project.instituteId } });
-      }
-      await tx.projectCounsellor.create({
-        data: { counsellorId: id, projectId: input.projectId },
-      });
+    // Counsellors are tenant-wide, not institute-scoped: the same counsellor can be
+    // assigned to any number of projects/institutes concurrently.
+    await prisma.projectCounsellor.create({
+      data: { counsellorId: id, projectId: input.projectId },
     });
   } catch (err) {
     handlePrismaError(err); // P2002 → 409 (already assigned)

@@ -39,6 +39,7 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
 
   afterAll(async () => {
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test Norm Role" } } });
+    await prisma.careerLibraryEntryProposal.deleteMany({ where: { jobRole: { startsWith: "Test Norm Role" } } });
     await prisma.careerDomain.deleteMany({ where: { name: { startsWith: "Test Norm Domain" } } });
     await prisma.careerIndustry.deleteMany({ where: { name: "Test Norm Industry" } });
     await prisma.careerCluster.deleteMany({ where: { name: "Test Norm Cluster" } });
@@ -141,14 +142,14 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
   });
 
   it("holds a counsellor's write for review, and keeps the dropdowns open to them", async () => {
-    // The write path is staff now, but a counsellor's entry is parked PENDING rather than
-    // landing in the library — see career-library-writes.test.ts for the full review flow.
+    // The write path is staff now, but a counsellor's entry is staged as a proposal rather
+    // than landing in the library — see career-library-writes.test.ts for the full review flow.
     const write = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", bearer("COUNSELLOR"))
       .send(entryBody({ jobRole: "Test Norm Role NoPerm" }));
     expect(write.status).toBe(201);
-    expect(write.body.reviewStatus).toBe("PENDING");
+    expect(await prisma.careerLibraryEntry.findFirst({ where: { jobRole: "Test Norm Role NoPerm" } })).toBeNull();
 
     // Publishing it is not theirs to do.
     const publish = await request(app)
