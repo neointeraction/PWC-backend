@@ -272,16 +272,17 @@ still viewable.
 | GET | `/api/v1/assessment/attempts/{attemptId}` | Get an attempt with its answers (questions included, `correctOption` excluded). |
 | PUT | `/api/v1/assessment/attempts/{attemptId}/answers` | Save/update answers ("Save Progress"). Body: `answers: [{ fieldKey, selectedOption, timeTakenMs? }]`. Upserts `AssessmentAnswer` rows; idempotent. 400 on an unknown `fieldKey`. 409 if the attempt is already submitted (locked). `timeTakenMs` (optional, non-negative int) is per-question elapsed time — send it on every aptitude question to enable Time-Consistency and the composite ARI. Omitting it on a later save of the same answer preserves the stored value; sending `null` clears it. |
 | POST | `/api/v1/assessment/attempts/{attemptId}/submit` | Finalize an attempt. Validates every question in the cohort has an answer — 400 with `{ missingFieldKeys }` if not — then sets `status: SUBMITTED` + `submittedAt`, locks it, **and runs the scoring engine to compute + store the `AssessmentResult`**. 409 if already submitted. |
-| GET | `/api/v1/assessment/attempts/{attemptId}/result` | Get the computed scoring report for a submitted attempt: 18 trait scores + grades, RIASEC/Big Five/Aptitude/Cognitive layer breakdowns with flags, Dominant Career Style (DCS) & Dominant Personality Style (DPS), Stream Fit (top 3), Graduation Pathways (top 3), Career Fit (top-6 domains with a representative career + top-3 industries), and the reliability dashboard (RVS, ACI, ORI, DC). 404 until the attempt is submitted. |
+| GET | `/api/v1/assessment/attempts/{attemptId}/result` | Get the computed scoring report for a submitted attempt: 18 trait scores + grades, RIASEC/Big Five/Aptitude/Cognitive layer breakdowns with flags, Dominant Career Style (DCS) & Dominant Personality Style (DPS), Stream Fit (top 3), Graduation Pathways (top 3), Career Fit (top-6 domains with a representative career + top-3 industries), and the reliability dashboard (RVS, ACI, ORI, DC, and — once every aptitude answer carries `timeTakenMs` — TC and the composite ARI). 404 until the attempt is submitted. |
 
 On submit, the scoring engine computes an `AssessmentResult` (see
 `src/modules/assessment/scoring/`). **Fully computed today**: RIASEC / Big Five /
 Aptitude / Cognitive trait scores, grades, tie-breaks and flags; DCS; DPS; Stream Fit;
 Graduation Pathways; Career Fit (top-6 domains, each with a representative career picked
 by highest AI-resilience, plus a top-3 industry rollup); and the RVS, ACI, ORI and
-Difficulty-Consistency reliability measures. **Deferred pending PWC sign-off** (`null`
-until resolved): Time-Consistency & the composite ARI (need per-question `timeTakenMs`).
-See `docs/db-design.md`.
+Difficulty-Consistency (DC) reliability measures. The reliability dashboard's Time-
+Consistency (TC) and composite ARI (`DC×0.6 + TC×0.4`) activate as soon as every
+aptitude answer on the attempt carries a `timeTakenMs`; until then they stay `null` and
+`meta.pending` lists `"ari"`. See `docs/db-design.md`.
 
 **Scoring tester (dev only):** with the API running (`pnpm dev`), open
 `http://localhost:4000/dev/assessment` in a browser — a single self-contained page that
@@ -498,7 +499,7 @@ token may only read their own (it's the student-facing deliverable).
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/v1/reports/students/{studentId}/assessment` | The full student assessment report. Returns `student` (name, code, institute/class/division, workflowStatus), `championProfile` (DCS + DPS), `traitMap` (RIASEC / Big Five / Aptitude / Cognitive layers + flat 18-trait map), `careerCompass` (Career Fit top-6 domains with representative careers + top-3 industries), `streamFit`, `graduationPathways`, `reliability` (RVS/ACI/ORI/DC), `counsellorNarrative` (chart strengths/hobbies/shortlist/SCRI/notes, or `null` if none authored), `feedback` (score or `{ complete:false }`), and `meta` (cohort, `assessmentSubmittedAt`, `finalized`, engine `pending` list). **404 until the student has a computed assessment result.** When the **student** fetches their own report and they are at `STUDENT_PARENT_FEEDBACK`, the case is closed (`workflowStatus` → `CLOSED`) — receiving the report is the last step. A staff fetch is a read, and never closes a case. |
+| GET | `/api/v1/reports/students/{studentId}/assessment` | The full student assessment report. Returns `student` (name, code, institute/class/division, workflowStatus), `championProfile` (DCS + DPS), `traitMap` (RIASEC / Big Five / Aptitude / Cognitive layers + flat 18-trait map), `careerCompass` (Career Fit top-6 domains with representative careers + top-3 industries), `streamFit`, `graduationPathways`, `reliability` (RVS/ACI/ORI/DC, plus TC and the composite ARI once every aptitude answer carries `timeTakenMs`), `counsellorNarrative` (chart strengths/hobbies/shortlist/SCRI/notes, or `null` if none authored), `feedback` (score or `{ complete:false }`), and `meta` (cohort, `assessmentSubmittedAt`, `finalized`, engine `pending` list). **404 until the student has a computed assessment result.** When the **student** fetches their own report and they are at `STUDENT_PARENT_FEEDBACK`, the case is closed (`workflowStatus` → `CLOSED`) — receiving the report is the last step. A staff fetch is a read, and never closes a case. |
 
 ## Email
 

@@ -90,6 +90,8 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "free_time_activities",
     sectionLabel: "Section 2 — How I Spend My Time",
     questionText: "What do you do most in your free time when you are NOT studying? (Tick all that apply)",
+    helpText:
+      "Free time includes evenings, weekends, school holidays, any time that is not class or homework time.",
     questionType: "MCQ_MULTI",
     allowOtherText: true,
     otherTextFieldKey: "free_time_activities_other",
@@ -109,6 +111,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "hobbies_table",
     sectionLabel: "Section 2 — How I Spend My Time",
     questionText: "Write your top two hobbies and how many hours per week you spend on them.",
+    helpText: "Even casual things like watching YouTube or playing with pets count as hobbies.",
     questionType: "MATRIX",
     options: {
       rows: [
@@ -127,6 +130,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "interest_consistency",
     sectionLabel: "Section 2 — How I Spend My Time",
     questionText: "How consistent are your interests / hobbies over time?",
+    helpText: "Even casual things like watching YouTube or playing with pets count as interests / hobbies.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "Very consistent — same interests have continued for a long time" },
@@ -140,6 +144,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "school_activities",
     sectionLabel: "Section 2 — How I Spend My Time",
     questionText: "Which school activities do you enjoy the most? (Tick all that apply)",
+    helpText: "These are activities that are not part of your routine academics or studies.",
     questionType: "MCQ_MULTI",
     allowOtherText: true,
     otherTextFieldKey: "school_activities_other",
@@ -159,6 +164,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "learning_style",
     sectionLabel: "Section 2 — How I Spend My Time",
     questionText: "How do you learn best? Choose the ONE option that feels most like you.",
+    helpText: "Think about which way of studying actually makes things stick in your mind and you get interested.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "Reading and understanding concepts from books or notes" },
@@ -199,6 +205,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "study_challenges",
     sectionLabel: "Section 3 — What I Am Good At (My Strengths)",
     questionText: "What is your biggest challenge when studying? (Choose up to TWO)",
+    helpText: "Being honest here helps your counsellor give you practical tips.",
     questionType: "MCQ_MULTI",
     allowOtherText: true,
     otherTextFieldKey: "study_challenges_other",
@@ -218,6 +225,8 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "energy_type",
     sectionLabel: "Section 4 — My Personality & How I Think",
     questionText: "Which of these best describes you? (Choose ONE)",
+    helpText:
+      "There is no better or worse option, this just helps us understand how you get your energy or how you think you are.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "Introvert — I prefer working alone and feel recharged after time by myself" },
@@ -231,6 +240,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "decision_style",
     sectionLabel: "Section 4 — My Personality & How I Think",
     questionText: "How do you usually make an important decision? (Choose ONE)",
+    helpText: "Example: Deciding which book to read, which tuition/course to take, which activity to join.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "decision_style_other",
@@ -249,6 +259,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "failure_response",
     sectionLabel: "Section 4 — My Personality & How I Think",
     questionText: "When you fail at something or get negative feedback, what do you usually do? (Choose ONE)",
+    helpText: "Think of the last time you got a bad mark, lost a competition or were told you did something wrong.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "failure_response_other",
@@ -267,6 +278,8 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "career_in_mind",
     sectionLabel: "Section 5 — My Career Thoughts",
     questionText: 'Do you have a specific career/s in mind? If yes, write it. If no, write "Still Exploring".',
+    helpText:
+      "It is perfectly fine if you are not sure about your career, most students at your age are not! Just answer honestly with what you think right now. Even if you're not sure, write what comes to mind or you might have thought of.",
     questionType: "OPEN_TEXT",
   },
   {
@@ -276,6 +289,8 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     sectionLabel: "Section 5 — My Career Thoughts",
     questionText:
       'Why are you interested in that career/s? (Choose ONE, or select "Not Applicable" if Q14 was "Still Exploring")',
+    helpText:
+      "If you have mentioned some career in the previous question, there would be something that you like about it. Just mention that.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "career_interest_reason_other",
@@ -296,6 +311,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "career_influence",
     sectionLabel: "Section 5 — My Career Thoughts",
     questionText: "Who or what has most influenced your thinking about your career? (Choose ONE)",
+    helpText: "It is perfectly fine if you are told about the career. We just want to know who or what shaped your thinking.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "career_influence_other",
@@ -316,6 +332,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "parent_understanding",
     sectionLabel: "Section 5 — My Career Thoughts",
     questionText: "How well do your parents understand what you want to do after school? (Choose ONE)",
+    helpText: "It can be about your career plans or stream selection.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "Very well — they fully understand and support my direction" },
@@ -331,6 +348,8 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     fieldKey: "programme_expectations",
     sectionLabel: "Section 6 — What I Want From This Programme",
     questionText: "What are you hoping to get from this career counselling programme? (Tick all that apply)",
+    helpText:
+      "Look at this as a conversation with your best friend and hence choose an answer so that the discussion is meaningful.",
     questionType: "MCQ_MULTI",
     allowOtherText: true,
     otherTextFieldKey: "programme_expectations_other",

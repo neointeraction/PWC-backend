@@ -41,6 +41,8 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "p_strengths_table",
     sectionLabel: "Section 2 — Strengths & Interests I Observe In My Child",
     questionText: "Tick what you clearly observe, sometimes notice, or rarely see in your child.",
+    helpText:
+      "As a parent, you observe your child in situations that others don't see. Your observations here are very valuable. Please tick based on what you have genuinely seen not what you hope for.",
     questionType: "MATRIX",
     options: {
       rows: STRENGTH_ITEMS,
@@ -85,6 +87,8 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "unique_talent",
     sectionLabel: "Section 2 — Strengths & Interests I Observe In My Child",
     questionText: "Have you noticed any one special talent or unique ability in your child?",
+    helpText:
+      "This could be anything a way of thinking, a skill, a habit, or something others have also noticed or commented on.",
     questionType: "OPEN_TEXT",
   },
   {
@@ -93,6 +97,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "p_interest_consistency",
     sectionLabel: "Section 2 — Strengths & Interests I Observe In My Child",
     questionText: "How consistent are your child's interests over time?",
+    helpText: "Even casual things like watching YouTube or playing with pets count as interests / hobbies.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "Very consistent — same interests have continued for a long time" },
@@ -107,6 +112,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "child_personality",
     sectionLabel: "Section 3 — My Child's Personality",
     questionText: "Which of these best describes your child's general personality? (Choose ONE)",
+    helpText: "This just helps us understand how your child gets his energy.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "Confident and a natural leader — takes charge in situations" },
@@ -124,6 +130,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "child_interaction_style",
     sectionLabel: "Section 3 — My Child's Personality",
     questionText: "How does your child generally interact with others — friends, classmates, teachers?",
+    helpText: "This simply helps us understand how your child relates to people around them.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "child_interaction_style_other",
@@ -142,6 +149,8 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "child_decision_style",
     sectionLabel: "Section 3 — My Child's Personality",
     questionText: "How does your child typically make important decisions?",
+    helpText:
+      "Example: Deciding which book to read, which tuition/course to take, which activity to join.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "child_decision_style_other",
@@ -161,6 +170,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "child_failure_response",
     sectionLabel: "Section 3 — My Child's Personality",
     questionText: "How does your child usually handle failure or critical feedback?",
+    helpText: "Think of a time they got a low mark, lost a competition, or were told they did something wrong.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "child_failure_response_other",
@@ -180,6 +190,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "child_study_obstacle",
     sectionLabel: "Section 3 — My Child's Personality",
     questionText: "What is the biggest obstacle your child faces in studying or performing academically?",
+    helpText: "Being honest here helps the counsellor give your child practical tips.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "child_study_obstacle_other",
@@ -201,6 +212,8 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     sectionLabel: "Section 4 — Career Direction & Expectations",
     questionText:
       "Do you currently have a preferred career path or stream in mind for your child? If yes, please write it.",
+    helpText:
+      "This can be anything related to education like any particular course as well as related to career like any profession.",
     questionType: "OPEN_TEXT",
   },
   {
@@ -209,6 +222,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "career_pref_reason",
     sectionLabel: "Section 4 — Career Direction & Expectations",
     questionText: "If you have a preference, what is the main reason behind it? (Choose ONE)",
+    helpText: "Being honest here helps your counsellor guide better.",
     questionType: "MCQ_SINGLE",
     allowOtherText: true,
     otherTextFieldKey: "career_pref_reason_other",
@@ -245,6 +259,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     sectionLabel: "Section 4 — Career Direction & Expectations",
     questionText:
       "Are there financial or practical constraints that should be considered in planning your child's education?",
+    helpText: "Being honest helps for defining the career path.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "No significant constraints — we are open to most options" },
@@ -258,6 +273,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "study_away_table",
     sectionLabel: "Section 4 — Career Direction & Expectations",
     questionText: "How open are you to your child studying away from home for their higher education?",
+    helpText: "Being honest here helps your counsellor give you practical tips.",
     questionType: "MATRIX",
     options: {
       rows: [
@@ -283,6 +299,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "final_decision_maker",
     sectionLabel: "Section 4 — Career Direction & Expectations",
     questionText: "Who usually makes the final decisions about your child's education and future?",
+    helpText: "Being honest here helps your counsellor understand your family's decision-making style.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "Primarily us as parents" },
@@ -296,6 +313,8 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "child_involvement",
     sectionLabel: "Section 4 — Career Direction & Expectations",
     questionText: "How actively is your child involved in these major education decisions?",
+    helpText:
+      "Being honest here helps your counsellor understand how involved your child is in decisions about their own future.",
     questionType: "MCQ_SINGLE",
     options: [
       { value: "a", label: "Always — every major decision is discussed with them" },
@@ -309,6 +328,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "biggest_concern",
     sectionLabel: "Section 4 — Career Direction & Expectations",
     questionText: "What is your biggest concern about your child's academic and career future? (Tick all that apply)",
+    helpText: "Being honest here helps your counsellor address what matters most to you.",
     questionType: "MCQ_MULTI",
     allowOtherText: true,
     otherTextFieldKey: "biggest_concern_other",
@@ -328,6 +348,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     sectionLabel: "Section 4 — Career Direction & Expectations",
     questionText:
       "Is there any specific concern — academic, behavioural or emotional — you would like the counsellor to address in the session?",
+    helpText: "This is confidential and will only be used to make the session more useful for your child.",
     questionType: "OPEN_TEXT",
   },
   {
@@ -336,6 +357,8 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     fieldKey: "programme_hopes",
     sectionLabel: "Section 5 — What You Expect From This Programme",
     questionText: "What are you hoping your child will gain from this counselling programme? (Tick all that apply)",
+    helpText:
+      "Look at this as a conversation with your best friend and hence choose an answer so that the discussion is meaningful.",
     questionType: "MCQ_MULTI",
     allowOtherText: true,
     otherTextFieldKey: "programme_hopes_other",
@@ -355,6 +378,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     sectionLabel: "Section 5 — What You Expect From This Programme",
     questionText:
       "Is there anything you want to personally share with the counsellor — family context, background, or anything relevant?",
+    helpText: "This is confidential and will only be used to make the session more useful for your child.",
     questionType: "OPEN_TEXT",
   },
 ];
