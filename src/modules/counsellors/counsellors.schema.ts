@@ -15,6 +15,10 @@ export const createCounsellorSchema = z.object({
   instituteId: z.string().cuid().optional(),
   // Optional: assign to these projects on creation. No institute-matching required.
   projectIds: z.array(z.string().cuid()).optional(),
+  // The counsellor's one fixed meeting room (e.g. their own Zoom/Meet room). Every
+  // session assigned to this counsellor uses this same link — sessions don't have their
+  // own link anymore (see Session.counsellor.meetingLink).
+  meetingLink: z.string().trim().url().optional(),
 });
 export type CreateCounsellorInput = z.infer<typeof createCounsellorSchema>;
 
@@ -23,6 +27,8 @@ export const updateCounsellorSchema = z.object({
   lastName: z.string().trim().min(1).optional(),
   mobile: phoneSchema.optional(),
   isActive: z.boolean().optional(), // deactivate/reactivate the login without deleting
+  // Send null to clear a previously-set default link.
+  meetingLink: z.string().trim().url().nullable().optional(),
 });
 export type UpdateCounsellorInput = z.infer<typeof updateCounsellorSchema>;
 

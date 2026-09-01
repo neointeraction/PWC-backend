@@ -1,9 +1,10 @@
 import argon2 from "argon2";
 import request from "supertest";
-import { authRequest } from "./helpers/http.js";
+import { authRequest, bearer } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
+import { formatDisplayDate } from "../src/common/utils/dateFormat.js";
 
 const app = createApp();
 
@@ -263,12 +264,14 @@ describe("Sessions API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("sets the meeting link and allows join once inside the window", async () => {
+  it("resolves the meeting link from the assigned counsellor, and allows join once inside the window", async () => {
     const list = await authRequest(app).get(`/api/v1/sessions/students/${studentId}`);
     const session1 = list.body.find((s: { sessionNumber: string }) => s.sessionNumber === "SESSION_1");
+    expect(session1.counsellor.id).toBe(counsellorAId);
 
+    // No per-session link to set — the counsellor's own meetingLink is what /join returns.
     const linkRes = await authRequest(app)
-      .patch(`/api/v1/sessions/${session1.id}/meeting-link`)
+      .patch(`/api/v1/counsellors/${counsellorAId}`)
       .send({ meetingLink: "https://meet.example.com/abc" });
     expect(linkRes.status).toBe(200);
 
@@ -276,6 +279,7 @@ describe("Sessions API", () => {
     const joinRes = await authRequest(app).post(`/api/v1/sessions/${session1.id}/join`).send({ role: "STUDENT" });
     expect(joinRes.status).toBe(200);
     expect(joinRes.body.meetingLink).toBe("https://meet.example.com/abc");
+    expect(joinRes.body.session.counsellor.meetingLink).toBe("https://meet.example.com/abc");
     expect(joinRes.body.session.studentJoinedAt).not.toBeNull();
   });
 
@@ -427,6 +431,331 @@ describe("Sessions API", () => {
         endTime: "12:30",
       });
       expect(res.status).toBe(409);
+    });
+  });
+
+  describe("Reschedule limit, counsellor-initiated reschedule, and restart", () => {
+    let fixtureCounter = 0;
+
+    // Books a real Session 1 + Session 2 pair (via the real booking flow, so a real
+    // CounsellorSlot inventory backs it) for a brand-new student, locked to counsellorA.
+    // Also adds one spare "alternative" open slot on counsellorA (for reschedule
+    // targets) and one on counsellorB (to prove cross-counsellor proposals are rejected).
+    async function bookFreshPairForNewStudent() {
+      fixtureCounter += 1;
+      const passwordHash = await argon2.hash("temp-password");
+      const user = await prisma.user.create({
+        data: { email: `resched-student-${fixtureCounter}@test.example`, passwordHash, role: "STUDENT", firstName: "Resh", lastName: "Kapoor" },
+      });
+      const student = await prisma.student.create({
+        data: {
+          userId: user.id,
+          studentCode: `SESS-RESCHED-${fixtureCounter}`,
+          projectId,
+          divisionId,
+          mobile: `+91987659${(1000 + fixtureCounter).toString().padStart(4, "0")}`,
+          parentMobile: `+91987660${(1000 + fixtureCounter).toString().padStart(4, "0")}`,
+          parentEmail: `parent-resched-${fixtureCounter}@test.example`,
+          fatherName: "Father",
+          fatherOccupation: "Engineer",
+          motherName: "Mother",
+          motherOccupation: "Doctor",
+          workflowStatus: "ASSESSMENT_COMPLETED",
+        },
+      });
+
+      // Far-future dates, widely offset per fixture — some tests add their own extra
+      // slots further out from `base` (e.g. altDate + 20 days), so fixtures need a lot
+      // of headroom between them to never collide on (counsellorId, date, startTime).
+      const base = addDays(now, 100 + fixtureCounter * 200);
+      const s1Date = base;
+      const s2Date = addDays(base, 3);
+      const altDate = addDays(base, 10); // spare slot for reschedule targets
+      const time = "11:00";
+      const endTime = "11:45";
+
+      await authRequest(app).post("/api/v1/sessions/slots").send({
+        projectId,
+        counsellorId: counsellorAId,
+        slots: [
+          { date: ymd(s1Date), startTime: time, endTime },
+          { date: ymd(s2Date), startTime: time, endTime },
+          { date: ymd(altDate), startTime: time, endTime },
+        ],
+      });
+      await authRequest(app).post("/api/v1/sessions/slots").send({
+        projectId,
+        counsellorId: counsellorBId,
+        slots: [{ date: ymd(altDate), startTime: time, endTime }],
+      });
+
+      const booked = await authRequest(app)
+        .post(`/api/v1/sessions/students/${student.id}/book`)
+        .send({ session1: { date: ymd(s1Date), startTime: time }, session2: { date: ymd(s2Date), startTime: time } });
+      expect(booked.status).toBe(201);
+
+      return {
+        studentId: student.id,
+        session1Id: booked.body.session1.id as string,
+        session2Id: booked.body.session2.id as string,
+        altDate,
+        time,
+      };
+    }
+
+    it("blocks a second STUDENT-initiated reschedule, but not an ADMIN one", async () => {
+      const { session1Id, altDate, time } = await bookFreshPairForNewStudent();
+      const nextAlt = addDays(altDate, 20);
+      await authRequest(app).post("/api/v1/sessions/slots").send({
+        projectId,
+        counsellorId: counsellorAId,
+        slots: [{ date: ymd(nextAlt), startTime: time, endTime: "11:45" }],
+      });
+
+      const first = await authRequest(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule`)
+        .send({ date: ymd(altDate), startTime: time, initiatedBy: "STUDENT" });
+      expect(first.status).toBe(200);
+      expect(first.body.studentRescheduleUsed).toBe(true);
+
+      const second = await authRequest(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule`)
+        .send({ date: ymd(nextAlt), startTime: time, initiatedBy: "STUDENT" });
+      expect(second.status).toBe(400);
+
+      // Admin isn't limited by the same flag.
+      const asAdmin = await authRequest(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule`)
+        .send({ date: ymd(nextAlt), startTime: time, initiatedBy: "ADMIN" });
+      expect(asAdmin.status).toBe(200);
+    });
+
+    it("counsellor proposes a reschedule; student accepts; move performed without consuming the self-service limit", async () => {
+      const { session1Id, altDate, time } = await bookFreshPairForNewStudent();
+
+      const requested = await authRequest(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule-request`)
+        .send({ reason: "Family emergency", date: ymd(altDate), startTime: time });
+      expect(requested.status).toBe(200);
+      expect(requested.body.counsellorRescheduleReason).toBe("Family emergency");
+
+      const accepted = await authRequest(app).post(`/api/v1/sessions/${session1Id}/reschedule-request/accept`);
+      expect(accepted.status).toBe(200);
+      expect(accepted.body.status).toBe("SCHEDULED");
+      // scheduledDate comes back in the generic display format ("08 Jul 2027", IST) via
+      // formatResponseDates — compare against the same formatter rather than re-parsing
+      // the display string with `new Date(...)`, which reads it as local time and can
+      // drift a day off UTC-midnight values.
+      expect(accepted.body.scheduledDate).toBe(formatDisplayDate(altDate));
+      expect(accepted.body.counsellorProposedDate).toBeNull();
+      expect(accepted.body.studentRescheduleUsed).toBe(false); // not consumed
+
+      // The student's own 1 self-service reschedule is still available afterward.
+      const nextAlt = addDays(altDate, 20);
+      await authRequest(app).post("/api/v1/sessions/slots").send({
+        projectId,
+        counsellorId: counsellorAId,
+        slots: [{ date: ymd(nextAlt), startTime: time, endTime: "11:45" }],
+      });
+      const selfService = await authRequest(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule`)
+        .send({ date: ymd(nextAlt), startTime: time, initiatedBy: "STUDENT" });
+      expect(selfService.status).toBe(200);
+    });
+
+    it("student can decline a counsellor's proposal, which just clears it", async () => {
+      const { session1Id, altDate, time } = await bookFreshPairForNewStudent();
+      await authRequest(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule-request`)
+        .send({ reason: "Clinic day", date: ymd(altDate), startTime: time });
+
+      const declined = await authRequest(app).post(`/api/v1/sessions/${session1Id}/reschedule-request/decline`);
+      expect(declined.status).toBe(200);
+      expect(declined.body.counsellorProposedDate).toBeNull();
+      expect(declined.body.status).toBe("SCHEDULED"); // no auto-cancel
+    });
+
+    it("rejects a counsellor proposing a slot that isn't their own", async () => {
+      const { session1Id, altDate, time } = await bookFreshPairForNewStudent();
+      // altDate/time was also added for counsellorB above, but session1 is locked to A.
+      const res = await request(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule-request`)
+        .set("Authorization", bearer("COUNSELLOR", { userId: (await prisma.counsellor.findUniqueOrThrow({ where: { id: counsellorBId } })).userId }))
+        .send({ reason: "Not my session", date: ymd(altDate), startTime: time });
+      expect(res.status).toBe(403);
+    });
+
+    it("restarts (Option B): cancels both sessions, then rebooking reactivates them fresh", async () => {
+      const { studentId: freshStudentId, session1Id, session2Id } = await bookFreshPairForNewStudent();
+
+      const restarted = await authRequest(app).post(`/api/v1/sessions/students/${freshStudentId}/restart`);
+      expect(restarted.status).toBe(200);
+      expect(restarted.body.cancelled).toHaveLength(2);
+      expect(restarted.body.cancelled.every((s: { status: string }) => s.status === "CANCELLED")).toBe(true);
+
+      // Both slots released.
+      const s1 = await prisma.session.findUnique({ where: { id: session1Id } });
+      const s2 = await prisma.session.findUnique({ where: { id: session2Id } });
+      expect(s1?.status).toBe("CANCELLED");
+      expect(s2?.status).toBe("CANCELLED");
+
+      // Fresh booking against new dates reactivates the same two rows (same ids), not new ones.
+      const newBase = addDays(now, 5000 + fixtureCounter * 200);
+      const newS1 = newBase;
+      const newS2 = addDays(newBase, 3);
+      await authRequest(app).post("/api/v1/sessions/slots").send({
+        projectId,
+        counsellorId: counsellorBId,
+        slots: [
+          { date: ymd(newS1), startTime: "09:00", endTime: "09:45" },
+          { date: ymd(newS2), startTime: "09:00", endTime: "09:45" },
+        ],
+      });
+      const rebooked = await authRequest(app)
+        .post(`/api/v1/sessions/students/${freshStudentId}/book`)
+        .send({ session1: { date: ymd(newS1), startTime: "09:00" }, session2: { date: ymd(newS2), startTime: "09:00" } });
+      expect(rebooked.status).toBe(201);
+      expect(rebooked.body.session1.id).toBe(session1Id); // reactivated in place
+      expect(rebooked.body.session2.id).toBe(session2Id);
+      expect(rebooked.body.session1.status).toBe("SCHEDULED");
+      expect(rebooked.body.counsellor.id).toBe(counsellorBId); // fresh blind assignment, not locked to A
+    });
+
+    it("409s restarting once Session 1 has already been joined", async () => {
+      const { studentId: freshStudentId, session1Id } = await bookFreshPairForNewStudent();
+      await prisma.session.update({ where: { id: session1Id }, data: { studentJoinedAt: new Date() } });
+
+      const res = await authRequest(app).post(`/api/v1/sessions/students/${freshStudentId}/restart`);
+      expect(res.status).toBe(409);
+    });
+  });
+
+  describe("No-show tracking", () => {
+    let noShowFixtureCounter = 0;
+
+    // @@unique([studentId, sessionNumber]) allows only one row per session number per
+    // student ever (even cancelled ones stay in place) — each fixture needs its own
+    // student so tests can freely reuse SESSION_1/SESSION_2 without colliding.
+    async function createInProgressSessionForNewStudent(sessionNumber: "SESSION_1" | "SESSION_2", counsellorId: string) {
+      noShowFixtureCounter += 1;
+      const passwordHash = await argon2.hash("temp-password");
+      const user = await prisma.user.create({
+        data: {
+          email: `noshow-student-${noShowFixtureCounter}@test.example`,
+          passwordHash,
+          role: "STUDENT",
+          firstName: "Nia",
+          lastName: "Shah",
+        },
+      });
+      const student = await prisma.student.create({
+        data: {
+          userId: user.id,
+          studentCode: `SESS-NOSHOW-${noShowFixtureCounter}`,
+          projectId,
+          divisionId,
+          mobile: `+91987657${(1000 + noShowFixtureCounter).toString().padStart(4, "0")}`,
+          parentMobile: `+91987658${(1000 + noShowFixtureCounter).toString().padStart(4, "0")}`,
+          parentEmail: `parent-noshow-${noShowFixtureCounter}@test.example`,
+          fatherName: "Father",
+          fatherOccupation: "Engineer",
+          motherName: "Mother",
+          motherOccupation: "Doctor",
+          workflowStatus: "ASSESSMENT_COMPLETED",
+        },
+      });
+      // "In progress" — started a few minutes ago, doesn't end for a while yet. Satisfies
+      // the no-show endpoint's "at or after startTime" gate without also crossing
+      // endTime, which would trigger the separate passive reconcileNoShow() (both flags
+      // auto-true once a SCHEDULED session's endTime has passed unattended) and make
+      // this fixture indistinguishable from that mechanism. Offset varies per fixture —
+      // @@unique([counsellorId, scheduledDate, startTime]) would otherwise collide when
+      // the same counsellor is reused across fixtures.
+      const startTime = hm(addMinutes(now, -10 - noShowFixtureCounter));
+      const endTime = hm(addMinutes(now, 60 + noShowFixtureCounter));
+      const session = await prisma.session.create({
+        data: {
+          studentId: student.id,
+          counsellorId,
+          sessionNumber,
+          scheduledDate: now,
+          startTime,
+          endTime,
+        },
+      });
+      return { studentId: student.id, session };
+    }
+
+    it("rejects marking no-show before the session's scheduled start time", async () => {
+      const { session: inProgress } = await createInProgressSessionForNewStudent("SESSION_1", counsellorAId);
+      // Move this one fixture's session into the future instead of already-started.
+      const future = await prisma.session.update({
+        where: { id: inProgress.id },
+        data: { scheduledDate: addDays(now, 5), startTime: "10:00", endTime: "10:45" },
+      });
+      const res = await authRequest(app).post(`/api/v1/sessions/${future.id}/no-show`).send({ party: "STUDENT" });
+      expect(res.status).toBe(400);
+    });
+
+    it("marks a student no-show and is idempotent on repeat calls", async () => {
+      const { session } = await createInProgressSessionForNewStudent("SESSION_1", counsellorAId);
+
+      const res = await authRequest(app).post(`/api/v1/sessions/${session.id}/no-show`).send({ party: "STUDENT" });
+      expect(res.status).toBe(200);
+      expect(res.body.studentNoShow).toBe(true);
+      expect(res.body.counsellorNoShow).toBe(false);
+      expect(res.body.status).toBe("SCHEDULED"); // marking no-show doesn't cancel the session
+
+      const again = await authRequest(app).post(`/api/v1/sessions/${session.id}/no-show`).send({ party: "STUDENT" });
+      expect(again.status).toBe(200);
+      expect(again.body.studentNoShow).toBe(true);
+    });
+
+    it("marks a counsellor no-show", async () => {
+      const { session } = await createInProgressSessionForNewStudent("SESSION_2", counsellorAId);
+
+      const res = await authRequest(app).post(`/api/v1/sessions/${session.id}/no-show`).send({ party: "COUNSELLOR" });
+      expect(res.status).toBe(200);
+      expect(res.body.counsellorNoShow).toBe(true);
+      expect(res.body.studentNoShow).toBe(false);
+    });
+
+    it("409s marking no-show on a session that isn't SCHEDULED", async () => {
+      const { session } = await createInProgressSessionForNewStudent("SESSION_1", counsellorBId);
+      await authRequest(app)
+        .post(`/api/v1/sessions/${session.id}/cancel`)
+        .send({ reason: "OTHER", initiatedBy: "ADMIN" });
+
+      const res = await authRequest(app).post(`/api/v1/sessions/${session.id}/no-show`).send({ party: "STUDENT" });
+      expect(res.status).toBe(409);
+    });
+
+    it("gates the reschedule-prompt on studentNoShow, and to Admin only", async () => {
+      const { session } = await createInProgressSessionForNewStudent("SESSION_2", counsellorBId);
+
+      // Not yet flagged.
+      const tooSoon = await authRequest(app).post(`/api/v1/sessions/${session.id}/no-show/reschedule-prompt`);
+      expect(tooSoon.status).toBe(400);
+
+      await authRequest(app).post(`/api/v1/sessions/${session.id}/no-show`).send({ party: "STUDENT" });
+
+      const asCounsellor = await request(app)
+        .post(`/api/v1/sessions/${session.id}/no-show/reschedule-prompt`)
+        .set("Authorization", bearer("COUNSELLOR"));
+      expect(asCounsellor.status).toBe(403);
+
+      const res = await authRequest(app).post(`/api/v1/sessions/${session.id}/no-show/reschedule-prompt`);
+      expect(res.status).toBe(202);
+    });
+
+    it("filters the oversight list by noShow", async () => {
+      const { studentId: fixtureStudentId, session } = await createInProgressSessionForNewStudent("SESSION_1", counsellorAId);
+      await authRequest(app).post(`/api/v1/sessions/${session.id}/no-show`).send({ party: "STUDENT" });
+
+      const res = await authRequest(app).get("/api/v1/sessions").query({ studentId: fixtureStudentId, noShow: "STUDENT" });
+      expect(res.status).toBe(200);
+      expect(res.body.length).toBeGreaterThan(0);
+      expect(res.body.every((s: { studentNoShow: boolean }) => s.studentNoShow)).toBe(true);
     });
   });
 

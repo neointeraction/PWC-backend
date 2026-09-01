@@ -32,6 +32,10 @@ const envSchema = z.object({
   MAILGUN_DOMAIN: z.string().optional(),
   // "us" (Mailgun's American endpoint, api.mailgun.net) or "eu" (api.eu.mailgun.net).
   MAILGUN_REGION: z.enum(["us", "eu"]).default("us"),
+  // Fixed inbox for operational alerts that aren't addressed to a specific student/
+  // parent/counsellor (currently: session no-show flags — see sessions.service.ts).
+  // No code path queries ADMIN/SUPER_ADMIN users for this; it's config, not a lookup.
+  ADMIN_NOTIFICATION_EMAIL: z.string().email().default("admin@kreate.local"),
 
   // In-process reminder/nudge scheduler (src/scheduler). Off by default so it never runs
   // in tests or serverless invocations; enable it only where the app runs as a single

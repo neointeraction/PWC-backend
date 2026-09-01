@@ -225,6 +225,10 @@ D. **Meeting link** → **deferred (resolved 2026-08-06).** Real Calendly/Google
    with the already-decided single-upload discrete slot sheet) — is an open question
    for a future, separate integration project. Nothing about this blocks building the
    Session module now.
+   **Superseded 2026-09-01**: the per-session field was dropped. Each counsellor has
+   one fixed meeting link (`Counsellor.meetingLink`), and every session assigned to
+   them resolves to that same link — no more per-session `PATCH .../meeting-link`.
+   Same plain-opaque-string, no-integration shape; just moved up one level.
 F. **2-day gap** → **calendar days between session dates** (e.g. Session 1 = Aug 4 →
    Session 2 earliest Aug 6), not a strict 48-hours-between-start-times rule.
 

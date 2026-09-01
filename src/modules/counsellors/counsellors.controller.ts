@@ -17,6 +17,11 @@ export async function getCounsellor(req: Request, res: Response): Promise<void> 
   res.status(200).json(counsellor);
 }
 
+export async function getMyCounsellor(req: Request, res: Response): Promise<void> {
+  const counsellor = await counsellorsService.getCounsellorByUserId(req.user!.sub);
+  res.status(200).json(counsellor);
+}
+
 export async function updateCounsellor(req: Request, res: Response): Promise<void> {
   const counsellor = await counsellorsService.updateCounsellor(req.params.id as string, req.body);
   res.status(200).json(counsellor);

@@ -17,6 +17,7 @@ Set via env vars (validated in `src/config/env.ts`, see `.env.example`):
 | `MAILGUN_API_KEY` | string | Required when `EMAIL_PROVIDER=mailgun`. |
 | `MAILGUN_DOMAIN` | string | Required when `EMAIL_PROVIDER=mailgun`. Your Mailgun sandbox or verified sending domain. |
 | `MAILGUN_REGION` | `us` \| `eu` | Defaults to `us` (`api.mailgun.net`). Use `eu` for `api.eu.mailgun.net`. |
+| `ADMIN_NOTIFICATION_EMAIL` | email | Defaults to `admin@kreate.local`. Fixed inbox for operational alerts not addressed to a specific student/parent/counsellor — currently only session no-show flags (`SESSION_STUDENT_NO_SHOW_ADMIN`/`SESSION_COUNSELLOR_NO_SHOW_ADMIN`). Not a lookup against `ADMIN`/`SUPER_ADMIN` users — just one configured address. |
 
 `EMAIL_PROVIDER=mailgun` without `MAILGUN_API_KEY`/`MAILGUN_DOMAIN` fails fast at
 startup (see `src/config/env.ts`).
@@ -135,8 +136,12 @@ automatically by `sessions.service.ts` (`bookSessions`, `sendDayReminder`), same
 | `SESSION_RESCHEDULED_PARENT` | `parentName`, `studentName`, `sessionNumber`, `newDateTime` | 12 |
 | `SESSION_CANCELLED_STUDENT` | `studentName`, `sessionNumber`, `originalDateTime`, `portalLink?` | 13 — Session Cancelled |
 | `SESSION_CANCELLED_PARENT` | `parentName`, `studentName`, `sessionNumber`, `originalDateTime` | 13 |
-| `SESSION_MISSED_STUDENT` | `studentName`, `sessionDateTime`, `portalLink?` | 14 — Session Missed (no-show) |
+| `SESSION_MISSED_STUDENT` | `studentName`, `sessionDateTime`, `portalLink?` | 14 — Session Missed (no-show). Reused as the "Admin permitted" reschedule prompt sent by `POST /sessions/:id/no-show/reschedule-prompt` after a student no-show. |
 | `SESSION_MISSED_PARENT` | `parentName`, `studentName`, `sessionDateTime` | 14 |
+| `SESSION_STUDENT_NO_SHOW_ADMIN` | `studentName`, `counsellorName`, `sessionNumber`, `sessionDateTime` | Not in source sheet — Admin alert fired by `POST /sessions/:id/no-show` (party `STUDENT`), see `docs/Session Handling_Cancellation  Rescheduling.pdf` §2. |
+| `SESSION_COUNSELLOR_NO_SHOW_ADMIN` | `studentName`, `counsellorName`, `sessionNumber`, `sessionDateTime` | Not in source sheet — Admin alert fired by `POST /sessions/:id/no-show` (party `COUNSELLOR`), same doc §4. |
+| `SESSION_COUNSELLOR_NO_SHOW_STUDENT` | `studentName`, `sessionDateTime`, `portalLink?` | Not in source sheet — apology + reschedule prompt sent automatically (no Admin gate) when the counsellor is the no-show party, same doc §4. |
+| `SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT` | `studentName`, `sessionNumber`, `reason`, `proposedDateTime`, `portalLink?` | Not in source sheet — sent when a counsellor proposes a reschedule (`POST /sessions/:id/reschedule-request`), see `docs/Session Handling_Cancellation  Rescheduling.pdf` §3. |
 | `FEEDBACK_STUDENT_PENDING_REMINDER_STUDENT` | `studentName`, `feedbackFormLink?` | 15 — Feedback Reminder, student pending |
 | `FEEDBACK_STUDENT_PENDING_REMINDER_PARENT` | `parentName`, `studentName` | 15 |
 | `FEEDBACK_PARENT_PENDING_REMINDER_STUDENT` | `studentName` | 16 — Feedback Reminder, parent pending |

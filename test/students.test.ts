@@ -315,4 +315,65 @@ describe("Students API", () => {
 
     expect(res.status).toBe(409);
   });
+
+  it("discontinues a student (marking inactive without deleting) and can reinstate them", async () => {
+    const created = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Drop",
+      lastName: "Out",
+      email: "dropout@test-student.example",
+      mobile: "+919876500101",
+      projectId,
+      divisionId,
+      parentMobile: "+919876500102",
+      parentEmail: "parent-dropout@test-student.example",
+      fatherName: "Dropout Sr",
+    });
+    const studentId: string = created.body.student.id;
+
+    // Backdate creation so it would otherwise show up flagged/idle.
+    await prisma.student.update({
+      where: { id: studentId },
+      data: { createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000) },
+    });
+
+    const discontinued = await authRequest(app)
+      .post(`/api/v1/students/${studentId}/discontinue`)
+      .send({ reason: "Transferred schools" });
+    expect(discontinued.status).toBe(200);
+    expect(discontinued.body.isDiscontinued).toBe(true);
+    expect(discontinued.body.discontinuedReason).toBe("Transferred schools");
+    expect(discontinued.body.stageInfo).toMatchObject({ stage: "DISCONTINUED", flagged: false });
+
+    // The student row (and linked user) still exist — this isn't a delete.
+    const stillThere = await authRequest(app).get(`/api/v1/students/${studentId}`);
+    expect(stillThere.status).toBe(200);
+
+    // Excluded from the 🚩 follow-up flag even though it would otherwise be idle.
+    const flaggedList = await authRequest(app).get(`/api/v1/students?projectId=${projectId}&flagged=true`);
+    expect(flaggedList.body.some((s: { id: string }) => s.id === studentId)).toBe(false);
+
+    // discontinued=false filters it out of the active list; discontinued=true finds it.
+    const activeList = await authRequest(app).get(
+      `/api/v1/students?projectId=${projectId}&discontinued=false`
+    );
+    expect(activeList.body.some((s: { id: string }) => s.id === studentId)).toBe(false);
+    const discontinuedList = await authRequest(app).get(
+      `/api/v1/students?projectId=${projectId}&discontinued=true`
+    );
+    expect(discontinuedList.body.some((s: { id: string }) => s.id === studentId)).toBe(true);
+
+    // A repeat discontinue is a 409, not a silent overwrite.
+    const repeat = await authRequest(app).post(`/api/v1/students/${studentId}/discontinue`);
+    expect(repeat.status).toBe(409);
+
+    const reinstated = await authRequest(app).post(`/api/v1/students/${studentId}/reinstate`);
+    expect(reinstated.status).toBe(200);
+    expect(reinstated.body.isDiscontinued).toBe(false);
+    expect(reinstated.body.discontinuedReason).toBeNull();
+    // workflowStatus was untouched throughout, so the derived stage resumes.
+    expect(reinstated.body.stageInfo.stage).toBe("LOGIN_ACTIVATED");
+
+    const reinstateAgain = await authRequest(app).post(`/api/v1/students/${studentId}/reinstate`);
+    expect(reinstateAgain.status).toBe(409);
+  });
 });

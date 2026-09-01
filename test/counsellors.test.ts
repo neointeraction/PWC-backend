@@ -270,6 +270,57 @@ describe("Counsellors API", () => {
     expect(del.body.error.details.sessionCount).toBe(1);
   });
 
+  it("sets, updates, and clears the default meetingLink", async () => {
+    const created = await authRequest(app).post("/api/v1/counsellors").send({
+      firstName: "Link",
+      lastName: "Bearer",
+      email: "linkbearer@test-counsellor.example",
+      mobile: "+919876572060",
+      counsellorCode: "CN-LINK",
+      instituteId,
+      meetingLink: "https://meet.example.com/link-bearer",
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.counsellor.meetingLink).toBe("https://meet.example.com/link-bearer");
+    const id = created.body.counsellor.id;
+
+    const updated = await authRequest(app)
+      .patch(`/api/v1/counsellors/${id}`)
+      .send({ meetingLink: "https://meet.example.com/link-bearer-2" });
+    expect(updated.status).toBe(200);
+    expect(updated.body.meetingLink).toBe("https://meet.example.com/link-bearer-2");
+
+    const cleared = await authRequest(app).patch(`/api/v1/counsellors/${id}`).send({ meetingLink: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.meetingLink).toBeNull();
+  });
+
+  it("GET /counsellors/me resolves the logged-in counsellor's own record", async () => {
+    const created = await authRequest(app).post("/api/v1/counsellors").send({
+      firstName: "Self",
+      lastName: "Service",
+      email: "selfservice@test-counsellor.example",
+      mobile: "+919876572050",
+      counsellorCode: "CN-ME",
+      instituteId,
+    });
+    const userId = created.body.counsellor.user.id;
+
+    const me = await request(app)
+      .get("/api/v1/counsellors/me")
+      .set("Authorization", bearer("COUNSELLOR", { userId }));
+    expect(me.status).toBe(200);
+    expect(me.body.id).toBe(created.body.counsellor.id);
+    expect(me.body.user.email).toBe("selfservice@test-counsellor.example");
+  });
+
+  it("GET /counsellors/me 404s for an account with no linked Counsellor row", async () => {
+    const me = await request(app)
+      .get("/api/v1/counsellors/me")
+      .set("Authorization", bearer("ADMIN"));
+    expect(me.status).toBe(404);
+  });
+
   it("enforces auth: 401 without token, 403 for a counsellor creating (admin-only)", async () => {
     const noToken = await request(app).get("/api/v1/counsellors");
     expect(noToken.status).toBe(401);

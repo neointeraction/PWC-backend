@@ -6,6 +6,7 @@ import { ownStudentIdParam } from "../../common/middlewares/ownership.js";
 import * as studentsController from "./students.controller.js";
 import {
   createStudentSchema,
+  discontinueStudentBodySchema,
   listStudentsQuerySchema,
   studentIdParamsSchema,
   updateMyStudentSchema,
@@ -84,4 +85,21 @@ studentsRouter.patch(
   ...requireAdmin,
   validate({ params: studentIdParamsSchema, body: updateWorkflowStatusBodySchema }),
   asyncHandler(studentsController.updateWorkflowStatus)
+);
+
+// Marks a student inactive (dropped out mid-project) without deleting them — data/history
+// stays intact, only excluded from the ageing/follow-up flag. Management action, same
+// tier as delete/workflow-status override.
+studentsRouter.post(
+  "/:id/discontinue",
+  ...requireAdmin,
+  validate({ params: studentIdParamsSchema, body: discontinueStudentBodySchema }),
+  asyncHandler(studentsController.discontinueStudent)
+);
+
+studentsRouter.post(
+  "/:id/reinstate",
+  ...requireAdmin,
+  validate({ params: studentIdParamsSchema }),
+  asyncHandler(studentsController.reinstateStudent)
 );

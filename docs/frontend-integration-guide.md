@@ -259,12 +259,14 @@ Base path: `/api/v1/students`
 | POST | `/` | see below (admin) |
 | GET | `/me` | **student self-service — start here (§6.0)**; no params, resolves the caller from their token |
 | PATCH | `/me` | **student self-service edit (§6.0.1)** — partial body, contact/parent fields only; resolves the caller from their token |
-| GET | `/` | query: `projectId?`, `divisionId?`, `workflowStatus?` (staff) |
+| GET | `/` | query: `projectId?`, `divisionId?`, `workflowStatus?`, `stage?`, `flagged?`, `discontinued?` (staff) |
 | GET | `/{id}` | staff only — students use `/me` |
 | PATCH | `/{id}` | partial body, same fields as create minus `email`/`studentCode`/`projectId` (immutable) (admin) |
 | DELETE | `/{id}` | deletes the linked `User` too (cascades) — also releases any `CounsellorSlot` the student's sessions had booked back to `OPEN`, so deleting a student never strands a slot (admin) |
 | POST | `/{id}/confirm-profile` | no body — the student confirms **their own** profile data is correct (or staff on their behalf); a student confirming another student's profile is 403 |
 | PATCH | `/{id}/workflow-status` | `{ workflowStatus }` — admin/ops override, see below |
+| POST | `/{id}/discontinue` | `{ reason? }` — marks the student inactive, **not** a delete (admin); see §6.3 |
+| POST | `/{id}/reinstate` | no body — reverses `/discontinue` (admin); see §6.3 |
 
 ### 6.0 Student self-service: `GET /students/me` — the entry point for every student page
 
@@ -461,6 +463,46 @@ the rule and returns the result.
   `COUNSELLOR_FEEDBACK`, `FEEDBACK_STUDENT`, `FEEDBACK_PARENT`, `FEEDBACK_PENDING`,
   `CLOSED`.
 - `GET /students?flagged=true` — the 🚩 toolbar toggle: only students needing follow-up.
+
+### 6.3 Discontinuing a student
+
+This backs the Projects UI's **"Discontinue Student"** action (student follow-up modal) —
+for a student who drops out of a project before completing it (transferred schools,
+opted out, ...). It is **not a delete**: the `User`/`Student` rows and all their
+history (forms, assessment, sessions, chart) are preserved, and `workflowStatus` is left
+untouched underneath.
+
+**`POST /students/{id}/discontinue`** — body: `{ "reason": "Transferred schools" }`
+(`reason` optional). 200 with the updated student. **409** if already discontinued (call
+`/reinstate` first to undo, rather than re-calling this to change the reason).
+
+**`POST /students/{id}/reinstate`** — no body. Clears the discontinued state; the
+student's stage resumes from wherever `workflowStatus` already was. **409** if not
+currently discontinued.
+
+The student object gains three fields, and `stageInfo.stage` overrides to `"DISCONTINUED"`
+(never flagged) while `isDiscontinued` is true:
+
+```jsonc
+{
+  // ...usual student fields...
+  "isDiscontinued": true,
+  "discontinuedAt": "2026-09-01T10:00:00.000Z",
+  "discontinuedReason": "Transferred schools",   // or null
+  "stageInfo": {
+    "stage": "DISCONTINUED",
+    "stageLabel": "Discontinued",
+    "stageEnteredAt": "2026-09-01T10:00:00.000Z", // = discontinuedAt
+    "ageDays": 0,
+    "flagged": false,
+    "flagReason": null
+  }
+}
+```
+
+`GET /students?discontinued=false` returns only active students (hide these from the
+default follow-up list); `?discontinued=true` returns only discontinued ones. Omit the
+param for no filtering (today's default behavior, unchanged).
 
 ---
 

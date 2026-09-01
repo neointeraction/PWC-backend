@@ -40,6 +40,7 @@ export const DERIVED_STAGES = [
   "FEEDBACK_PARENT",
   "FEEDBACK_PENDING",
   "CLOSED",
+  "DISCONTINUED",
 ] as const;
 
 export type DerivedStage = (typeof DERIVED_STAGES)[number];
@@ -60,6 +61,7 @@ export const STAGE_LABELS: Record<DerivedStage, string> = {
   FEEDBACK_PARENT: "Feedback — Parent",
   FEEDBACK_PENDING: "Feedback Pending",
   CLOSED: "Closed",
+  DISCONTINUED: "Discontinued",
 };
 
 export type FlagReason = "IDLE" | "MISSED_SESSION";
@@ -83,6 +85,8 @@ export interface StudentForStage {
   workflowStatus: WorkflowStatus;
   createdAt: Date;
   updatedAt: Date;
+  isDiscontinued: boolean;
+  discontinuedAt: Date | null;
   formSubmissions: SubmittedForm[];
   assessmentAttempts: AttemptRow[];
   sessions: SessionRow[];
@@ -197,6 +201,20 @@ function hasMissedSession(s: StudentForStage, now: Date): boolean {
 }
 
 export function computeStageInfo(s: StudentForStage, now: Date = new Date()): StageInfo {
+  // Discontinued overrides the derived workflow stage entirely — excluded from ageing/
+  // missed-session flags (they've left the project, not idle within it).
+  if (s.isDiscontinued) {
+    const clock = s.discontinuedAt ?? s.updatedAt;
+    return {
+      stage: "DISCONTINUED",
+      stageLabel: STAGE_LABELS.DISCONTINUED,
+      stageEnteredAt: clock.toISOString(),
+      ageDays: calendarDaysSince(clock, now),
+      flagged: false,
+      flagReason: null,
+    };
+  }
+
   const { stage, actionable, clock } = resolveStage(s);
   const ageDays = calendarDaysSince(clock, now);
 

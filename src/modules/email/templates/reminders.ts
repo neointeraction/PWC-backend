@@ -330,6 +330,22 @@ function sessionDayReminderParent(sessionNumber: "1" | "2") {
   });
 }
 
+// Not from the source WhatsApp sheet — added for the Sessions module, sent to the
+// parent when the student joins their session.
+const sessionJoinedParentSchema = z.object({
+  parentName: z.string().trim().min(1),
+  studentName: z.string().trim().min(1),
+  sessionNumber: z.enum(["1", "2"]),
+});
+export const SESSION_JOINED_PARENT = reminder({
+  subject: "Your Child Has Joined Their Session",
+  schema: sessionJoinedParentSchema,
+  body: ({ parentName, studentName, sessionNumber }) =>
+    paragraph(`Dear ${parentName}, ${studentName} has just joined Session ${sessionNumber}.`),
+  text: ({ parentName, studentName, sessionNumber }) =>
+    `Dear ${parentName}, ${studentName} has just joined Session ${sessionNumber}.`,
+});
+
 // Not from the source WhatsApp sheet — added for the Sessions module, same-day
 // reminder to the assigned counsellor, in parity with the student/parent reminders.
 function sessionDayReminderCounsellor(sessionNumber: "1" | "2") {
@@ -468,6 +484,89 @@ export const SESSION_MISSED_PARENT = reminder({
     ),
   text: ({ parentName, studentName, sessionDateTime }) =>
     `Dear ${parentName}, ${studentName} missed their scheduled session today (${sessionDateTime}). Please encourage them to rebook soon.`,
+});
+
+// --- No-show tracking (Cancellation, Rescheduling & No-Show Process Note) ---
+// Not in the original 31-row reminder sheet — added when explicit no-show marking
+// (POST /sessions/:id/no-show) was built. Two admin alerts (one per party) plus an
+// apology sent straight to the student when the *counsellor* is the no-show, since
+// SESSION_MISSED_STUDENT's "we missed you" framing would wrongly imply the student
+// was at fault — that template is reused as-is for the student-no-show reschedule
+// prompt (sent once Admin permits it), where the framing is correct.
+
+const sessionStudentNoShowAdminSchema = z.object({
+  studentName: z.string().trim().min(1),
+  counsellorName: z.string().trim().min(1),
+  sessionNumber: z.enum(["1", "2"]),
+  sessionDateTime: z.string().trim().min(1),
+});
+export const SESSION_STUDENT_NO_SHOW_ADMIN = reminder({
+  subject: "Student No-Show Flagged",
+  schema: sessionStudentNoShowAdminSchema,
+  body: ({ studentName, counsellorName, sessionNumber, sessionDateTime }) =>
+    paragraph(
+      `${studentName} was marked as not having joined session ${sessionNumber} with ${counsellorName}, scheduled for ${sessionDateTime}. Once you're ready, permit the reschedule prompt to be sent to the student.`
+    ),
+  text: ({ studentName, counsellorName, sessionNumber, sessionDateTime }) =>
+    `${studentName} was marked as not having joined session ${sessionNumber} with ${counsellorName}, scheduled for ${sessionDateTime}.`,
+});
+
+const sessionCounsellorNoShowAdminSchema = z.object({
+  studentName: z.string().trim().min(1),
+  counsellorName: z.string().trim().min(1),
+  sessionNumber: z.enum(["1", "2"]),
+  sessionDateTime: z.string().trim().min(1),
+});
+export const SESSION_COUNSELLOR_NO_SHOW_ADMIN = reminder({
+  subject: "Counsellor No-Show — Action Required",
+  schema: sessionCounsellorNoShowAdminSchema,
+  body: ({ studentName, counsellorName, sessionNumber, sessionDateTime }) =>
+    paragraph(
+      `${counsellorName} did not join session ${sessionNumber} with ${studentName}, scheduled for ${sessionDateTime}. The student has already been sent an apology and reschedule prompt automatically. Please review this counsellor's availability record.`
+    ),
+  text: ({ studentName, counsellorName, sessionNumber, sessionDateTime }) =>
+    `${counsellorName} did not join session ${sessionNumber} with ${studentName}, scheduled for ${sessionDateTime}. The student has already been notified.`,
+});
+
+const sessionCounsellorNoShowStudentSchema = z.object({
+  studentName: z.string().trim().min(1),
+  sessionDateTime: z.string().trim().min(1),
+  portalLink: z.string().url().optional(),
+});
+export const SESSION_COUNSELLOR_NO_SHOW_STUDENT = reminder({
+  subject: "We're Sorry We Missed You",
+  schema: sessionCounsellorNoShowStudentSchema,
+  body: ({ studentName, sessionDateTime, portalLink }) =>
+    withLink(
+      `Hi ${studentName}, we're sorry — your counsellor was unable to join your session scheduled for ${sessionDateTime}. This was on us, not you. Please log in to the portal to pick a new time that works for you.`,
+      "Rebook My Session",
+      portalLink
+    ),
+  text: ({ studentName, sessionDateTime }) =>
+    `Hi ${studentName}, we're sorry — your counsellor was unable to join your session scheduled for ${sessionDateTime}. Please rebook at your convenience.`,
+});
+
+// --- Counsellor-initiated reschedule (same doc, §3) ---
+// Not in either source sheet — added alongside the no-show templates above.
+
+const sessionCounsellorRescheduleRequestStudentSchema = z.object({
+  studentName: z.string().trim().min(1),
+  sessionNumber: z.enum(["1", "2"]),
+  reason: z.string().trim().min(1),
+  proposedDateTime: z.string().trim().min(1),
+  portalLink: z.string().url().optional(),
+});
+export const SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT = reminder({
+  subject: "Your Counsellor Needs to Reschedule",
+  schema: sessionCounsellorRescheduleRequestStudentSchema,
+  body: ({ studentName, sessionNumber, reason, proposedDateTime, portalLink }) =>
+    withLink(
+      `Hi ${studentName}, your counsellor needs to reschedule session ${sessionNumber} (${reason}). They've proposed a new time: ${proposedDateTime}. Please log in to the portal to accept it or let us know if it doesn't work.`,
+      "Review Proposed Time",
+      portalLink
+    ),
+  text: ({ studentName, sessionNumber, reason, proposedDateTime }) =>
+    `Hi ${studentName}, your counsellor needs to reschedule session ${sessionNumber} (${reason}). Proposed new time: ${proposedDateTime}.`,
 });
 
 // --- Row 15: Feedback Reminder — Student Pending (+2 days) ---

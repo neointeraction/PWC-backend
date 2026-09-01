@@ -130,6 +130,7 @@ export async function listStudents(query: ListStudentsQuery) {
       projectId: query.projectId,
       divisionId: query.divisionId,
       workflowStatus: query.workflowStatus,
+      isDiscontinued: query.discontinued,
     },
     include: { ...studentInclude, ...stageRelationsInclude },
     orderBy: { createdAt: "desc" },
@@ -277,4 +278,35 @@ export async function setWorkflowStatus(id: string, workflowStatus: WorkflowStat
     data: { workflowStatus },
     include: studentInclude,
   });
+}
+
+// Marks a student as having dropped out of the project mid-way (transferred schools,
+// opted out, ...). Deliberately independent of `workflowStatus` — see the schema comment
+// on `isDiscontinued`. Data/history is preserved; this only flips the flag, so it's
+// idempotent-unfriendly by design (409 on a repeat call, like confirmProfile) rather than
+// silently overwriting an existing reason/timestamp.
+export async function discontinueStudent(id: string, reason: string | undefined) {
+  const existing = await getStudentById(id);
+  if (existing.isDiscontinued) {
+    throw new ConflictError("Student is already discontinued");
+  }
+  await prisma.student.update({
+    where: { id },
+    data: { isDiscontinued: true, discontinuedAt: new Date(), discontinuedReason: reason ?? null },
+  });
+  return getStudentById(id);
+}
+
+// Reverses discontinueStudent — clears the flag/timestamp/reason so the student's
+// existing `workflowStatus` (untouched throughout) resumes driving their stage.
+export async function reinstateStudent(id: string) {
+  const existing = await getStudentById(id);
+  if (!existing.isDiscontinued) {
+    throw new ConflictError("Student is not discontinued");
+  }
+  await prisma.student.update({
+    where: { id },
+    data: { isDiscontinued: false, discontinuedAt: null, discontinuedReason: null },
+  });
+  return getStudentById(id);
 }

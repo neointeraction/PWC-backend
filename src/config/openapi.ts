@@ -14,6 +14,7 @@ import {
 } from "../modules/institutes/institutes.schema.js";
 import {
   createStudentSchema,
+  discontinueStudentBodySchema,
   listStudentsQuerySchema,
   studentIdParamsSchema,
   updateMyStudentSchema,
@@ -117,10 +118,11 @@ import {
   joinSessionBodySchema,
   listSessionsQuerySchema,
   listSlotsQuerySchema,
+  markNoShowBodySchema,
+  requestCounsellorRescheduleBodySchema,
   rescheduleSessionBodySchema,
   sendDayReminderBodySchema,
   sessionIdParamsSchema,
-  setMeetingLinkBodySchema,
   setNotesBodySchema,
   slotIdParamsSchema,
   studentIdParamsSchema as sessionStudentIdParamsSchema,
@@ -385,7 +387,7 @@ registry.registerPath({
   path: "/api/v1/students",
   tags: ["Students"],
   summary:
-    "List students. Each row includes a computed `stageInfo` { stage, stageLabel, stageEnteredAt, ageDays, flagged, flagReason } — the derived stage and ageing/🚩-flag (idle > 2 calendar days on an actionable stage, or a missed session). Filter with `stage` (derived-stage dropdown) and `flagged=true` (follow-up toggle). Ageing is computed live, never stored. Staff only.",
+    "List students. Each row includes a computed `stageInfo` { stage, stageLabel, stageEnteredAt, ageDays, flagged, flagReason } — the derived stage and ageing/🚩-flag (idle > 2 calendar days on an actionable stage, or a missed session). Filter with `stage` (derived-stage dropdown), `flagged=true` (follow-up toggle), and `discontinued` (true/false — filter by isDiscontinued). Ageing is computed live, never stored. Staff only.",
   request: { query: listStudentsQuerySchema },
   responses: {
     200: { description: "List of students, each with stageInfo", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
@@ -477,6 +479,33 @@ registry.registerPath({
     params: studentIdParamsSchema,
     body: { content: { "application/json": { schema: updateWorkflowStatusBodySchema } } },
   },
+  responses: {
+    200: { description: "Updated student", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/students/{id}/discontinue",
+  tags: ["Students"],
+  summary: "Marks a student inactive (dropped out mid-project) — not a delete, data/history preserved. Independent of workflowStatus. stageInfo.stage reads DISCONTINUED and is never ageing/missed-session flagged while set. Admin only. 409 if already discontinued.",
+  request: {
+    params: studentIdParamsSchema,
+    body: { content: { "application/json": { schema: discontinueStudentBodySchema } } },
+  },
+  responses: {
+    200: { description: "Updated student", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/students/{id}/reinstate",
+  tags: ["Students"],
+  summary: "Reverses /discontinue — clears isDiscontinued/discontinuedAt/discontinuedReason; the student's stage resumes from their untouched workflowStatus. Admin only. 409 if not currently discontinued.",
+  request: { params: studentIdParamsSchema },
   responses: {
     200: { description: "Updated student", content: { "application/json": { schema: genericObjectSchema } } },
     ...errorResponses,
@@ -731,6 +760,18 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/students/{studentId}/restart",
+  tags: ["Sessions"],
+  summary: "Option B: cancel both sessions together and clear the way to rebook via booking-options/book, before Session 1 has started.",
+  request: { params: sessionStudentIdParamsSchema },
+  responses: {
+    200: { description: "Both sessions cancelled", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
   method: "get",
   path: "/api/v1/sessions/counsellors/{counsellorId}",
   tags: ["Sessions"],
@@ -790,22 +831,10 @@ registry.registerPath({
 });
 
 registry.registerPath({
-  method: "patch",
-  path: "/api/v1/sessions/{id}/meeting-link",
-  tags: ["Sessions"],
-  summary: "Manually set/replace the meeting link (no Calendly/Google Meet integration yet — plain opaque string, also shared with the parent)",
-  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: setMeetingLinkBodySchema } } } },
-  responses: {
-    200: { description: "Updated session", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
   method: "post",
   path: "/api/v1/sessions/{id}/join",
   tags: ["Sessions"],
-  summary: "Record a Join Now click and reveal the meeting link. Window: T-minus-10-minutes through the session's endTime.",
+  summary: "Record a Join Now click and reveal the meeting link (always the assigned counsellor's Counsellor.meetingLink — no per-session link). Window: T-minus-10-minutes through the session's endTime.",
   request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: joinSessionBodySchema } } } },
   responses: {
     200: { description: "Session + meetingLink", content: { "application/json": { schema: genericObjectSchema } } },
@@ -857,6 +886,66 @@ registry.registerPath({
   request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: cancelSessionBodySchema } } } },
   responses: {
     200: { description: "Cancelled session", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/reschedule-request",
+  tags: ["Sessions"],
+  summary: "Counsellor proposes one alternative slot from their own open inventory + a reason. Not subject to the student's 1-reschedule limit.",
+  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: requestCounsellorRescheduleBodySchema } } } },
+  responses: {
+    200: { description: "Updated session with pending proposal", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/reschedule-request/accept",
+  tags: ["Sessions"],
+  summary: "Student (or staff) accepts the pending counsellor reschedule proposal — performs the actual move.",
+  request: { params: sessionIdParamsSchema },
+  responses: {
+    200: { description: "Rescheduled session", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/reschedule-request/decline",
+  tags: ["Sessions"],
+  summary: "Student (or staff) declines the pending counsellor reschedule proposal — clears it, no other side effects.",
+  request: { params: sessionIdParamsSchema },
+  responses: {
+    200: { description: "Updated session, proposal cleared", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/no-show",
+  tags: ["Sessions"],
+  summary: "Staff. Mark a party as having missed the session (party: STUDENT|COUNSELLOR), at or after startTime. STUDENT alerts Admin only; COUNSELLOR alerts Admin and immediately emails the student an apology + reschedule prompt, no Admin gate. Idempotent per party.",
+  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: markNoShowBodySchema } } } },
+  responses: {
+    200: { description: "Updated session", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/{id}/no-show/reschedule-prompt",
+  tags: ["Sessions"],
+  summary: "Admin only. Sends the reschedule prompt to the student after a student no-show — this call is the 'Admin permits' step. 400 if the session isn't flagged studentNoShow.",
+  request: { params: sessionIdParamsSchema },
+  responses: {
+    202: { description: "Reschedule prompt sent", content: { "application/json": { schema: genericObjectSchema } } },
     ...errorResponses,
   },
 });
@@ -992,6 +1081,17 @@ registry.registerPath({
   request: { query: listCounsellorsQuerySchema },
   responses: {
     200: { description: "List of counsellors", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/counsellors/me",
+  tags: ["Counsellors"],
+  summary: "Counsellor self-service: the logged-in counsellor's own record (id, counsellorCode, institute, assigned projects). The entry point for every counsellor-facing page that needs the Counsellor id (sessions, feedback score, my-students). 404 for a non-counsellor account.",
+  responses: {
+    200: { description: "The caller's own counsellor record", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
   },
 });
 

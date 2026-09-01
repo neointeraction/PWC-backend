@@ -72,6 +72,7 @@ export async function createCounsellor(input: CreateCounsellorInput) {
           counsellorCode,
           instituteId: input.instituteId,
           mobile: input.mobile,
+          meetingLink: input.meetingLink,
           projects: projectIds.length > 0 ? { create: projectIds.map((projectId) => ({ projectId })) } : undefined,
         },
         include: counsellorInclude,
@@ -106,9 +107,23 @@ export async function getCounsellorById(id: string) {
   return counsellor;
 }
 
+// Self-service: resolves the logged-in COUNSELLOR user to their Counsellor row, the same
+// way getStudentByUserId does for students — the frontend has the User id from the JWT,
+// not the Counsellor id that session/chart/feedback routes are keyed on.
+export async function getCounsellorByUserId(userId: string) {
+  const counsellor = await prisma.counsellor.findUnique({
+    where: { userId },
+    include: counsellorInclude,
+  });
+  if (!counsellor) {
+    throw new NotFoundError("No counsellor profile is linked to this account");
+  }
+  return counsellor;
+}
+
 export async function updateCounsellor(id: string, input: UpdateCounsellorInput) {
   const existing = await getCounsellorById(id);
-  const { firstName, lastName, isActive, mobile } = input;
+  const { firstName, lastName, isActive, mobile, meetingLink } = input;
 
   try {
     return await prisma.$transaction(async (tx) => {
@@ -120,7 +135,7 @@ export async function updateCounsellor(id: string, input: UpdateCounsellorInput)
       }
       return tx.counsellor.update({
         where: { id },
-        data: { mobile },
+        data: { mobile, meetingLink },
         include: counsellorInclude,
       });
     });

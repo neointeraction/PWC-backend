@@ -30,6 +30,15 @@ counsellorsRouter.get(
   asyncHandler(counsellorsController.listCounsellors)
 );
 
+// Counsellor self-service: the logged-in counsellor's own record. Declared before "/:id"
+// so "me" isn't parsed as an id — same pattern as students' GET /me. Admin/Super Admin
+// may call it too (they'll just 404 — no Counsellor row).
+counsellorsRouter.get(
+  "/me",
+  ...requireStaff,
+  asyncHandler(counsellorsController.getMyCounsellor)
+);
+
 counsellorsRouter.get(
   "/:id",
   ...requireStaff,

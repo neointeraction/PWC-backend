@@ -213,6 +213,11 @@ model Counsellor {
   instituteId    String?
   institute      Institute? @relation(fields: [instituteId], references: [id])
   mobile         String     @unique
+  // Standing default meeting link (e.g. the counsellor's own Zoom/Meet room) — plain
+  // opaque string, same as Session.meetingLink, no Calendly/Google Meet integration.
+  // Not auto-applied to sessions; a session's own meetingLink (set via
+  // PATCH /sessions/:id/meeting-link) is independent and takes precedence.
+  meetingLink    String?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
@@ -309,6 +314,13 @@ model Student {
   // Last time the scheduler sent this student a follow-up nudge (idle/missed-session).
   // Drives the IDLE_NUDGE_COOLDOWN_DAYS throttle; null = never nudged.
   lastNudgeAt      DateTime?
+  // Dropped out of the project mid-way (transferred schools, opted out, ...). Deliberately
+  // independent of `workflowStatus` — that enum is forward-only and every stage has a real
+  // trigger, so a terminal-but-not-CLOSED state doesn't fit it. Data/history is preserved;
+  // this only marks the student inactive and excludes them from ageing/follow-up flags.
+  isDiscontinued     Boolean   @default(false)
+  discontinuedAt     DateTime?
+  discontinuedReason String?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
@@ -355,10 +367,11 @@ model Session {
   startTime            String // "HH:mm"
   endTime              String // "HH:mm"
   status               SessionStatus       @default(SCHEDULED)
-  // Plain, opaque string — manually populated (e.g. Admin pastes a link). No
-  // Calendly/Google Meet integration yet, see docs/session-scheduling-use-cases.md
-  // resolved decision D. Also shared as-is with the parent (decision I).
-  meetingLink          String?
+  // No per-session link: each counsellor has one fixed meeting room
+  // (Counsellor.meetingLink), and a session's link is always that counsellor's —
+  // resolve via session.counsellor.meetingLink, never stored here. Supersedes the old
+  // per-session PATCH /sessions/:id/meeting-link (see docs/session-scheduling-use-cases.md
+  // resolved decision D, now superseded). Also shared as-is with the parent (decision I).
   studentJoinedAt      DateTime?
   counsellorJoinedAt   DateTime?
   studentNoShow        Boolean             @default(false)
@@ -368,6 +381,22 @@ model Session {
   cancellationNotes    String?
   rescheduledFromDate  DateTime?           @db.Date
   rescheduledFromStart String?
+  // "Only 1 reschedule is allowed per student" (per session) — docs/Session Handling_
+  // Cancellation  Rescheduling.pdf §1. Set once a STUDENT-initiated reschedule succeeds;
+  // a further STUDENT-initiated attempt is rejected (routes to Admin, like the <24h
+  // case). Doesn't gate ADMIN- or COUNSELLOR-initiated reschedules. Reset to false when
+  // a cancelled session is reactivated (fresh start) — see sessions.service.ts.
+  studentRescheduleUsed Boolean            @default(false)
+  // A pending counsellor-initiated reschedule proposal (§3 of the same doc): the
+  // counsellor picks one alternative from their own open slots + a free-text reason: the
+  // student then accepts (performs the actual reschedule) or declines (clears these
+  // fields; no automatic cancellation — the doc frames restarting as the student's own
+  // next action, see the "restart" endpoint). Non-null counsellorProposedDate means a
+  // proposal is pending. Doesn't touch scheduledDate/startTime/endTime until accepted.
+  counsellorRescheduleReason   String?
+  counsellorProposedDate       DateTime? @db.Date
+  counsellorProposedStartTime  String?
+  counsellorProposedEndTime    String?
   // Set by the scheduler when the same-day reminder for this session has been sent, so a
   // repeated daily run never double-sends. Null = not yet reminded.
   dayReminderSentAt    DateTime?

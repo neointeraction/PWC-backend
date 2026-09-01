@@ -1,6 +1,7 @@
 import type { CancellationReason, Prisma, SessionNumber, SessionStatus } from "@prisma/client";
+import { env } from "../../config/env.js";
 import { prisma } from "../../config/prisma.js";
-import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { advanceWorkflowStatus, WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
 import { sendTemplateEmail } from "../email/email.service.js";
@@ -35,6 +36,7 @@ const sessionInclude = {
     select: {
       id: true,
       counsellorCode: true,
+      meetingLink: true,
       user: { select: { id: true, email: true, firstName: true, lastName: true } },
     },
   },
@@ -253,10 +255,17 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
     );
   }
 
-  const existing = await prisma.session.findMany({ where: { studentId }, select: { sessionNumber: true } });
-  if (existing.length > 0) {
+  // A plain create() 409s forever once any row exists for a (studentId, sessionNumber)
+  // pair (@@unique), even a cancelled one — so an *active* (non-cancelled) session
+  // blocks booking, but two cancelled rows (the "restart" / Option B state, see
+  // restartStudentSessions above) don't: reactivate them in place instead, same pattern
+  // as createSessionManually.
+  const existing = await prisma.session.findMany({ where: { studentId } });
+  if (existing.some((s) => s.status !== "CANCELLED")) {
     throw new ConflictError("Sessions are already booked for this student");
   }
+  const existingSession1 = existing.find((s) => s.sessionNumber === "SESSION_1");
+  const existingSession2 = existing.find((s) => s.sessionNumber === "SESSION_2");
 
   if (diffCalendarDays(input.session1.date, input.session2.date) < MIN_SESSION_GAP_DAYS) {
     throw new BadRequestError(`Session 2 must be at least ${MIN_SESSION_GAP_DAYS} calendar days after Session 1`);
@@ -282,28 +291,57 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
     const claim2 = await tx.counsellorSlot.updateMany({ where: { id: slot2.id, status: "OPEN" }, data: { status: "BOOKED" } });
     if (claim2.count !== 1) throw new ConflictError("That Session 2 slot was just booked by someone else — please pick another");
 
-    const createdSession1 = await tx.session.create({
-      data: {
-        studentId,
-        counsellorId: slot1.counsellorId,
-        sessionNumber: "SESSION_1",
-        scheduledDate: slot1.slotDate,
-        startTime: slot1.startTime,
-        endTime: slot1.endTime,
-      },
-      include: sessionInclude,
-    });
-    const createdSession2 = await tx.session.create({
-      data: {
-        studentId,
-        counsellorId: slot1.counsellorId,
-        sessionNumber: "SESSION_2",
-        scheduledDate: slot2.slotDate,
-        startTime: slot2.startTime,
-        endTime: slot2.endTime,
-      },
-      include: sessionInclude,
-    });
+    // Fresh start (Option B): a reactivated row also clears the reschedule allowance and
+    // any stale counsellor proposal, same as a single-session reschedule reactivation.
+    const freshFields = {
+      status: "SCHEDULED" as const,
+      cancellationReason: null,
+      cancellationNotes: null,
+      studentJoinedAt: null,
+      counsellorJoinedAt: null,
+      studentNoShow: false,
+      counsellorNoShow: false,
+      studentRescheduleUsed: false,
+      counsellorRescheduleReason: null,
+      counsellorProposedDate: null,
+      counsellorProposedStartTime: null,
+      counsellorProposedEndTime: null,
+    };
+
+    const createdSession1 = existingSession1
+      ? await tx.session.update({
+          where: { id: existingSession1.id },
+          data: { counsellorId: slot1.counsellorId, scheduledDate: slot1.slotDate, startTime: slot1.startTime, endTime: slot1.endTime, ...freshFields },
+          include: sessionInclude,
+        })
+      : await tx.session.create({
+          data: {
+            studentId,
+            counsellorId: slot1.counsellorId,
+            sessionNumber: "SESSION_1",
+            scheduledDate: slot1.slotDate,
+            startTime: slot1.startTime,
+            endTime: slot1.endTime,
+          },
+          include: sessionInclude,
+        });
+    const createdSession2 = existingSession2
+      ? await tx.session.update({
+          where: { id: existingSession2.id },
+          data: { counsellorId: slot1.counsellorId, scheduledDate: slot2.slotDate, startTime: slot2.startTime, endTime: slot2.endTime, ...freshFields },
+          include: sessionInclude,
+        })
+      : await tx.session.create({
+          data: {
+            studentId,
+            counsellorId: slot1.counsellorId,
+            sessionNumber: "SESSION_2",
+            scheduledDate: slot2.slotDate,
+            startTime: slot2.startTime,
+            endTime: slot2.endTime,
+          },
+          include: sessionInclude,
+        });
 
     await tx.counsellorSlot.update({ where: { id: slot1.id }, data: { sessionId: createdSession1.id } });
     await tx.counsellorSlot.update({ where: { id: slot2.id }, data: { sessionId: createdSession2.id } });
@@ -331,9 +369,10 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
     studentName,
     sessionDateTime: s1DateTime,
   });
-  // SESSION_DETAILS_PARENT (with join links) is sent once meetingLink is populated for
-  // both sessions (resolved decision D — links are pasted manually, not generated at
-  // booking time), not here — see setMeetingLink.
+  // SESSION_DETAILS_PARENT (with join links) is still a manual POST /email/send call,
+  // not sent here — the counsellor's meetingLink (session.counsellor.meetingLink) is
+  // already resolvable the moment the counsellor is assigned, so there's no "populated
+  // later" gate to wait on anymore (resolved decision D, superseded).
 
   return { session1, session2, counsellor };
 }
@@ -526,6 +565,8 @@ export async function listSessions(query: ListSessionsQuery) {
     counsellorId: query.counsellorId,
     status: query.status,
     student: query.projectId || query.instituteId ? { projectId: query.projectId, project: query.instituteId ? { instituteId: query.instituteId } : undefined } : undefined,
+    studentNoShow: query.noShow === "STUDENT" ? true : undefined,
+    counsellorNoShow: query.noShow === "COUNSELLOR" ? true : undefined,
   };
   if (query.from || query.to) {
     where.scheduledDate = {
@@ -542,15 +583,7 @@ export async function listSessions(query: ListSessionsQuery) {
   return sessions.map(reconcileNoShow);
 }
 
-// --- Meeting link / join / complete / notes ---
-
-export async function setMeetingLink(id: string, meetingLink: string) {
-  try {
-    return await prisma.session.update({ where: { id }, data: { meetingLink }, include: sessionInclude });
-  } catch (err) {
-    handlePrismaError(err);
-  }
-}
+// --- Join / complete / notes ---
 
 export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
   const session = await getSessionById(id);
@@ -572,7 +605,16 @@ export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
 
   const data = role === "STUDENT" ? { studentJoinedAt: session.studentJoinedAt ?? now } : { counsellorJoinedAt: session.counsellorJoinedAt ?? now };
   const updated = await prisma.session.update({ where: { id }, data, include: sessionInclude });
-  return { session: updated, meetingLink: updated.meetingLink };
+
+  if (role === "STUDENT") {
+    sendEmailBestEffort(updated.student.parentEmail, "SESSION_JOINED_PARENT", {
+      parentName: "Parent",
+      studentName: `${updated.student.user.firstName} ${updated.student.user.lastName}`,
+      sessionNumber: updated.sessionNumber === "SESSION_1" ? "1" : "2",
+    });
+  }
+
+  return { session: updated, meetingLink: updated.counsellor.meetingLink };
 }
 
 export async function completeSession(id: string) {
@@ -600,48 +642,24 @@ export async function setNotes(id: string, notes: string) {
 
 // --- Reschedule / cancel ---
 
-export async function rescheduleSession(id: string, input: RescheduleSessionBody) {
-  const session = await getSessionById(id);
-  // Also reactivates a CANCELLED session (still locked to its counsellor) — the
-  // documented "Admin cancels, student re-books" flow (resolved decision H) has no
-  // other path back in, since @@unique([studentId, sessionNumber]) blocks a fresh
-  // create once any row (even a cancelled one) exists for that slot.
-  if (session.status !== "SCHEDULED" && session.status !== "CANCELLED") {
-    throw new ConflictError(`A ${session.status.toLowerCase()} session can't be rescheduled`);
-  }
-
-  // The 24h cutoff protects an upcoming, still-live session — irrelevant when
-  // reactivating a cancelled one (its old date may already be in the past).
-  if (input.initiatedBy === "STUDENT" && session.status === "SCHEDULED") {
-    const startsAt = combineDateTime(session.scheduledDate, session.startTime);
-    const cutoff = new Date(startsAt.getTime() - RESCHEDULE_CUTOFF_HOURS * 60 * 60_000);
-    if (new Date() > cutoff) {
-      throw new BadRequestError(`Reschedule requests must be made at least ${RESCHEDULE_CUTOFF_HOURS} hours before the session`);
-    }
-  }
-
-  const other = await prisma.session.findFirst({
-    where: {
-      studentId: session.studentId,
-      sessionNumber: session.sessionNumber === "SESSION_1" ? "SESSION_2" : "SESSION_1",
-      status: { not: "CANCELLED" },
-    },
-  });
-  if (other) {
-    const otherDateStr = other.scheduledDate.toISOString().slice(0, 10);
-    if (Math.abs(diffCalendarDays(input.date, otherDateStr)) < MIN_SESSION_GAP_DAYS) {
-      throw new BadRequestError(`Sessions must stay at least ${MIN_SESSION_GAP_DAYS} calendar days apart`);
-    }
-  }
-
-  const updated = await prisma.$transaction(async (tx) => {
-    const oldSlot = await tx.counsellorSlot.findUnique({ where: { sessionId: id } });
+// Shared by rescheduleSession and acceptCounsellorRescheduleProposal: claims the new
+// slot, releases the old one (if any), and updates the session row. Doesn't touch
+// studentRescheduleUsed — callers decide whether this particular move consumes the
+// student's one-time self-service allowance.
+async function claimSlotAndUpdateSession(
+  session: { id: string; counsellorId: string; scheduledDate: Date; startTime: string },
+  targetDate: string,
+  targetStartTime: string,
+  extraData: Prisma.SessionUpdateInput
+) {
+  return prisma.$transaction(async (tx) => {
+    const oldSlot = await tx.counsellorSlot.findUnique({ where: { sessionId: session.id } });
 
     const newSlot = await tx.counsellorSlot.findFirst({
       where: {
         counsellorId: session.counsellorId,
-        slotDate: toDate(input.date),
-        startTime: input.startTime,
+        slotDate: toDate(targetDate),
+        startTime: targetStartTime,
         status: "OPEN",
       },
     });
@@ -656,7 +674,7 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
     }
 
     const result = await tx.session.update({
-      where: { id },
+      where: { id: session.id },
       data: {
         scheduledDate: newSlot.slotDate,
         startTime: newSlot.startTime,
@@ -670,12 +688,72 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
         counsellorJoinedAt: null,
         studentNoShow: false,
         counsellorNoShow: false,
+        // Any pending counsellor proposal was targeting the *old* date — stale now.
+        counsellorRescheduleReason: null,
+        counsellorProposedDate: null,
+        counsellorProposedStartTime: null,
+        counsellorProposedEndTime: null,
+        ...extraData,
       },
       include: sessionInclude,
     });
     await tx.counsellorSlot.update({ where: { id: newSlot.id }, data: { sessionId: result.id } });
     return result;
   });
+}
+
+// Enforces the ≥2-day gap against the student's other (non-cancelled) session.
+async function assertSessionGap(studentId: string, sessionNumber: SessionNumber, targetDate: string) {
+  const other = await prisma.session.findFirst({
+    where: { studentId, sessionNumber: sessionNumber === "SESSION_1" ? "SESSION_2" : "SESSION_1", status: { not: "CANCELLED" } },
+  });
+  if (other) {
+    const otherDateStr = other.scheduledDate.toISOString().slice(0, 10);
+    if (Math.abs(diffCalendarDays(targetDate, otherDateStr)) < MIN_SESSION_GAP_DAYS) {
+      throw new BadRequestError(`Sessions must stay at least ${MIN_SESSION_GAP_DAYS} calendar days apart`);
+    }
+  }
+}
+
+export async function rescheduleSession(id: string, input: RescheduleSessionBody) {
+  const session = await getSessionById(id);
+  // Also reactivates a CANCELLED session (still locked to its counsellor) — the
+  // documented "Admin cancels, student re-books" flow (resolved decision H) has no
+  // other path back in, since @@unique([studentId, sessionNumber]) blocks a fresh
+  // create once any row (even a cancelled one) exists for that slot.
+  if (session.status !== "SCHEDULED" && session.status !== "CANCELLED") {
+    throw new ConflictError(`A ${session.status.toLowerCase()} session can't be rescheduled`);
+  }
+
+  if (input.initiatedBy === "STUDENT" && session.status === "SCHEDULED") {
+    // The 24h cutoff protects an upcoming, still-live session — irrelevant when
+    // reactivating a cancelled one (its old date may already be in the past).
+    const startsAt = combineDateTime(session.scheduledDate, session.startTime);
+    const cutoff = new Date(startsAt.getTime() - RESCHEDULE_CUTOFF_HOURS * 60 * 60_000);
+    if (new Date() > cutoff) {
+      throw new BadRequestError(`Reschedule requests must be made at least ${RESCHEDULE_CUTOFF_HOURS} hours before the session`);
+    }
+    // "Only 1 reschedule is allowed per student" (per session — docs/Session Handling_
+    // Cancellation  Rescheduling.pdf §1, Option A). A further self-service attempt
+    // routes to Admin (same message shape as the 24h cutoff); Admin- or counsellor-
+    // initiated reschedules aren't limited. The student's other escape hatch is Option
+    // B — see restartStudentSessions below.
+    if (session.studentRescheduleUsed) {
+      throw new BadRequestError(
+        "You've already used your one self-service reschedule for this session. Please contact Admin for further changes."
+      );
+    }
+  }
+
+  await assertSessionGap(session.studentId, session.sessionNumber, input.date);
+
+  // Only a STUDENT-initiated move consumes the one-time allowance (ADMIN/COUNSELLOR
+  // don't); reactivating a cancelled session is a fresh start regardless of initiator;
+  // otherwise leave the flag untouched (`undefined` = not included in the update).
+  const studentRescheduleUsed =
+    input.initiatedBy === "STUDENT" ? true : session.status === "CANCELLED" ? false : undefined;
+
+  const updated = await claimSlotAndUpdateSession(session, input.date, input.startTime, { studentRescheduleUsed });
 
   const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
   const newDateTime = formatDateTime(input.date, input.startTime);
@@ -694,6 +772,180 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
   });
 
   return updated;
+}
+
+// --- Counsellor-initiated reschedule (docs/Session Handling_Cancellation  Rescheduling.pdf §3) ---
+//
+// A three-step handshake, distinct from the student self-service path above and not
+// subject to its 1-reschedule limit: the counsellor proposes one alternative from their
+// own open inventory + a reason; the student either accepts (performs the actual move)
+// or declines (clears the proposal — restarting from there is the student's own next
+// action, via restartStudentSessions below).
+
+export async function requestCounsellorReschedule(
+  id: string,
+  input: { reason: string; date: string; startTime: string },
+  actingUser: { sub: string; role: string }
+) {
+  const session = await getSessionById(id);
+  if (session.status !== "SCHEDULED") {
+    throw new ConflictError(`A ${session.status.toLowerCase()} session can't be rescheduled`);
+  }
+
+  // A counsellor may only propose for their own session; Admin can act on any.
+  if (actingUser.role === "COUNSELLOR") {
+    const counsellor = await prisma.counsellor.findUnique({ where: { userId: actingUser.sub } });
+    if (!counsellor || counsellor.id !== session.counsellorId) {
+      throw new ForbiddenError("You can only request a reschedule for your own session");
+    }
+  }
+
+  // "The system shows the counsellor their own remaining open slots" — validated here
+  // by requiring the proposed slot to actually belong to this session's counsellor.
+  const proposedSlot = await prisma.counsellorSlot.findFirst({
+    where: { counsellorId: session.counsellorId, slotDate: toDate(input.date), startTime: input.startTime, status: "OPEN" },
+  });
+  if (!proposedSlot) {
+    throw new ConflictError("That date/time isn't one of this counsellor's own open slots");
+  }
+  await assertSessionGap(session.studentId, session.sessionNumber, input.date);
+
+  const updated = await prisma.session.update({
+    where: { id },
+    data: {
+      counsellorRescheduleReason: input.reason,
+      counsellorProposedDate: proposedSlot.slotDate,
+      counsellorProposedStartTime: proposedSlot.startTime,
+      counsellorProposedEndTime: proposedSlot.endTime,
+    },
+    include: sessionInclude,
+  });
+
+  const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
+  const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
+  const proposedDateTime = formatDateTime(input.date, input.startTime);
+
+  sendEmailBestEffort(updated.student.user.email, "SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT", {
+    studentName,
+    sessionNumber: sessionNumberDigit,
+    reason: input.reason,
+    proposedDateTime,
+    portalLink: env.APP_WEB_URL,
+  });
+
+  return updated;
+}
+
+export async function acceptCounsellorRescheduleProposal(id: string) {
+  const session = await getSessionById(id);
+  if (!session.counsellorProposedDate || !session.counsellorProposedStartTime) {
+    throw new BadRequestError("This session has no pending counsellor reschedule proposal");
+  }
+  if (session.status !== "SCHEDULED") {
+    throw new ConflictError(`A ${session.status.toLowerCase()} session can't be rescheduled`);
+  }
+
+  const targetDate = session.counsellorProposedDate.toISOString().slice(0, 10);
+  const targetStartTime = session.counsellorProposedStartTime;
+
+  // Counsellor-initiated — doesn't touch studentRescheduleUsed.
+  const updated = await claimSlotAndUpdateSession(session, targetDate, targetStartTime, {});
+
+  const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
+  const newDateTime = formatDateTime(targetDate, targetStartTime);
+  const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
+
+  sendEmailBestEffort(updated.student.user.email, "SESSION_RESCHEDULED_STUDENT", {
+    studentName,
+    sessionNumber: sessionNumberDigit,
+    newDateTime,
+  });
+  sendEmailBestEffort(updated.student.parentEmail, "SESSION_RESCHEDULED_PARENT", {
+    parentName: "Parent",
+    studentName,
+    sessionNumber: sessionNumberDigit,
+    newDateTime,
+  });
+
+  return updated;
+}
+
+export async function declineCounsellorRescheduleProposal(id: string) {
+  const session = await getSessionById(id);
+  if (!session.counsellorProposedDate) {
+    throw new BadRequestError("This session has no pending counsellor reschedule proposal");
+  }
+  return prisma.session.update({
+    where: { id },
+    data: {
+      counsellorRescheduleReason: null,
+      counsellorProposedDate: null,
+      counsellorProposedStartTime: null,
+      counsellorProposedEndTime: null,
+    },
+    include: sessionInclude,
+  });
+}
+
+// --- Restart (docs/Session Handling_Cancellation  Rescheduling.pdf §1, Option B) ---
+//
+// "Before starting Session 1, both Session 1 and Session 2 are cancelled together and
+// the student starts fresh, rebooking both against current availability." The escape
+// hatch when the 1-reschedule limit isn't enough, or a counsellor's proposal doesn't
+// work for the student. Cancels both sessions in one transaction; bookSessions (below)
+// is what allows rebooking afterward — it reactivates these rows once both are
+// CANCELLED rather than blocking on "sessions already booked".
+
+export async function restartStudentSessions(studentId: string) {
+  const sessions = await prisma.session.findMany({ where: { studentId }, include: sessionInclude });
+  const session1 = sessions.find((s) => s.sessionNumber === "SESSION_1");
+  if (!session1) {
+    throw new NotFoundError("This student has no Session 1 to restart from");
+  }
+  if (session1.status === "COMPLETED" || session1.studentJoinedAt || session1.counsellorJoinedAt) {
+    throw new ConflictError("Session 1 has already started — restart is only available before then");
+  }
+
+  const activeSessions = sessions.filter((s) => s.status !== "CANCELLED");
+  if (activeSessions.length === 0) {
+    throw new ConflictError("There's nothing to restart — both sessions are already cancelled");
+  }
+
+  const cancelled = await prisma.$transaction(async (tx) => {
+    const results = [];
+    for (const s of activeSessions) {
+      const slot = await tx.counsellorSlot.findUnique({ where: { sessionId: s.id } });
+      if (slot) {
+        await tx.counsellorSlot.update({ where: { id: slot.id }, data: { status: "OPEN", sessionId: null } });
+      }
+      results.push(
+        await tx.session.update({
+          where: { id: s.id },
+          data: {
+            status: "CANCELLED",
+            cancellationReason: "OTHER",
+            cancellationNotes: "Student restarted booking from scratch (Option B)",
+            counsellorRescheduleReason: null,
+            counsellorProposedDate: null,
+            counsellorProposedStartTime: null,
+            counsellorProposedEndTime: null,
+          },
+          include: sessionInclude,
+        })
+      );
+    }
+    return results;
+  });
+
+  const studentName = `${session1.student.user.firstName} ${session1.student.user.lastName}`;
+  for (const s of cancelled) {
+    const originalDateTime = formatDateTime(s.scheduledDate.toISOString().slice(0, 10), s.startTime);
+    const sessionNumberDigit = s.sessionNumber === "SESSION_1" ? "1" : "2";
+    sendEmailBestEffort(s.student.user.email, "SESSION_CANCELLED_STUDENT", { studentName, sessionNumber: sessionNumberDigit, originalDateTime });
+    sendEmailBestEffort(s.student.parentEmail, "SESSION_CANCELLED_PARENT", { parentName: "Parent", studentName, sessionNumber: sessionNumberDigit, originalDateTime });
+  }
+
+  return { cancelled };
 }
 
 export async function cancelSession(id: string, input: CancelSessionBody) {
@@ -715,6 +967,11 @@ export async function cancelSession(id: string, input: CancelSessionBody) {
         status: "CANCELLED",
         cancellationReason: input.reason as CancellationReason,
         cancellationNotes: input.notes,
+        // A pending counsellor proposal is moot once the session itself is cancelled.
+        counsellorRescheduleReason: null,
+        counsellorProposedDate: null,
+        counsellorProposedStartTime: null,
+        counsellorProposedEndTime: null,
       },
       include: sessionInclude,
     });
@@ -736,6 +993,92 @@ export async function cancelSession(id: string, input: CancelSessionBody) {
   });
 
   return updated;
+}
+
+// --- No-show tracking (docs/Session Handling_Cancellation  Rescheduling.pdf §2, §4) ---
+//
+// Complements the passive, lazy `reconcileNoShow` above (which silently backfills the
+// flags whenever a session is read after it ends): this is the explicit, immediate path
+// — "the counsellor marks 'Student did not join' from their session screen at or after
+// the scheduled time" — with the notification side effects the doc requires. Marking
+// doesn't change `status`; the session stays SCHEDULED (a no-show is a fact about what
+// happened, not itself a cancellation) until someone reschedules or cancels it via the
+// existing endpoints.
+
+export async function markSessionNoShow(id: string, party: "STUDENT" | "COUNSELLOR") {
+  const session = await getSessionById(id);
+  if (session.status !== "SCHEDULED") {
+    throw new ConflictError(`A ${session.status.toLowerCase()} session can't be marked no-show`);
+  }
+  const startsAt = combineDateTime(session.scheduledDate, session.startTime);
+  if (new Date() < startsAt) {
+    throw new BadRequestError("A session can only be marked no-show at or after its scheduled start time");
+  }
+
+  // Idempotent: already flagged for this party — return as-is, no duplicate alerts.
+  if (party === "STUDENT" ? session.studentNoShow : session.counsellorNoShow) {
+    return session;
+  }
+
+  const updated = await prisma.session.update({
+    where: { id },
+    data: party === "STUDENT" ? { studentNoShow: true } : { counsellorNoShow: true },
+    include: sessionInclude,
+  });
+
+  const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
+  const counsellorName = `${updated.counsellor.user.firstName} ${updated.counsellor.user.lastName}`;
+  const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
+  const sessionDateTime = formatDateTime(updated.scheduledDate.toISOString().slice(0, 10), updated.startTime);
+
+  if (party === "STUDENT") {
+    // "That single occurrence is auto-flagged to Admin." The reschedule prompt itself
+    // waits for sendNoShowReschedulePrompt (Admin-only) — "once Admin permits."
+    sendEmailBestEffort(env.ADMIN_NOTIFICATION_EMAIL, "SESSION_STUDENT_NO_SHOW_ADMIN", {
+      studentName,
+      counsellorName,
+      sessionNumber: sessionNumberDigit,
+      sessionDateTime,
+    });
+  } else {
+    // Counsellor no-show "should always route to Admin every time, without exception"
+    // AND the student gets an apology + reschedule prompt immediately, with no Admin
+    // gate — "so the student isn't left waiting on Admin before they can rebook."
+    sendEmailBestEffort(env.ADMIN_NOTIFICATION_EMAIL, "SESSION_COUNSELLOR_NO_SHOW_ADMIN", {
+      studentName,
+      counsellorName,
+      sessionNumber: sessionNumberDigit,
+      sessionDateTime,
+    });
+    sendEmailBestEffort(updated.student.user.email, "SESSION_COUNSELLOR_NO_SHOW_STUDENT", {
+      studentName,
+      sessionDateTime,
+      portalLink: env.APP_WEB_URL,
+    });
+  }
+
+  return updated;
+}
+
+// Admin explicitly "permitting" the reschedule prompt IS this call — no separate
+// persisted approval flag, matching the app's fire-and-forget/no-log convention
+// (docs/session-scheduling-use-cases.md resolved decision G).
+export async function sendNoShowReschedulePrompt(id: string) {
+  const session = await getSessionById(id);
+  if (!session.studentNoShow) {
+    throw new BadRequestError("This session hasn't been marked as a student no-show");
+  }
+
+  const studentName = `${session.student.user.firstName} ${session.student.user.lastName}`;
+  const sessionDateTime = formatDateTime(session.scheduledDate.toISOString().slice(0, 10), session.startTime);
+
+  sendEmailBestEffort(session.student.user.email, "SESSION_MISSED_STUDENT", {
+    studentName,
+    sessionDateTime,
+    portalLink: env.APP_WEB_URL,
+  });
+
+  return { sent: true };
 }
 
 // --- Day-of reminder (manual trigger — no scheduler exists yet, see email module README) ---

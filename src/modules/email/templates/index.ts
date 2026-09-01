@@ -18,11 +18,12 @@ export interface RenderedEmail {
 }
 
 // One entry per kREATE communication template: the 9 rich lifecycle templates from
-// docs/11.Class 910_Communication EMail Templates.pdf, plus the 31 reminder/session-
-// status templates (email equivalents of docs/Class 910_Workflow Prompts for
-// Watsapp.xlsx rows 3-16 — that sheet is WhatsApp copy; WhatsApp sending itself isn't
-// implemented). Each entry pairs the Zod schema that validates the template's merge
-// data with the function that renders subject/html/text from it. See
+// docs/11.Class 910_Communication EMail Templates.pdf, the 31 reminder/session-status
+// templates (email equivalents of docs/Class 910_Workflow Prompts for Watsapp.xlsx rows
+// 3-16 — that sheet is WhatsApp copy; WhatsApp sending itself isn't implemented), plus 4
+// no-show/reschedule-tracking templates added for docs/Session Handling_Cancellation
+// Rescheduling.pdf (not in either source sheet). Each entry pairs the Zod schema that validates the
+// template's merge data with the function that renders subject/html/text from it. See
 // src/modules/email/README.md for the full reference.
 export const emailTemplateRegistry = {
   WELCOME_STUDENT: { schema: welcomeStudentDataSchema, render: renderWelcomeStudentEmail },
@@ -57,12 +58,17 @@ export const emailTemplateRegistry = {
   SESSION_2_DAY_REMINDER_STUDENT: reminders.SESSION_2_DAY_REMINDER_STUDENT,
   SESSION_2_DAY_REMINDER_PARENT: reminders.SESSION_2_DAY_REMINDER_PARENT,
   SESSION_2_DAY_REMINDER_COUNSELLOR: reminders.SESSION_2_DAY_REMINDER_COUNSELLOR,
+  SESSION_JOINED_PARENT: reminders.SESSION_JOINED_PARENT,
   SESSION_RESCHEDULED_STUDENT: reminders.SESSION_RESCHEDULED_STUDENT,
   SESSION_RESCHEDULED_PARENT: reminders.SESSION_RESCHEDULED_PARENT,
   SESSION_CANCELLED_STUDENT: reminders.SESSION_CANCELLED_STUDENT,
   SESSION_CANCELLED_PARENT: reminders.SESSION_CANCELLED_PARENT,
   SESSION_MISSED_STUDENT: reminders.SESSION_MISSED_STUDENT,
   SESSION_MISSED_PARENT: reminders.SESSION_MISSED_PARENT,
+  SESSION_STUDENT_NO_SHOW_ADMIN: reminders.SESSION_STUDENT_NO_SHOW_ADMIN,
+  SESSION_COUNSELLOR_NO_SHOW_ADMIN: reminders.SESSION_COUNSELLOR_NO_SHOW_ADMIN,
+  SESSION_COUNSELLOR_NO_SHOW_STUDENT: reminders.SESSION_COUNSELLOR_NO_SHOW_STUDENT,
+  SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT: reminders.SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT,
   FEEDBACK_STUDENT_PENDING_REMINDER_STUDENT: reminders.FEEDBACK_STUDENT_PENDING_REMINDER_STUDENT,
   FEEDBACK_STUDENT_PENDING_REMINDER_PARENT: reminders.FEEDBACK_STUDENT_PENDING_REMINDER_PARENT,
   FEEDBACK_PARENT_PENDING_REMINDER_STUDENT: reminders.FEEDBACK_PARENT_PENDING_REMINDER_STUDENT,

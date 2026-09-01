@@ -12,9 +12,10 @@ import type {
   JoinSessionBody,
   ListSessionsQuery,
   ListSlotsQuery,
+  MarkNoShowBody,
+  RequestCounsellorRescheduleBody,
   RescheduleSessionBody,
   SendDayReminderBody,
-  SetMeetingLinkBody,
   SetNotesBody,
 } from "./sessions.schema.js";
 
@@ -95,12 +96,6 @@ export async function getCounsellorMyStudents(req: Request, res: Response): Prom
   res.status(200).json(students);
 }
 
-export async function setMeetingLink(req: Request, res: Response): Promise<void> {
-  const { meetingLink } = req.body as SetMeetingLinkBody;
-  const session = await sessionsService.setMeetingLink(req.params.id as string, meetingLink);
-  res.status(200).json(session);
-}
-
 export async function joinSession(req: Request, res: Response): Promise<void> {
   const { role } = req.body as JoinSessionBody;
   const result = await sessionsService.joinSession(req.params.id as string, role);
@@ -126,6 +121,41 @@ export async function rescheduleSession(req: Request, res: Response): Promise<vo
 export async function cancelSession(req: Request, res: Response): Promise<void> {
   const session = await sessionsService.cancelSession(req.params.id as string, req.body as CancelSessionBody);
   res.status(200).json(session);
+}
+
+export async function requestCounsellorReschedule(req: Request, res: Response): Promise<void> {
+  const session = await sessionsService.requestCounsellorReschedule(
+    req.params.id as string,
+    req.body as RequestCounsellorRescheduleBody,
+    { sub: req.user!.sub, role: req.user!.role }
+  );
+  res.status(200).json(session);
+}
+
+export async function acceptCounsellorRescheduleProposal(req: Request, res: Response): Promise<void> {
+  const session = await sessionsService.acceptCounsellorRescheduleProposal(req.params.id as string);
+  res.status(200).json(session);
+}
+
+export async function declineCounsellorRescheduleProposal(req: Request, res: Response): Promise<void> {
+  const session = await sessionsService.declineCounsellorRescheduleProposal(req.params.id as string);
+  res.status(200).json(session);
+}
+
+export async function restartStudentSessions(req: Request, res: Response): Promise<void> {
+  const result = await sessionsService.restartStudentSessions(req.params.studentId as string);
+  res.status(200).json(result);
+}
+
+export async function markNoShow(req: Request, res: Response): Promise<void> {
+  const { party } = req.body as MarkNoShowBody;
+  const session = await sessionsService.markSessionNoShow(req.params.id as string, party);
+  res.status(200).json(session);
+}
+
+export async function sendNoShowReschedulePrompt(req: Request, res: Response): Promise<void> {
+  const result = await sessionsService.sendNoShowReschedulePrompt(req.params.id as string);
+  res.status(202).json(result);
 }
 
 export async function sendDayReminder(req: Request, res: Response): Promise<void> {

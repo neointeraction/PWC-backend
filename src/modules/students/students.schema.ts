@@ -84,6 +84,12 @@ export const listStudentsQuerySchema = z.object({
     .enum(["true", "false"])
     .transform((v) => v === "true")
     .optional(),
+  // `?discontinued=false` → active only (the default follow-up list); `=true` → only
+  // discontinued students. Omitted → no filtering, same as today.
+  discontinued: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .optional(),
 });
 export type ListStudentsQuery = z.infer<typeof listStudentsQuerySchema>;
 
@@ -91,3 +97,8 @@ export const updateWorkflowStatusBodySchema = z.object({
   workflowStatus: workflowStatusSchema,
 });
 export type UpdateWorkflowStatusBody = z.infer<typeof updateWorkflowStatusBodySchema>;
+
+export const discontinueStudentBodySchema = z.object({
+  reason: z.string().trim().min(1).optional(),
+});
+export type DiscontinueStudentBody = z.infer<typeof discontinueStudentBodySchema>;

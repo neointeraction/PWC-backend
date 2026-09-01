@@ -17,10 +17,11 @@ import {
   joinSessionBodySchema,
   listSessionsQuerySchema,
   listSlotsQuerySchema,
+  markNoShowBodySchema,
+  requestCounsellorRescheduleBodySchema,
   rescheduleSessionBodySchema,
   sendDayReminderBodySchema,
   sessionIdParamsSchema,
-  setMeetingLinkBodySchema,
   slotIdParamsSchema,
   setNotesBodySchema,
   studentIdParamsSchema,
@@ -77,14 +78,9 @@ sessionsRouter.post("/", ...requireAdmin, validate({ body: createSessionBodySche
 sessionsRouter.get("/", ...requireStaff, validate({ query: listSessionsQuerySchema }), asyncHandler(sessionsController.listSessions));
 sessionsRouter.get("/:id", ...requireStaff, validate({ params: sessionIdParamsSchema }), asyncHandler(sessionsController.getSession));
 
-// Meeting link / join / complete / notes. Join is student- or staff-initiated; the rest
-// are counsellor/admin actions.
-sessionsRouter.patch(
-  "/:id/meeting-link",
-  ...requireStaff,
-  validate({ params: sessionIdParamsSchema, body: setMeetingLinkBodySchema }),
-  asyncHandler(sessionsController.setMeetingLink)
-);
+// Join / complete / notes. Join is student- or staff-initiated; the rest are
+// counsellor/admin actions. No per-session meeting-link route — a session's link is
+// always its assigned counsellor's (Counsellor.meetingLink), returned by /join.
 sessionsRouter.post(
   "/:id/join",
   ...requireStudentOrStaff,
@@ -119,6 +115,55 @@ sessionsRouter.post(
   validate({ params: sessionIdParamsSchema, body: cancelSessionBodySchema }),
   ownSessionParam,
   asyncHandler(sessionsController.cancelSession)
+);
+
+// Counsellor-initiated reschedule — the counsellor proposes one alternative from their
+// own open slots + a reason; the student accepts (performs the move) or declines
+// (clears it). Not subject to the student's 1-reschedule limit.
+sessionsRouter.post(
+  "/:id/reschedule-request",
+  ...requireStaff,
+  validate({ params: sessionIdParamsSchema, body: requestCounsellorRescheduleBodySchema }),
+  asyncHandler(sessionsController.requestCounsellorReschedule)
+);
+sessionsRouter.post(
+  "/:id/reschedule-request/accept",
+  ...requireStudentOrStaff,
+  validate({ params: sessionIdParamsSchema }),
+  ownSessionParam,
+  asyncHandler(sessionsController.acceptCounsellorRescheduleProposal)
+);
+sessionsRouter.post(
+  "/:id/reschedule-request/decline",
+  ...requireStudentOrStaff,
+  validate({ params: sessionIdParamsSchema }),
+  ownSessionParam,
+  asyncHandler(sessionsController.declineCounsellorRescheduleProposal)
+);
+
+// Restart (Option B) — cancel both sessions and clear the way to rebook via the normal
+// booking-options/book flow, before Session 1 has started.
+sessionsRouter.post(
+  "/students/:studentId/restart",
+  ...requireStudentOrStaff,
+  validate({ params: studentIdParamsSchema }),
+  ownStudentParam,
+  asyncHandler(sessionsController.restartStudentSessions)
+);
+
+// No-show tracking — a counsellor marks either party from their session screen; the
+// reschedule prompt after a student no-show is Admin-only ("once Admin permits").
+sessionsRouter.post(
+  "/:id/no-show",
+  ...requireStaff,
+  validate({ params: sessionIdParamsSchema, body: markNoShowBodySchema }),
+  asyncHandler(sessionsController.markNoShow)
+);
+sessionsRouter.post(
+  "/:id/no-show/reschedule-prompt",
+  ...requireAdmin,
+  validate({ params: sessionIdParamsSchema }),
+  asyncHandler(sessionsController.sendNoShowReschedulePrompt)
 );
 
 // Day-of reminder (manual trigger — no scheduler exists yet)

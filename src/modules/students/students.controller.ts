@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import * as studentsService from "./students.service.js";
-import type { UpdateWorkflowStatusBody } from "./students.schema.js";
+import type { DiscontinueStudentBody, UpdateWorkflowStatusBody } from "./students.schema.js";
 
 export async function createStudent(req: Request, res: Response): Promise<void> {
   const result = await studentsService.createStudent(req.body);
@@ -45,5 +45,16 @@ export async function confirmProfile(req: Request, res: Response): Promise<void>
 export async function updateWorkflowStatus(req: Request, res: Response): Promise<void> {
   const { workflowStatus } = req.body as UpdateWorkflowStatusBody;
   const student = await studentsService.setWorkflowStatus(req.params.id as string, workflowStatus);
+  res.status(200).json(student);
+}
+
+export async function discontinueStudent(req: Request, res: Response): Promise<void> {
+  const { reason } = req.body as DiscontinueStudentBody;
+  const student = await studentsService.discontinueStudent(req.params.id as string, reason);
+  res.status(200).json(student);
+}
+
+export async function reinstateStudent(req: Request, res: Response): Promise<void> {
+  const student = await studentsService.reinstateStudent(req.params.id as string);
   res.status(200).json(student);
 }

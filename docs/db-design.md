@@ -186,6 +186,7 @@ specific projects via `ProjectCounsellor`.
 | counsellorCode | String | unique; auto-generated login id, e.g. `C0001` (see `CodeSequence`), or a supplied legacy/import code |
 | instituteId | String? | FK → Institute. Nullable — a counsellor can be created into an unassigned pool with no institute, and picks one up when it's first assigned to a project (`POST /counsellors/{id}/projects`, which backfills this from the project's institute) |
 | mobile | String | unique, E.164 |
+| meetingLink | String? | the counsellor's one fixed meeting room (their own Zoom/Meet room) — plain opaque string, no Calendly/Google Meet integration. Every session assigned to this counsellor shares this same link; `Session` has no link field of its own (resolve via `session.counsellor.meetingLink`). |
 
 ### `ProjectCounsellor`
 Join table: which counsellors are assigned to which project. Unique on
@@ -233,6 +234,9 @@ Extends `User` (role=STUDENT).
 | motherName, motherOccupation | String? | Student Profile Form, Section C; optional (bulk imports may omit) |
 | motherEmployer | String? | optional ("if applicable") |
 | workflowStatus | `WorkflowStatus` enum | see lifecycle below |
+| isDiscontinued | Boolean | dropped out of the project mid-way; default `false` — see below |
+| discontinuedAt | DateTime? | set when `isDiscontinued` flips true, cleared on reinstate |
+| discontinuedReason | String? | optional free-text reason from `POST /students/{id}/discontinue` |
 
 Earlier revisions of this schema had a single `parentName` field (matching the
 institute's bulk-upload Excel columns). The Student Profile Form — filled by the
@@ -257,6 +261,17 @@ SESSION_2_COMPLETED → COUNSELLOR_FEEDBACK → STUDENT_PARENT_FEEDBACK → CLOS
 Every stage has a real trigger (see the trigger table in `docs/api-list.md`); the admin
 `PATCH /students/{id}/workflow-status` override is a correction tool, not the normal
 path. The tail of the lifecycle is driven by: a counsellor-chart save with real content
+
+**Discontinuing a student** (dropped out mid-project — transferred schools, opted out,
+...) is deliberately **not** modeled as a `workflowStatus` value: that enum is
+forward-only and every stage already has a real trigger, so a terminal-but-not-`CLOSED`
+state doesn't fit the same switch-driven model `advanceWorkflowStatus`/`studentStage.ts`
+rely on. Instead `isDiscontinued`/`discontinuedAt`/`discontinuedReason` sit alongside
+`workflowStatus` (untouched) — `POST /students/{id}/discontinue` sets them,
+`POST /students/{id}/reinstate` clears them. `stageInfo.stage` reads `DISCONTINUED`
+while the flag is set (never ageing/missed-session flagged), then resumes from
+`workflowStatus` on reinstate. This is a mark-inactive action, not a delete — unlike
+`DELETE /students/{id}`, no data is removed.
 (`COUNSELLOR_FEEDBACK_REPORT`), chart finalize (`COUNSELLOR_FEEDBACK` — this is what
 writes `CounsellorChart.finalizedAt`), both feedback forms submitted
 (`STUDENT_PARENT_FEEDBACK`), and the **student's own** fetch of their assessment report
@@ -282,13 +297,14 @@ constraint).
 | scheduledDate | Date | |
 | startTime, endTime | String | "HH:mm" |
 | status | `SessionStatus` enum | SCHEDULED / COMPLETED / RESCHEDULED / CANCELLED |
-| meetingLink | String? | plain opaque string — pasted manually (Admin/Counsellor); no Calendly/Google Meet integration yet. Also what's emailed to the parent (same link, no separate access control). |
 | studentJoinedAt, counsellorJoinedAt | DateTime? | set on the "Join Now" click, not just on window entry |
 | studentNoShow, counsellorNoShow | Boolean | lazily reconciled on read once `endTime` has passed with no matching join timestamp — see "Deliberate scope gaps" |
 | notes | String? | counsellor's session notes/agenda |
 | cancellationReason | `CancellationReason`? | STUDENT_UNAVAILABLE / COUNSELLOR_UNAVAILABLE / INSTITUTION_REQUEST / OTHER |
 | cancellationNotes | String? | free text |
 | rescheduledFromDate, rescheduledFromStart | nullable | prior date/time, for the "was X → now Y" display |
+| studentRescheduleUsed | Boolean | "only 1 self-service reschedule per session" (`docs/Session Handling_Cancellation  Rescheduling.pdf` §1) — set on a successful STUDENT-initiated reschedule, blocks a further one (routes to Admin). Not consumed by ADMIN/COUNSELLOR-initiated moves. Reset to false when a cancelled session is reactivated (fresh start), including via the Option B restart flow. |
+| counsellorRescheduleReason, counsellorProposedDate, counsellorProposedStartTime, counsellorProposedEndTime | nullable | a pending counsellor-initiated reschedule proposal (same doc, §3) — non-null `counsellorProposedDate` means one's awaiting the student's accept/decline. Doesn't move `scheduledDate`/`startTime`/`endTime` until accepted. Cleared on accept, decline, any other reschedule, or cancellation. |
 
 Unique constraints: `(studentId, sessionNumber)` — a student can't double-book the same
 session number; `(counsellorId, scheduledDate, startTime)` — prevents double-booking a
@@ -703,8 +719,9 @@ variants aren't built. See `docs/pending-items.md` §1.3.
   matching join timestamp, rather than by a background job. Functionally equivalent
   for a UI that reads sessions on every dashboard load, but the flag won't flip until
   something reads that session again.
-- **Real meeting-link generation** — `Session.meetingLink` is a plain opaque string,
-  populated manually. No Calendly/Google Meet integration exists.
+- **Real meeting-link generation** — `Counsellor.meetingLink` is a plain opaque string,
+  populated manually (one fixed link per counsellor, shared by every session assigned to
+  them — no per-session link). No Calendly/Google Meet integration exists.
 - **Session-scheduling role checks** — the Sessions API has no auth/role enforcement
   yet (matches the rest of the app); `role`/`initiatedBy` are trusted request body
   fields, not derived from an authenticated caller.

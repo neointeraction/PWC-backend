@@ -126,11 +126,33 @@ retrieval + submission), Assessment (question bank + attempt flow, no scoring ye
 Career Library (retrieval/search + cross-referenced UG/PG data), Sessions (blind
 slot-based booking, join/no-show tracking, reschedule/cancel — design in
 `docs/session-scheduling-use-cases.md`, fully resolved and implemented; see
-`src/modules/sessions/`), Email (configurable provider — `console` for local dev,
-Mailgun for real sends — with the 9 kREATE lifecycle templates plus 31
-reminder/session-status templates; most sends are still a manual
-`POST /api/v1/email/send` call, though booking/reschedule/cancel in Sessions trigger
-the relevant template automatically), OpenAPI/Swagger docs. **Route-level auth is now
+`src/modules/sessions/`). No-show has two layers: passive/lazy (`reconcileNoShow`
+backfills `studentNoShow`/`counsellorNoShow` on read, once a `SCHEDULED` session's
+`endTime` has passed with no join timestamp) and explicit (`POST /sessions/:id/no-show`,
+a counsellor/staff action per `docs/Session Handling_Cancellation  Rescheduling.pdf`) —
+a student no-show alerts Admin and waits for `POST /sessions/:id/no-show/reschedule-prompt`
+(Admin-only) before the student is prompted to rebook; a counsellor no-show alerts Admin
+**and** auto-sends the student an apology/reschedule prompt immediately, no Admin gate.
+`GET /sessions?noShow=STUDENT|COUNSELLOR` filters for the operational-metric read.
+`studentRescheduleUsed` caps self-service `POST /sessions/:id/reschedule` at one
+STUDENT-initiated move per session (further requests route to Admin, same doc §1 Option
+A) — not consumed by ADMIN/COUNSELLOR-initiated reschedules, and reset on reactivation.
+Counsellor-initiated reschedule (§3) is a propose/accept/decline handshake:
+`POST /sessions/:id/reschedule-request` (counsellor proposes one alternative from their
+own open slots + a reason, doesn't move the session yet) →
+`.../reschedule-request/accept` (student performs the move, doesn't consume the
+self-service limit) or `.../reschedule-request/decline` (clears it, no auto-cancel).
+Option B — `POST /sessions/students/:studentId/restart` — cancels both sessions together
+(before Session 1 has started) so the student can rebook fresh via the normal
+booking-options/book flow, blind to a possibly-new counsellor; `bookSessions` now
+reactivates two `CANCELLED` rows in place instead of 409ing once any row exists. Email
+(configurable provider — `console` for local dev, Mailgun for real sends — with the 9
+kREATE lifecycle templates, 31 reminder/session-status templates, plus 5 no-show/
+reschedule/join templates (`SESSION_STUDENT_NO_SHOW_ADMIN`, `SESSION_COUNSELLOR_NO_SHOW_ADMIN`,
+`SESSION_COUNSELLOR_NO_SHOW_STUDENT`, `SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT`,
+`SESSION_JOINED_PARENT`) not in either source sheet; most sends are still a manual
+`POST /api/v1/email/send` call, though booking/reschedule/cancel/no-show/restart/join in
+Sessions trigger the relevant template automatically), OpenAPI/Swagger docs. **Route-level auth is now
 enforced** — `authenticate`/`requireRole` plus convenience stacks (`requireStaff`,
 `requireAdmin`, `requireStudentOrStaff`) and per-record ownership guards
 (`src/common/middlewares/ownership.ts`) are applied across every module; the parent

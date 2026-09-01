@@ -137,6 +137,12 @@ export const listSessionsQuerySchema = z.object({
   status: z.enum(["SCHEDULED", "COMPLETED", "RESCHEDULED", "CANCELLED"]).optional(),
   from: dateSchema.optional(),
   to: dateSchema.optional(),
+  // Oversight filter for the no-show operational metric (docs/Session Handling_
+  // Cancellation  Rescheduling.pdf §4 — "tracked as an operational metric, feeding back
+  // into the monthly availability review"). `STUDENT`/`COUNSELLOR` filters to sessions
+  // where that party's no-show flag is set; combine with counsellorId/from/to for a
+  // per-counsellor monthly count.
+  noShow: z.enum(["STUDENT", "COUNSELLOR"]).optional(),
 });
 export type ListSessionsQuery = z.infer<typeof listSessionsQuerySchema>;
 
@@ -151,12 +157,9 @@ export const counsellorMyStudentsQuerySchema = z.object({
 });
 export type CounsellorMyStudentsQuery = z.infer<typeof counsellorMyStudentsQuerySchema>;
 
-// --- Meeting link / join / complete / notes ---
-
-export const setMeetingLinkBodySchema = z.object({
-  meetingLink: z.string().trim().url(),
-});
-export type SetMeetingLinkBody = z.infer<typeof setMeetingLinkBodySchema>;
+// --- Join / complete / notes ---
+// No per-session meeting-link schema — each session's link is always its counsellor's
+// (Counsellor.meetingLink), resolved server-side, not set per session.
 
 export const joinSessionBodySchema = z.object({
   role: joinRoleSchema,
@@ -183,6 +186,22 @@ export const cancelSessionBodySchema = z.object({
   initiatedBy: initiatedBySchema,
 });
 export type CancelSessionBody = z.infer<typeof cancelSessionBodySchema>;
+
+// --- Counsellor-initiated reschedule ---
+
+export const requestCounsellorRescheduleBodySchema = z.object({
+  reason: z.string().trim().min(1),
+  date: dateSchema,
+  startTime: timeSchema,
+});
+export type RequestCounsellorRescheduleBody = z.infer<typeof requestCounsellorRescheduleBodySchema>;
+
+// --- No-show tracking ---
+
+export const markNoShowBodySchema = z.object({
+  party: z.enum(["STUDENT", "COUNSELLOR"]),
+});
+export type MarkNoShowBody = z.infer<typeof markNoShowBodySchema>;
 
 // --- Reminder trigger (manual — no scheduler/cron exists yet, see email module README) ---
 
