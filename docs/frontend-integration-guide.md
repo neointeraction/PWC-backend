@@ -528,9 +528,15 @@ grouped together (e.g. "favourite subject" + "why"). Either way, the **answer yo
 submit for a MATRIX question is a single JSON object** keyed by the sub-field keys
 (see 6.2).
 
-`allowOtherText: true` means the question has an "Any Other: ___" choice —
-`otherTextFieldKey` names the companion free-text field to submit alongside the
-selected option (submitted as a *separate* answer entry with that `fieldKey`).
+`allowOtherText: true` means the question (or, for `MATRIX`, one of its `options.fields`
+entries) has an "Any Other: ___" choice. The option that triggers it carries
+`isOtherOption: true` in its `options` entry. For a normal selection, `answer` is the
+plain value as usual (string, or array for `MCQ_MULTI`). Only when the `isOtherOption`
+choice is picked does `answer` need to become `{ value, other }` — `value` the same
+selected value(s) as before, `other` the free text (`otherTextFieldKey` is just a
+suggested name for that input, not a separate fieldKey to submit). If that option is
+selected and `other` is blank, the question counts as **unanswered** — it'll show up in
+`missingFieldKeys` on submit if `isRequired`.
 
 ### 7.2 Save a draft / submit answers
 
@@ -549,14 +555,19 @@ Answers are always submitted the same shape — an array of `{ fieldKey, answer 
     ```json
     { "fieldKey": "fav_subject_block", "answer": { "fav_subject": "Mathematics", "fav_subject_reason": "a" } }
     ```
+    If the student instead picks the `isOtherOption` choice for `fav_subject_reason`
+    (e.g. value `"e"`, "Any Other Reason"), that sub-field's value becomes an object:
+    ```json
+    { "fieldKey": "fav_subject_block", "answer": { "fav_subject": "Mathematics", "fav_subject_reason": { "value": "e", "other": "I like the teacher" } } }
+    ```
   - **With `rows`** (a grid, e.g. per-subject marks table): key by row `key`, each
     value itself an object keyed by field `key`.
     ```json
     {
       "fieldKey": "academic_record_table",
       "answer": {
-        "english": { "c7": "78", "c8": "82", "c9": "85", "fav": "Y", "hard": "N" },
-        "maths":   { "c7": "65", "c8": "70", "c9": "74", "fav": "N", "hard": "Y" }
+        "english": { "c7": "78", "c8": "82", "c9": "85" },
+        "maths":   { "c7": "65", "c8": "70", "c9": "74" }
       }
     }
     ```

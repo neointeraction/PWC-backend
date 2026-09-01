@@ -14,6 +14,11 @@ export interface FormQuestionSeed {
   helpText?: string;
   questionType: QuestionType;
   options?: unknown;
+  // `allowOtherText`/`otherTextFieldKey` mark a question (or, for MATRIX questions, a
+  // sub-field inside `options.fields`) as having an "Any Other: ___" choice. The option
+  // in that field's `options` list that triggers the free-text box carries
+  // `isOtherOption: true` — see forms.service.ts's isAnswerIncomplete, which requires
+  // that free text to be non-blank once that option is selected.
   allowOtherText?: boolean;
   otherTextFieldKey?: string;
   isRequired?: boolean;

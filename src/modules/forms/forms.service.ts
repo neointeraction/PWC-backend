@@ -80,6 +80,62 @@ function isAnswerEmpty(value: unknown): boolean {
   return false;
 }
 
+interface OtherTextOption {
+  value: string;
+  isOtherOption?: boolean;
+}
+
+interface MatrixFieldDef {
+  key: string;
+  allowOtherText?: boolean;
+  options?: OtherTextOption[];
+}
+
+function findOtherOptionValue(options: unknown): string | undefined {
+  if (!Array.isArray(options)) return undefined;
+  return (options as OtherTextOption[]).find((o) => o?.isOtherOption)?.value;
+}
+
+// A question with an "Any Other: ___" choice (see isOtherOption in seed-data/types.ts)
+// is answered with `{ value, other }` — this is "empty" if that option is selected but
+// the free text is blank, even though the answer object itself has keys.
+function isOtherTextMissing(value: unknown, otherOptionValue: string | undefined): boolean {
+  if (!otherOptionValue || typeof value !== "object" || value === null) return false;
+  const { value: selected, other } = value as { value?: unknown; other?: unknown };
+  const otherSelected = Array.isArray(selected) ? selected.includes(otherOptionValue) : selected === otherOptionValue;
+  if (!otherSelected) return false;
+  return typeof other !== "string" || other.trim().length === 0;
+}
+
+function isAnswerIncomplete(
+  question: { allowOtherText: boolean; questionType: string; options: unknown },
+  answer: unknown
+): boolean {
+  if (isAnswerEmpty(answer)) return true;
+
+  if (question.allowOtherText && isOtherTextMissing(answer, findOtherOptionValue(question.options))) {
+    return true;
+  }
+
+  if (question.questionType === "MATRIX" && question.options && typeof question.options === "object") {
+    const { rows, fields } = question.options as { rows?: Array<{ key: string }>; fields?: MatrixFieldDef[] };
+    const otherFields = (fields ?? []).filter((f) => f.allowOtherText);
+    if (otherFields.length > 0 && typeof answer === "object") {
+      const rowKeys = rows?.map((r) => r.key) ?? [undefined];
+      for (const rowKey of rowKeys) {
+        const rowAnswer = rowKey ? (answer as Record<string, unknown>)[rowKey] : answer;
+        if (!rowAnswer || typeof rowAnswer !== "object") continue;
+        for (const field of otherFields) {
+          const fieldAnswer = (rowAnswer as Record<string, unknown>)[field.key];
+          if (isOtherTextMissing(fieldAnswer, findOtherOptionValue(field.options))) return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 export async function getFormTemplate(formType: FormType, query: GetFormTemplateQuery) {
   return resolveTemplateOrThrow(formType, query.cohort, query.version);
 }
@@ -137,8 +193,11 @@ export async function saveFormAnswers(
 
     if (options.finalize) {
       const allAnswers = await tx.formAnswer.findMany({ where: { submissionId: submission.id } });
+      const questionsById = new Map(template.questions.map((q) => [q.id, q]));
       const answeredQuestionIds = new Set(
-        allAnswers.filter((a) => !isAnswerEmpty(a.answer)).map((a) => a.questionId)
+        allAnswers
+          .filter((a) => !isAnswerIncomplete(questionsById.get(a.questionId)!, a.answer))
+          .map((a) => a.questionId)
       );
       const missing = template.questions.filter(
         (q) => q.isRequired && !answeredQuestionIds.has(q.id)
