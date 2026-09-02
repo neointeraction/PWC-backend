@@ -125,7 +125,7 @@ stay public. So build the student UI to only ever pass the logged-in student's o
   transparently). `newPassword` must be ≥ 8 chars; wrong current / too-short / same-as-old → 400.
 - **Forgot password** — `POST /auth/forgot-password` `{ email }` → always **202** (never
   reveals whether the email exists). The user gets an email with a
-  `${APP_WEB_URL}/reset-password?token=...` link.
+  `${APP_WEB_URL}/reset-password-confirm?token=...` link.
 - **Reset** — your `/reset-password` page reads `token` from the query and calls
   `POST /auth/reset-password` `{ token, newPassword }`. 204 on success; 400 if the token is
   invalid/expired/already used. The token is single-use and expires in 1h by default.

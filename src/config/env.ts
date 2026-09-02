@@ -12,7 +12,7 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
 
   // Frontend base URL used to build user-facing links in emails (e.g. the password
-  // reset link `${APP_WEB_URL}/reset-password?token=...`).
+  // reset link `${APP_WEB_URL}/reset-password-confirm?token=...`).
   APP_WEB_URL: z.string().url().default("http://localhost:3000"),
   // How long a forgot-password reset token stays valid.
   PASSWORD_RESET_EXPIRES_IN: z.string().default("1h"),

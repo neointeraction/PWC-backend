@@ -144,7 +144,7 @@ export async function forgotPassword(email: string): Promise<{ rawToken: string 
     },
   });
 
-  const resetLink = `${env.APP_WEB_URL}/reset-password?token=${rawToken}`;
+  const resetLink = `${env.APP_WEB_URL}/reset-password-confirm?token=${rawToken}`;
   await sendTemplateEmail(user.email, "PASSWORD_RESET", {
     name: user.firstName,
     resetLink,

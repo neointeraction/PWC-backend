@@ -83,7 +83,7 @@ use. `POST /auth/logout` just sets `revokedAt` on the current row.
 ### `PasswordResetToken`
 Hashed, single-use password-reset tokens for the forgot-password flow. Written by
 `src/modules/auth/auth.service.ts` — like `RefreshToken`, only the SHA-256 `tokenHash` is
-stored; the raw token lives only in the emailed `${APP_WEB_URL}/reset-password?token=...`
+stored; the raw token lives only in the emailed `${APP_WEB_URL}/reset-password-confirm?token=...`
 link. `POST /auth/reset-password` consumes a row (sets `usedAt`); expired or already-used
 tokens are rejected. A password change or reset also revokes all of the user's
 `RefreshToken` rows.
