@@ -384,10 +384,12 @@ student:
 **`tempPassword` is shown exactly once**, in this response — there's no "forgot
 password"/resend flow yet (§2.4). Creation also sends the `LOGIN_CREDENTIALS_STUDENT`
 email (login ID + this same temp password) to the student's own email, best-effort —
-it doesn't fail the request if the send fails. There's no equivalent to the parent
-(parents have no login), and no resend endpoint yet — if both the on-screen value and
-the email are lost, someone will need to regenerate the password directly against the
-DB for now.
+it doesn't fail the request if the send fails. There's no resend endpoint yet — if both
+the on-screen value and the email are lost, someone will need to regenerate the password
+directly against the DB for now. Separately, `parentEmail` gets a `PRE_COUNSELLING_PARENT`
+email (their pre-counselling form link) at the same time, also best-effort — parents have
+no login, so this is their only prompt to fill it in until the idle-nudge reminder cycle
+(`SCHEDULER_ENABLED`) picks it up.
 
 `workflowStatus` is one of: `DRAFT`, `PROFILE_COMPLETED`,
 `PRE_COUNSELLING_FORMS_SUBMITTED`, `ASSESSMENT_PENDING`, `ASSESSMENT_COMPLETED`,
