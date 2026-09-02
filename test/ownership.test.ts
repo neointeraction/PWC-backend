@@ -40,13 +40,13 @@ describe("Ownership scoping (student self-service)", () => {
     const institute = await authRequest(app).post("/api/v1/institutes").send({
       name: "Test Institute Ownership",
       address: "1 Own St",
-      contactNumber: "+919876571001",
+      contactNumber: "+919876571101",
       primaryEmail: "ownership@test-institute.example",
     });
     const instituteId = institute.body.id;
 
     const project = await prisma.project.create({
-      data: { instituteId, name: "Test Project Ownership", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: { instituteId, code: "P-OWN", name: "Test Project Ownership", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
     });
 
     const klass = await authRequest(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 9" });

@@ -1,7 +1,6 @@
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
-import { nextCode } from "../../common/utils/codeSequence.js";
 import type { CreateProjectInput, ListProjectsQuery, UpdateProjectInput } from "./projects.schema.js";
 
 const projectInclude = {
@@ -36,25 +35,20 @@ export async function createProject(input: CreateProjectInput) {
   const languageId = await resolveLanguageId(input.languageId);
 
   try {
-    // Code generation and create share a transaction so a failed create (e.g. duplicate
-    // name) rolls back the counter increment, leaving the P-sequence gap-free.
-    return await prisma.$transaction(async (tx) => {
-      const code = await nextCode(tx, "PROJECT");
-      return tx.project.create({
-        data: {
-          code,
-          instituteId: input.instituteId,
-          name: input.name,
-          fromDate: input.fromDate,
-          toDate: input.toDate,
-          status: input.status,
-          languageId,
-        },
-        include: projectInclude,
-      });
+    return await prisma.project.create({
+      data: {
+        code: input.code,
+        instituteId: input.instituteId,
+        name: input.name,
+        fromDate: input.fromDate,
+        toDate: input.toDate,
+        status: input.status,
+        languageId,
+      },
+      include: projectInclude,
     });
   } catch (err) {
-    handlePrismaError(err); // P2002 on [instituteId, name] → 409
+    handlePrismaError(err); // P2002 on [instituteId, name] or duplicate code → 409
   }
 }
 
@@ -118,6 +112,35 @@ export async function deleteProject(id: string) {
     where: { id },
     data: { status: "DELETED" },
     include: projectInclude,
+  });
+}
+
+// Hard-delete: permanently purges the project and every row scoped to it (students, their
+// User accounts, sessions, counsellor slots, form submissions/answers, assessment attempts/
+// answers/results, counsellor charts/notes, reports, ProjectCounsellor links). Irreversible,
+// so only allowed once the project is already CLOSED (or previously soft-deleted) — distinct
+// from deleteProject() above, which must stay reversible for the "close then maybe reopen"
+// flow.
+//
+// The Student → User FK is ON DELETE CASCADE in that direction only (deleting a User cascades
+// to its Student, not the other way round), so a plain `project.delete()` would leave the
+// students' User rows orphaned. We delete those User rows explicitly first — that cascades
+// Student and everything scoped to it (sessions, form/assessment/chart/report data) — then
+// delete the Project row itself, which cascades ProjectCounsellor and any remaining counsellor
+// slots. Counsellor rows and their own User accounts are never touched: ProjectCounsellor only
+// cascades from Counsellor, not from Project.
+export async function purgeProject(id: string) {
+  const existing = await getProjectById(id); // 404 if missing
+  if (existing.status !== "CLOSED" && existing.status !== "DELETED") {
+    throw new BadRequestError("Only a CLOSED or DELETED project can be purged");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    const students = await tx.student.findMany({ where: { projectId: id }, select: { userId: true } });
+    if (students.length > 0) {
+      await tx.user.deleteMany({ where: { id: { in: students.map((s) => s.userId) } } });
+    }
+    await tx.project.delete({ where: { id } });
   });
 }
 

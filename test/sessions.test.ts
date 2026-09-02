@@ -74,6 +74,7 @@ describe("Sessions API", () => {
     const project = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-SESS",
         name: "Test Project Sessions",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
@@ -356,7 +357,7 @@ describe("Sessions API", () => {
 
     it("rejects a projectId the counsellor isn't assigned to", async () => {
       const otherProject = await prisma.project.create({
-        data: { instituteId, name: "Test Project Sessions Unassigned", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+        data: { instituteId, code: "P-SESS-UNASSIGNED", name: "Test Project Sessions Unassigned", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
       });
       const res = await authRequest(app)
         .get(`/api/v1/sessions/counsellors/${counsellorAId}/my-students`)

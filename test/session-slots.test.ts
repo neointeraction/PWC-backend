@@ -49,6 +49,7 @@ describe("Counsellor slot inventory maintenance", () => {
     const project = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-SLOTADM",
         name: "Test Project Slot Admin",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),

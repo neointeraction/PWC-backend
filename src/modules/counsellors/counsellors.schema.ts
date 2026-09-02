@@ -6,8 +6,9 @@ export const createCounsellorSchema = z.object({
   lastName: z.string().trim().min(1),
   email: emailSchema,
   mobile: phoneSchema,
-  // Auto-generated (C0001, C0002, ...) when omitted. Optional override for imports.
-  counsellorCode: z.string().trim().min(1).optional(),
+  // Admin-supplied human-readable login id (e.g. "C0001"). Required — no longer generated
+  // by the service.
+  counsellorCode: z.string().trim().min(1),
   password: z.string().min(1).optional(), // temp password from the import sheet; generated if omitted
   // Optional and informational only — counsellors are a flat, tenant-wide directory,
   // not scoped to a single institute. Project assignment (POST /counsellors/:id/projects)

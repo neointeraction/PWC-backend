@@ -43,13 +43,14 @@ describe("Projects API", () => {
   it("creates a project", async () => {
     const res = await authRequest(app).post("/api/v1/projects").send({
       instituteId,
+      code: "PCRUDA",
       name: "Test Project CRUD A",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
     expect(res.status).toBe(201);
     expect(res.body.name).toBe("Test Project CRUD A");
-    expect(res.body.code).toMatch(/^P\d{4,}$/);
+    expect(res.body.code).toBe("PCRUDA");
     expect(res.body.status).toBe("ACTIVE");
     expect(res.body.institute.id).toBe(instituteId);
     expect(res.body._count.students).toBe(0);
@@ -60,6 +61,7 @@ describe("Projects API", () => {
   it("rejects a bad date order with 400", async () => {
     const res = await authRequest(app).post("/api/v1/projects").send({
       instituteId,
+      code: "PCRUDBAD",
       name: "Test Project CRUD Bad",
       fromDate: "2026-12-31",
       toDate: "2026-01-01",
@@ -70,6 +72,7 @@ describe("Projects API", () => {
   it("rejects an unknown instituteId with 400", async () => {
     const res = await authRequest(app).post("/api/v1/projects").send({
       instituteId: "clzzzzzzzzzzzzzzzzzzzzzzzz",
+      code: "PCRUDORPHAN",
       name: "Test Project CRUD Orphan",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
@@ -80,12 +83,14 @@ describe("Projects API", () => {
   it("rejects a duplicate name within the same institute with 409", async () => {
     await authRequest(app).post("/api/v1/projects").send({
       instituteId,
+      code: "PCRUDDUP1",
       name: "Test Project CRUD Dup",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
     const res = await authRequest(app).post("/api/v1/projects").send({
       instituteId,
+      code: "PCRUDDUP2",
       name: "Test Project CRUD Dup",
       fromDate: "2026-02-01",
       toDate: "2026-11-30",
@@ -106,6 +111,7 @@ describe("Projects API", () => {
   it("gets, updates (incl. closing), and rejects a bad merged date range", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
       instituteId,
+      code: "PCRUDUPD",
       name: "Test Project CRUD Update",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
@@ -131,6 +137,7 @@ describe("Projects API", () => {
   it("soft-deletes a project, hides it from the default list, and restores it", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
       instituteId,
+      code: "PCRUDDEL",
       name: "Test Project CRUD Delete",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
@@ -163,6 +170,7 @@ describe("Projects API", () => {
   it("soft-delete works even when the project has students (data preserved, no 409)", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
       instituteId,
+      code: "PCRUDWS",
       name: "Test Project CRUD WithStudents",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
@@ -193,6 +201,93 @@ describe("Projects API", () => {
     expect(stillThere).not.toBeNull();
   });
 
+  it("rejects purging an ACTIVE project with 400, and 404s for an unknown id", async () => {
+    const created = await authRequest(app).post("/api/v1/projects").send({
+      instituteId,
+      code: "PPURGEACT",
+      name: "Test Project CRUD PurgeActive",
+      fromDate: "2026-01-01",
+      toDate: "2026-12-31",
+    });
+    const id = created.body.id;
+
+    const rejected = await authRequest(app).delete(`/api/v1/projects/${id}/purge`);
+    expect(rejected.status).toBe(400);
+    // Row untouched.
+    const stillThere = await prisma.project.findUnique({ where: { id } });
+    expect(stillThere).not.toBeNull();
+
+    const missing = await authRequest(app).delete("/api/v1/projects/clzzzzzzzzzzzzzzzzzzzzzzzz/purge");
+    expect(missing.status).toBe(404);
+  });
+
+  it("purges a CLOSED project: hard-deletes the row, its students and their User accounts, and the ProjectCounsellor link — but leaves the Counsellor and its User account intact", async () => {
+    const created = await authRequest(app).post("/api/v1/projects").send({
+      instituteId,
+      code: "PPURGE",
+      name: "Test Project CRUD Purge",
+      fromDate: "2026-01-01",
+      toDate: "2026-12-31",
+    });
+    const id = created.body.id;
+
+    const counsellor = await authRequest(app).post("/api/v1/counsellors").send({
+      firstName: "Purge",
+      lastName: "Counsellor",
+      email: "purge-counsellor@test-projects.example",
+      mobile: "+919876573020",
+      counsellorCode: "PRGC1",
+    });
+    const counsellorId = counsellor.body.counsellor.id;
+    const counsellorUserId = counsellor.body.counsellor.user?.id;
+    await authRequest(app).post(`/api/v1/counsellors/${counsellorId}/projects`).send({ projectId: id });
+
+    const student = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Purge",
+      lastName: "Student",
+      email: "purge-student@test-projects.example",
+      mobile: "+919876573021",
+      studentCode: "PRGS1",
+      projectId: id,
+      divisionId,
+      parentMobile: "+919876573022",
+      parentEmail: "purge-parent@test-projects.example",
+      fatherName: "F",
+      fatherOccupation: "Engineer",
+      motherName: "M",
+      motherOccupation: "Doctor",
+    });
+    const studentId = student.body.student.id;
+    const studentUserId = student.body.student.user?.id;
+
+    const closed = await authRequest(app).patch(`/api/v1/projects/${id}`).send({ status: "CLOSED" });
+    expect(closed.status).toBe(200);
+
+    const purged = await authRequest(app).delete(`/api/v1/projects/${id}/purge`);
+    expect(purged.status).toBe(204);
+
+    expect(await prisma.project.findUnique({ where: { id } })).toBeNull();
+    expect(await prisma.student.findUnique({ where: { id: studentId } })).toBeNull();
+    if (studentUserId) {
+      expect(await prisma.user.findUnique({ where: { id: studentUserId } })).toBeNull();
+    }
+    expect(
+      await prisma.projectCounsellor.findFirst({ where: { projectId: id, counsellorId } })
+    ).toBeNull();
+
+    // Counsellor and its own User account survive the purge.
+    expect(await prisma.counsellor.findUnique({ where: { id: counsellorId } })).not.toBeNull();
+    if (counsellorUserId) {
+      expect(await prisma.user.findUnique({ where: { id: counsellorUserId } })).not.toBeNull();
+    }
+
+    // Not found afterwards, either way (already deleted).
+    const afterPurge = await authRequest(app).get(`/api/v1/projects/${id}`);
+    expect(afterPurge.status).toBe(404);
+    const purgeAgain = await authRequest(app).delete(`/api/v1/projects/${id}/purge`);
+    expect(purgeAgain.status).toBe(404);
+  });
+
   it("enforces auth: 401 without token, 403 for a counsellor creating (admin-only)", async () => {
     const noToken = await request(app).get("/api/v1/projects");
     expect(noToken.status).toBe(401);
@@ -200,7 +295,7 @@ describe("Projects API", () => {
     const asCounsellor = await request(app)
       .post("/api/v1/projects")
       .set("Authorization", bearer("COUNSELLOR"))
-      .send({ instituteId, name: "Test Project CRUD NoPerm", fromDate: "2026-01-01", toDate: "2026-12-31" });
+      .send({ instituteId, code: "PCRUDNOPERM", name: "Test Project CRUD NoPerm", fromDate: "2026-01-01", toDate: "2026-12-31" });
     expect(asCounsellor.status).toBe(403);
   });
 });

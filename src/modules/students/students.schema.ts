@@ -14,9 +14,9 @@ export const createStudentSchema = z.object({
   email: emailSchema,
   mobile: phoneSchema,
   whatsappNumber: phoneSchema.optional(),
-  // Auto-generated (S0001, S0002, ...) when omitted. Optional override kept for
-  // migrations/imports carrying a legacy code.
-  studentCode: z.string().trim().min(1).optional(),
+  // Admin-supplied human-readable login id (e.g. "S0001"). Required — no longer generated
+  // by the service.
+  studentCode: z.string().trim().min(1),
   password: z.string().min(1).optional(), // temp password from the import sheet; generated if omitted
   projectId: z.string().cuid(),
   divisionId: z.string().cuid(),

@@ -27,6 +27,12 @@ export async function deleteProject(req: Request, res: Response): Promise<void> 
   res.status(200).json(project);
 }
 
+export async function purgeProject(req: Request, res: Response): Promise<void> {
+  // Hard delete — no body to return.
+  await projectsService.purgeProject(req.params.id as string);
+  res.status(204).send();
+}
+
 export async function restoreProject(req: Request, res: Response): Promise<void> {
   const project = await projectsService.restoreProject(req.params.id as string);
   res.status(200).json(project);

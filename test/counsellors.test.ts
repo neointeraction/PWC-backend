@@ -31,11 +31,11 @@ describe("Counsellors API", () => {
     otherInstituteId = other.body.id;
 
     const project = await prisma.project.create({
-      data: { instituteId, name: "Test Project Counsellors", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: { instituteId, code: "P-CN", name: "Test Project Counsellors", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
     });
     projectId = project.id;
     const otherProject = await prisma.project.create({
-      data: { instituteId: otherInstituteId, name: "Test Project Counsellors Other", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: { instituteId: otherInstituteId, code: "P-CN-OTHER", name: "Test Project Counsellors Other", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
     });
     otherProjectId = otherProject.id;
 
@@ -73,16 +73,15 @@ describe("Counsellors API", () => {
     expect(res.body.counsellor.projects[0].projectId).toBe(projectId);
   });
 
-  it("auto-generates a counsellorCode (C####) when none is supplied", async () => {
+  it("rejects a missing counsellorCode with 400 (no auto-generation)", async () => {
     const res = await authRequest(app).post("/api/v1/counsellors").send({
-      firstName: "Auto",
+      firstName: "NoCode",
       lastName: "Counsellor",
-      email: "auto@test-counsellor.example",
+      email: "nocode@test-counsellor.example",
       mobile: "+919876572077",
       instituteId,
     });
-    expect(res.status).toBe(201);
-    expect(res.body.counsellor.counsellorCode).toMatch(/^C\d{4,}$/);
+    expect(res.status).toBe(400);
   });
 
   it("rejects a duplicate counsellorCode with 409", async () => {

@@ -53,6 +53,7 @@ describe("Counsellor Chart API", () => {
     const project = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-CCHART",
         name: "Test Project Counsellor Chart",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),

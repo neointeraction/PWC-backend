@@ -50,6 +50,7 @@ describe("Forms submission API", () => {
     const project = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-FSUB",
         name: "Test Project Forms Submission",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
@@ -175,6 +176,7 @@ describe("Forms submission API", () => {
     const expiredProject = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-FSUB-EXP",
         name: "Test Project Forms Submission Expired",
         fromDate: new Date("2025-01-01"),
         toDate: new Date("2025-12-31"),
@@ -217,6 +219,7 @@ describe("Forms submission API", () => {
     const endsToday = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-FSUB-TODAY",
         name: "Test Project Forms Submission EndsToday",
         fromDate: new Date("2025-01-01"),
         toDate: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),

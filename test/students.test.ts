@@ -33,6 +33,7 @@ describe("Students API", () => {
     const project = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-STU",
         name: "Test Project Students",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
@@ -43,6 +44,7 @@ describe("Students API", () => {
     const otherProject = await prisma.project.create({
       data: {
         instituteId: otherInstituteId,
+        code: "P-STU-OTHER",
         name: "Test Project Students Other",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
@@ -92,21 +94,20 @@ describe("Students API", () => {
     expect(res.body.student.division.id).toBe(divisionId);
   });
 
-  it("auto-generates a studentCode (S####) when none is supplied", async () => {
+  it("rejects a missing studentCode with 400 (no auto-generation)", async () => {
     const res = await authRequest(app).post("/api/v1/students").send({
-      firstName: "Auto",
-      lastName: "Code",
-      email: "autocode@test-student.example",
+      firstName: "NoCode",
+      lastName: "Student",
+      email: "nocode@test-student.example",
       mobile: "+919876500051",
       projectId,
       divisionId,
       parentMobile: "+919876500052",
-      parentEmail: "parent-autocode@test-student.example",
+      parentEmail: "parent-nocode@test-student.example",
       fatherName: "Code Sr",
     });
 
-    expect(res.status).toBe(201);
-    expect(res.body.student.studentCode).toMatch(/^S\d{4,}$/);
+    expect(res.status).toBe(400);
   });
 
   it("lets a student fetch their own record via /students/me and confirm their profile", async () => {
@@ -115,6 +116,7 @@ describe("Students API", () => {
       lastName: "Service",
       email: "self@test-student.example",
       mobile: "+919876500061",
+      studentCode: "CB-SELF",
       projectId,
       divisionId,
       parentMobile: "+919876500062",
@@ -131,7 +133,7 @@ describe("Students API", () => {
     const me = await asStudent.get("/api/v1/students/me");
     expect(me.status).toBe(200);
     expect(me.body.id).toBe(studentId);
-    expect(me.body.studentCode).toMatch(/^S\d{4,}$/);
+    expect(me.body.studentCode).toBe("CB-SELF");
     expect(me.body.workflowStatus).toBe("DRAFT");
     // Cohort surfaced for the frontend to request the right form/assessment bank.
     expect(me.body).toHaveProperty("cohort");
@@ -148,6 +150,7 @@ describe("Students API", () => {
       lastName: "Me",
       email: "editme@test-student.example",
       mobile: "+919876500091",
+      studentCode: "CB-EDIT",
       projectId,
       divisionId,
       parentMobile: "+919876500092",
@@ -195,6 +198,7 @@ describe("Students API", () => {
       lastName: "Student",
       email: "victim@test-student.example",
       mobile: "+919876500071",
+      studentCode: "CB-VICTIM",
       projectId,
       divisionId,
       parentMobile: "+919876500072",
@@ -222,6 +226,7 @@ describe("Students API", () => {
       lastName: "Student",
       email: "idle@test-student.example",
       mobile: "+919876500081",
+      studentCode: "CB-IDLE",
       projectId,
       divisionId,
       parentMobile: "+919876500082",
@@ -322,6 +327,7 @@ describe("Students API", () => {
       lastName: "Out",
       email: "dropout@test-student.example",
       mobile: "+919876500101",
+      studentCode: "CB-DROP",
       projectId,
       divisionId,
       parentMobile: "+919876500102",

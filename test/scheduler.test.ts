@@ -55,6 +55,7 @@ describe("Scheduler jobs", () => {
     const project = await prisma.project.create({
       data: {
         instituteId: institute.id,
+        code: `P-SCHED-${suffix}`,
         name: `Sched Project ${suffix}`,
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2030-12-31"),

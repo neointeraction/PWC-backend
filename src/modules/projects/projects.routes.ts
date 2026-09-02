@@ -49,6 +49,16 @@ projectsRouter.delete(
   asyncHandler(projectsController.deleteProject)
 );
 
+// Hard-delete (irreversible) — permanently purges the project and everything scoped to it.
+// Only allowed once the project is CLOSED (or already soft-deleted). Distinct from the
+// soft DELETE above, which must stay reversible.
+projectsRouter.delete(
+  "/:id/purge",
+  ...requireAdmin,
+  validate({ params: projectIdParamsSchema }),
+  asyncHandler(projectsController.purgeProject)
+);
+
 // Restore a soft-deleted project back to ACTIVE.
 projectsRouter.patch(
   "/:id/restore",

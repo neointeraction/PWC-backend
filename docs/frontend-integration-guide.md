@@ -339,6 +339,7 @@ non-student account.
   "email": "aditi.rao@example.com",
   "mobile": "+919876500001",
   "whatsappNumber": "+919876500002",
+  "studentCode": "S0001",
   "projectId": "cm...",
   "divisionId": "cm...",
   "parentMobile": "+919876500003",
@@ -351,9 +352,9 @@ non-student account.
   "motherEmployer": "City Hospital"
 }
 ```
-`whatsappNumber`, `fatherEmployer`, `motherEmployer` are optional. `studentCode` is
-**auto-generated** (`S0001`, `S0002`, …) — omit it (pass one only to carry a legacy/import
-code). Everything else is required.
+`whatsappNumber`, `fatherEmployer`, `motherEmployer` are optional. `studentCode` (e.g.
+`S0001`) is a **required, admin-assigned** human-readable login id — it is not
+auto-generated. Everything else is required.
 
 **Create response** — note the shape is `{ student, tempPassword }`, not just the
 student:

@@ -5,7 +5,6 @@ import { prisma } from "../../config/prisma.js";
 import { env } from "../../config/env.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
-import { nextCode } from "../../common/utils/codeSequence.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import { sendTemplateEmail } from "../email/email.service.js";
 import { computeStageInfo, stageRelationsInclude, type StudentForStage } from "./studentStage.js";
@@ -85,14 +84,10 @@ export async function createStudent(input: CreateStudentInput) {
         },
       });
 
-      // Auto-generate the login code (S0001, S0002, ...) unless one is supplied
-      // explicitly (kept as an override for migrations/imports carrying legacy codes).
-      const studentCode = input.studentCode ?? (await nextCode(tx, "STUDENT"));
-
       return tx.student.create({
         data: {
           userId: user.id,
-          studentCode,
+          studentCode: input.studentCode,
           projectId: input.projectId,
           divisionId: input.divisionId,
           mobile: input.mobile,

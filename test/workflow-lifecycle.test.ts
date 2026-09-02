@@ -45,6 +45,7 @@ describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () =>
     const project = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-WFLC",
         name: "Test Project Workflow Lifecycle",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),

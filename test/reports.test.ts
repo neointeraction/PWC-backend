@@ -41,7 +41,7 @@ describe("Reports — student assessment report", () => {
       primaryEmail: "reports@test-institute.example",
     });
     const project = await prisma.project.create({
-      data: { instituteId: institute.body.id, name: "Test Project Reports", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: { instituteId: institute.body.id, code: "P-REP", name: "Test Project Reports", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
     });
     const klass = await authRequest(app).post(`/api/v1/institutes/${institute.body.id}/classes`).send({ name: "Grade 9" });
     const division = await authRequest(app)

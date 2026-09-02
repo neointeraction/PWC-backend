@@ -100,7 +100,7 @@ describe("Feedback score API", () => {
     });
     const instituteId = institute.body.id;
     const project = await prisma.project.create({
-      data: { instituteId, name: "Test Project Feedback", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: { instituteId, code: "P-FB", name: "Test Project Feedback", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
     });
     const klass = await authRequest(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 9" });
     const division = await authRequest(app)

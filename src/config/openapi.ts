@@ -371,7 +371,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/students",
   tags: ["Students"],
-  summary: "Create a student (also creates a linked User with role STUDENT). studentCode is auto-generated (S0001, S0002, ...) unless supplied. Admin only.",
+  summary: "Create a student (also creates a linked User with role STUDENT). studentCode is admin-supplied (e.g. S0001). Admin only.",
   request: { body: { content: { "application/json": { schema: createStudentSchema } } } },
   responses: {
     201: {
@@ -1065,7 +1065,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/counsellors",
   tags: ["Counsellors"],
-  summary: "Create a counsellor (creates a linked User with role COUNSELLOR + temp password). counsellorCode is auto-generated (C0001, C0002, ...) unless supplied. Optionally assign to projects. Admin only.",
+  summary: "Create a counsellor (creates a linked User with role COUNSELLOR + temp password). counsellorCode is admin-supplied (e.g. C0001). Optionally assign to projects. Admin only.",
   request: { body: { content: { "application/json": { schema: createCounsellorSchema } } } },
   responses: {
     201: { description: "Counsellor created (+ tempPassword)", content: { "application/json": { schema: genericObjectSchema } } },
@@ -1162,7 +1162,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/projects",
   tags: ["Projects"],
-  summary: "Create a project (counselling cycle for an institute). code is auto-generated (P0001, P0002, ...). Admin only.",
+  summary: "Create a project (counselling cycle for an institute). code is admin-supplied (e.g. P0001). Admin only.",
   request: { body: { content: { "application/json": { schema: createProjectSchema } } } },
   responses: {
     201: { description: "Project created", content: { "application/json": { schema: genericObjectSchema } } },
@@ -1213,6 +1213,24 @@ registry.registerPath({
   request: { params: projectIdParamsSchema },
   responses: {
     200: { description: "The soft-deleted project (status DELETED)", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/projects/{id}/purge",
+  tags: ["Projects"],
+  summary:
+    "Hard-delete a project and everything scoped to it (students, their User accounts, " +
+    "sessions, counsellor slots, form/assessment/chart/report data, ProjectCounsellor " +
+    "links) in one transaction — irreversible. Assigned Counsellor records and their User " +
+    "accounts are untouched. Only allowed once the project is CLOSED (or already " +
+    "soft-deleted). Admin only.",
+  request: { params: projectIdParamsSchema },
+  responses: {
+    204: { description: "Project and all scoped data permanently deleted" },
+    400: errorResponses[400],
     404: errorResponses[404],
   },
 });

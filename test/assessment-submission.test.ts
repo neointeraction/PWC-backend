@@ -37,6 +37,7 @@ describe("Assessment submission API", () => {
     const project = await prisma.project.create({
       data: {
         instituteId,
+        code: "P-ASUB",
         name: "Test Project Assessment Submission",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),

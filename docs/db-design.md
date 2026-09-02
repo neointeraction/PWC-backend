@@ -128,22 +128,6 @@ carry a language (see `Project`).
 | isDefault | Boolean | default false; exactly one row (English) is the default used when a project omits `languageId` |
 | displayOrder | Int | default 0; dropdown ordering |
 
-### `CodeSequence`
-Monotonic counters that back the human-readable entity codes: `Student.studentCode`
-(`S0001`), `Counsellor.counsellorCode` (`C0001`), `Project.code` (`P0001`). One row per
-entity type, keyed by `key` (`STUDENT` / `COUNSELLOR` / `PROJECT`); `value` is the last
-number issued. `nextCode()` (`src/common/utils/codeSequence.ts`) does an atomic
-row-locked increment and formats `${prefix}${zero-padded value}`. Callers pull the next
-code **inside the same `$transaction` as the entity create**, so a rolled-back create
-rolls back the increment too, keeping the sequence gap-free. The migration seeds each
-counter at the current row count. Padding is a minimum — numbers grow past it (`S10000`).
-
-| Field | Type | Notes |
-|---|---|---|
-| key | String | PK; `STUDENT` / `COUNSELLOR` / `PROJECT` |
-| value | Int | default 0; last number issued |
-| updatedAt | DateTime | auto |
-
 ### `Institute`
 The tenant. Onboarded by Super Admin.
 
@@ -168,11 +152,11 @@ A counselling cycle/cohort under an institute.
 | Field | Type | Notes |
 |---|---|---|
 | id | String (cuid) | PK |
-| code | String? | unique; auto-generated human-readable id, e.g. `P0001` (see `CodeSequence`). Nullable at the DB level (pre-code backfill / raw test fixtures), but the service always sets it on create, so API-created projects always carry one. |
+| code | String | unique; admin-supplied human-readable id, e.g. `P0001`. Required on create — the service no longer generates it. |
 | instituteId | String | FK → Institute, cascade delete |
 | name | String | unique per institute |
 | fromDate, toDate | DateTime | cohort duration |
-| status | `ProjectStatus` enum | ACTIVE / CLOSED / DELETED (DELETED = reversible soft-delete via `DELETE` + `PATCH /:id/restore`; hidden from default listings) |
+| status | `ProjectStatus` enum | ACTIVE / CLOSED / DELETED (DELETED = reversible soft-delete via `DELETE` + `PATCH /:id/restore`; hidden from default listings). A `CLOSED` or `DELETED` project can additionally be permanently purged via `DELETE /:id/purge` — see Data retention below. |
 | languageId | String? | FK → Language. Nullable at the DB level (pre-language backfill), but the service resolves the default (English) on create, so new projects always carry one. Future: admins pick another language at creation. |
 
 ### `Counsellor`
@@ -183,7 +167,7 @@ specific projects via `ProjectCounsellor`.
 |---|---|---|
 | id | String (cuid) | PK |
 | userId | String | FK → User, unique, cascade delete |
-| counsellorCode | String | unique; auto-generated login id, e.g. `C0001` (see `CodeSequence`), or a supplied legacy/import code |
+| counsellorCode | String | unique; admin-supplied login id, e.g. `C0001`. Required on create — the service no longer generates it. |
 | instituteId | String? | FK → Institute. Nullable — a counsellor can be created into an unassigned pool with no institute, and picks one up when it's first assigned to a project (`POST /counsellors/{id}/projects`, which backfills this from the project's institute) |
 | mobile | String | unique, E.164 |
 | meetingLink | String? | the counsellor's one fixed meeting room (their own Zoom/Meet room) — plain opaque string, no Calendly/Google Meet integration. Every session assigned to this counsellor shares this same link; `Session` has no link field of its own (resolve via `session.counsellor.meetingLink`). |
@@ -221,7 +205,7 @@ Extends `User` (role=STUDENT).
 |---|---|---|
 | id | String (cuid) | PK |
 | userId | String | FK → User, unique, cascade delete |
-| studentCode | String | unique; auto-generated login id, e.g. `S0001` (see `CodeSequence`), or a supplied legacy/import code |
+| studentCode | String | unique; admin-supplied login id, e.g. `S0001`. Required on create — the service no longer generates it. |
 | projectId | String | FK → Project, cascade delete |
 | divisionId | String | FK → InstituteDivision |
 | mobile | String | unique, E.164 |
@@ -745,9 +729,21 @@ now reflected in the `CounsellorSlot`/`Session` schema and the Sessions module:
 
 ## Data retention
 
-All data under a `Project` (students, forms, assessments, sessions, chart, reports) is
-purged once that project is marked `CLOSED`. Cascading deletes are wired so that
-deleting a `Project` (or a `Student` within it) cleans up everything downstream. No
-fixed retention window is modeled per-institute yet — if an institute's contract
-requires a delay before purge, that would need a `retentionDays`-style field on
-`Institute`, not yet added.
+Marking a `Project` `CLOSED` does **not** by itself purge anything — it's the soft-close
+(blocks new student/parent submissions) and is reversible via `PATCH /:id/restore` on the
+regular soft-`DELETE`. Permanent purge is a separate, explicit, irreversible action:
+`DELETE /api/v1/projects/{id}/purge` (admin only), allowed only once the project is
+already `CLOSED` or (soft-)`DELETED`. Most of the cascade is wired at the DB level (`ON
+DELETE CASCADE` on every FK back to `Project`/`Student`), but the `Student.userId` FK
+cascades in the `User → Student` direction only — deleting a `Student` row does **not**
+delete its `User` row — so the service deletes the project's students' `User` rows
+explicitly first (in the same transaction as the `Project` delete); that cascade takes
+`Student` and everything scoped to it with it — sessions, form submissions/answers,
+assessment attempts/answers/results, counsellor charts/notes, reports — and the
+subsequent `Project` delete takes `ProjectCounsellor` links and any remaining counsellor
+slots. `Counsellor` rows and their `User` accounts are untouched: `ProjectCounsellor`
+cascades from `Counsellor` (so deleting a counsellor drops their project links), not the
+reverse, so purging a project never touches the counsellors that were assigned to it. No
+fixed retention window is
+modeled per-institute yet — if an institute's contract requires a delay before purge,
+that would need a `retentionDays`-style field on `Institute`, not yet added.
