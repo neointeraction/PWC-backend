@@ -50,20 +50,20 @@ export function difficultyConsistencyPenalty(traitQuestions: AnsweredQuestion[])
   const cleanSweep = allEasyCorrect && allMediumCorrect && hardCorrect;
 
   // 1: Hard correct + all other wrong
-  if (hardCorrect && allEasyWrong && allMediumWrong) return -25;
+  if (hardCorrect && allEasyWrong && allMediumWrong) return -75;
   // 2: all Easy wrong + any Medium correct + Hard correct
-  if (allEasyWrong && anyMediumCorrect && hardCorrect) return -20;
+  if (allEasyWrong && anyMediumCorrect && hardCorrect) return -60;
   // 3: any Easy correct + all Medium wrong + Hard correct
-  if (anyEasyCorrect && allMediumWrong && hardCorrect) return -15;
+  if (anyEasyCorrect && allMediumWrong && hardCorrect) return -45;
   // 4: any Easy correct + any Medium correct + Hard correct — but NOT a clean sweep.
   // A fully-correct pattern isn't one of the 6 "statistically unusual" signatures in
   // the Construct's ✅/❌ table, so it falls through to 0. (Exact boundary of P3/P4 is
   // an open confirmation item with PWC.)
-  if (!cleanSweep && anyEasyCorrect && anyMediumCorrect && hardCorrect) return -10;
+  if (!cleanSweep && anyEasyCorrect && anyMediumCorrect && hardCorrect) return -30;
   // 5: all Easy wrong + any Medium correct + Hard wrong
-  if (allEasyWrong && anyMediumCorrect && !hardCorrect) return -15;
+  if (allEasyWrong && anyMediumCorrect && !hardCorrect) return -45;
   // 6: all Easy wrong + all Medium correct + Hard wrong
-  if (allEasyWrong && allMediumCorrect && !hardCorrect) return -15;
+  if (allEasyWrong && allMediumCorrect && !hardCorrect) return -45;
   return 0;
 }
 
@@ -93,10 +93,10 @@ function timeConsistencyPenalty(q: AnsweredQuestion): number {
   const notSure = q.response === "E";
   if (q.difficulty === "HARD") {
     // Hard answered <5s, correct or wrong, but not 'Not Sure'
-    return notSure ? 0 : -10;
+    return notSure ? 0 : -70;
   }
   // Easy & Medium answered <5s and wrong
-  return !notSure && !isCorrect(q) ? -5 : 0;
+  return !notSure && !isCorrect(q) ? -40 : 0;
 }
 
 // Returns null unless every aptitude question has a timeTakenMs value.

@@ -504,6 +504,55 @@ describe("Sessions API", () => {
       };
     }
 
+    it("locks the Session 1 booking-options preview to the existing session's counsellor when rescheduling", async () => {
+      const { studentId: freshStudentId, session1Id, altDate, time } = await bookFreshPairForNewStudent();
+
+      // A distinct, unambiguous counsellorB-only slot that a blind query would include
+      // but the counsellor-locked preview must not.
+      const counsellorBOnlyDate = addDays(altDate, 1);
+      await authRequest(app).post("/api/v1/sessions/slots").send({
+        projectId,
+        counsellorId: counsellorBId,
+        slots: [{ date: ymd(counsellorBOnlyDate), startTime: time, endTime: "11:45" }],
+      });
+
+      const res = await authRequest(app)
+        .get(`/api/v1/sessions/students/${freshStudentId}/booking-options`)
+        .query({ sessionNumber: "SESSION_1", rescheduleSessionId: session1Id });
+      expect(res.status).toBe(200);
+
+      const match = res.body.find(
+        (s: { startTime: string; slotDate: string }) => s.startTime === time && s.slotDate === formatDisplayDate(altDate)
+      );
+      expect(match).toBeDefined();
+
+      const leaked = res.body.find(
+        (s: { startTime: string; slotDate: string }) => s.startTime === time && s.slotDate === formatDisplayDate(counsellorBOnlyDate)
+      );
+      expect(leaked).toBeUndefined();
+
+      // The slot it points to actually works on submit — no 409 from a counsellor mismatch.
+      const reschedule = await authRequest(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule`)
+        .send({ date: ymd(altDate), startTime: time, initiatedBy: "STUDENT" });
+      expect(reschedule.status).toBe(200);
+    });
+
+    it("404s the Session 1 reschedule preview for a session that isn't this student's SESSION_1", async () => {
+      const a = await bookFreshPairForNewStudent();
+      const b = await bookFreshPairForNewStudent();
+
+      const wrongStudent = await authRequest(app)
+        .get(`/api/v1/sessions/students/${b.studentId}/booking-options`)
+        .query({ sessionNumber: "SESSION_1", rescheduleSessionId: a.session1Id });
+      expect(wrongStudent.status).toBe(404);
+
+      const wrongSessionNumber = await authRequest(app)
+        .get(`/api/v1/sessions/students/${a.studentId}/booking-options`)
+        .query({ sessionNumber: "SESSION_1", rescheduleSessionId: a.session2Id });
+      expect(wrongSessionNumber.status).toBe(404);
+    });
+
     it("blocks a second STUDENT-initiated reschedule, but not an ADMIN one", async () => {
       const { session1Id, altDate, time } = await bookFreshPairForNewStudent();
       const nextAlt = addDays(altDate, 20);

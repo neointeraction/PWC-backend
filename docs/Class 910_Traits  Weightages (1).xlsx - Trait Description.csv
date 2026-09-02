@@ -1,0 +1,25 @@
+Layer,Trait,Trait Name,Description,Student Quality - Pre-Counselling
+RIASEC,Realistic,Applied Thinker,"Preference for practical, hands-on activities involving tools, machines, building, fixing, or physical problem solving.",Fixing or building things with hands
+RIASEC,Investigative,Analytical Explorer,"Interest in analytical thinking, research, problem solving, scientific exploration, and understanding how things work.",Analysing and understanding complex topics
+RIASEC,Artistic,Creative Thinker,"Preference for creativity, imagination, self-expression, design, music, storytelling, or innovative thinking.","Drawing, designing or making creative things"
+RIASEC,Social,Interpersonal Mindset,"Interest in helping, teaching, guiding, supporting, and positively interacting with people.",Making friends easily and working in teams
+RIASEC,Enterprising,Ambitious Initiator,"Preference for leadership, persuasion, initiative-taking, business activities, and influencing others.",Persuading or motivating others to follow an idea
+RIASEC,Conventional,Systematic & Disciplined,"Preference for structured work, planning, organization, accuracy, routines, and systematic processes.","Organising work, notes and assignments neatly"
+Big FIVE,Openness,Intellectual Curiosity,"Willingness to explore new ideas, experiences, perspectives, creativity, and intellectual curiosity.",Coming up with original or unusual ideas
+Big FIVE,Conscientiousness,Organised Executor,"Ability to stay organized, disciplined, responsible, goal-oriented, and focused on completing tasks.",Remembering facts and details accurately
+Big FIVE,Extraversion,Outwardly Engaged,"Preference for social interaction, teamwork, communication, energy from people, and active participation.",Speaking or presenting in front of others
+Big FIVE,Agreeableness,Harmonious Orientation,"Tendency to be cooperative, empathetic, supportive, understanding, and considerate toward others.",Understanding how others feel (empathy)
+Big FIVE,Emotional Stability,Pressure Tolerance,"Ability to remain calm, resilient, emotionally balanced, and handle stress effectively.",Playing sports or physical coordination
+Aptitude,Numerical Reasoning,Computational Thinking,"Ability to understand numbers, perform calculations, interpret quantitative information, and solve mathematical problems.",Solving maths or logic problems quickly
+Aptitude,Verbal Reasoning,Textual Intelligence,"Ability to understand language, interpret written information, analyze meaning, and communicate effectively.","Writing clearly (essays, stories, descriptions)"
+Aptitude,Logical Reasoning,Deductive Reasoning,"Ability to identify patterns, apply logic, analyze relationships, and solve reasoning-based problems.",Finding patterns and solving puzzles
+Aptitude,Spatial Reasoning,Visual Thinking,"Ability to visualize objects, understand shapes, directions, dimensions, and mentally manipulate spatial information.","Visualising shapes, maps, or objects in different positions"
+Cognitive & Decision,Learning Velocity,Knowledge Agility,"Ability and willingness to learn new skills, adapt quickly, and absorb new concepts efficiently.","Using computers, gadgets or digital tools"
+Cognitive & Decision,Uncertainty Tolerance,Risk Openness,"Comfort level in dealing with ambiguity, change, risk, and situations with uncertain outcomes.",Being comfortable trying something new even when success is uncertain
+Cognitive & Decision,Autonomy Preference,Self-Direction Drive,"Preference for independent decision-making, self-direction, ownership, and working with minimal supervision.",Taking initiative without being told what to do
+,,,,
+,Measure,Trait Name,What It Measures,
+,Response Validity (RVS),Engagement Integrity Measure,How consistent your responses were - sincere and internally consistent,
+,Aptitude Reliability (ARI),Aptitude Test Coherence Index,"How logically your aptitude answers progressed, hence are you fairly competent",
+,Aptitude Confidence (ACI),Aptitude Accuracy Indicator,"How confident you were in aptitude answers, did the respondent skip a lot",
+,Overall Assessment Reliability Index (ORI),Holistic Reliability Score,"Whether your pace was psychologically normal, whether you completed in the ideal time range",

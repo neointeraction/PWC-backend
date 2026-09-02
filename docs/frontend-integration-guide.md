@@ -1224,7 +1224,7 @@ slots imported. `400` if any `counsellorId` isn't assigned to the project via
 `GET /slots?projectId=&counsellorId=&status=` — oversight list (`status`: `OPEN` |
 `BOOKED`).
 
-### 10.2 Session 1 booking options (blind)
+### 10.2 Session 1 booking options (blind — or counsellor-locked when rescheduling)
 
 `GET /students/{studentId}/booking-options?sessionNumber=SESSION_1` — deduped list of
 open `{ slotDate, startTime, endTime }` combos across the student's project. **No
@@ -1232,6 +1232,14 @@ counsellor is shown or returned** — that's the point of blind booking.
 ```json
 [{ "slotDate": "20 Aug 2026", "startTime": "16:00", "endTime": "16:45" }]
 ```
+
+Add `rescheduleSessionId={sessionId}` when this preview is driving a **reschedule** of an
+existing Session 1 (not a fresh booking) — the response locks to that session's
+already-assigned counsellor's other open slots (same filtering as §10.3, plus the
+≥2-day gap against Session 2 if it's already booked), so nothing shown in the picker can
+409 on `POST /sessions/{id}/reschedule`. `404` if the session doesn't belong to this
+student or isn't a `SESSION_1`. Omit the param for a fresh Session 1 booking — that stays
+blind.
 
 ### 10.3 Session 2 preview (locked to Session 1's counsellor)
 

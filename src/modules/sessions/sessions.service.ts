@@ -194,8 +194,34 @@ export async function listSlots(query: ListSlotsQuery) {
 
 // --- Booking-option preview (blind for Session 1, counsellor-locked for Session 2) ---
 
-export async function getSession1BookingOptions(studentId: string) {
+export async function getSession1BookingOptions(studentId: string, rescheduleSessionId?: string) {
   const student = await getStudentOrThrow(studentId);
+
+  if (rescheduleSessionId) {
+    const session = await prisma.session.findUnique({ where: { id: rescheduleSessionId } });
+    if (!session || session.studentId !== studentId || session.sessionNumber !== "SESSION_1") {
+      throw new NotFoundError("No Session 1 found for this student with that id");
+    }
+
+    const slots = await prisma.counsellorSlot.findMany({
+      where: { projectId: student.projectId, counsellorId: session.counsellorId, status: "OPEN" },
+      orderBy: [{ slotDate: "asc" }, { startTime: "asc" }],
+      select: { slotDate: true, startTime: true, endTime: true },
+    });
+
+    // Keep the ≥2-day gap against the other (non-cancelled) session, same rule
+    // rescheduleSession/assertSessionGap enforces on submit — otherwise the preview
+    // could still offer a slot that gets rejected.
+    const other = await prisma.session.findFirst({
+      where: { studentId, sessionNumber: "SESSION_2", status: { not: "CANCELLED" } },
+    });
+    if (!other) return slots;
+    const otherDateStr = other.scheduledDate.toISOString().slice(0, 10);
+    return slots.filter(
+      (s) => Math.abs(diffCalendarDays(otherDateStr, s.slotDate.toISOString().slice(0, 10))) >= MIN_SESSION_GAP_DAYS
+    );
+  }
+
   const slots = await prisma.counsellorSlot.findMany({
     where: { projectId: student.projectId, status: "OPEN" },
     distinct: ["slotDate", "startTime", "endTime"],

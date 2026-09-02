@@ -54,7 +54,7 @@ export async function getBookingOptions(req: Request, res: Response): Promise<vo
     return;
   }
 
-  const options = await sessionsService.getSession1BookingOptions(studentId);
+  const options = await sessionsService.getSession1BookingOptions(studentId, query.rescheduleSessionId);
   res.status(200).json(options);
 }
 

@@ -190,10 +190,10 @@ describe("Difficulty Consistency (DC)", () => {
     );
   }
 
-  it("penalizes 'Hard correct + all others wrong' by 25 (DC = 75)", () => {
+  it("penalizes 'Hard correct + all others wrong' by 75 (DC = 25)", () => {
     // Possibility 1 from the Construct penalty table.
     const penalty = difficultyConsistencyPenalty(pattern([false, false, false, false, true]));
-    expect(penalty).toBe(-25);
+    expect(penalty).toBe(-75);
   });
 
   it("gives no penalty for a normal easy->hard gradient", () => {
@@ -210,13 +210,13 @@ describe("Difficulty Consistency (DC)", () => {
             difficulty,
             weight,
             correctOption: "A",
-            // Only the hard question correct -> possibility 1 -> DC 75 for every trait.
+            // Only the hard question correct -> possibility 1 -> DC 25 for every trait.
             response: i === 4 ? "A" : "B",
           })
         )
       ),
     ];
-    expect(computeDifficultyConsistency(answers).dc).toBe(75);
+    expect(computeDifficultyConsistency(answers).dc).toBe(25);
   });
 });
 
