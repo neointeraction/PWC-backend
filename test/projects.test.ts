@@ -6,9 +6,6 @@ import { authRequest, bearer } from "./helpers/http.js";
 
 const app = createApp();
 
-let instituteId: string;
-let divisionId: string;
-
 describe("Projects API", () => {
   beforeAll(async () => {
     // Project creation resolves the default language (English); ensure it exists.
@@ -17,42 +14,31 @@ describe("Projects API", () => {
       update: { isDefault: true, isActive: true },
       create: { code: "en", name: "English", isDefault: true, displayOrder: 1 },
     });
-
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Projects",
-      address: "1 Proj St",
-      contactNumber: "+919876573001",
-      primaryEmail: "projects@test-institute.example",
-    });
-    instituteId = institute.body.id;
-
-    const klass = await authRequest(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 9" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "A" });
-    divisionId = division.body.id;
   });
 
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { contains: "@test-projects.example" } } });
     await prisma.project.deleteMany({ where: { name: { startsWith: "Test Project CRUD" } } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute Projects" } });
     await prisma.$disconnect();
   });
 
   it("creates a project", async () => {
     const res = await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PCRUDA",
       name: "Test Project CRUD A",
+      address: "1 Proj St",
+      contactNumber: "+919876573101",
+      primaryEmail: "proja@test-projects.example",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
     expect(res.status).toBe(201);
     expect(res.body.name).toBe("Test Project CRUD A");
     expect(res.body.code).toBe("PCRUDA");
+    expect(res.body.address).toBe("1 Proj St");
+    expect(res.body.contactNumber).toBe("+919876573101");
+    expect(res.body.primaryEmail).toBe("proja@test-projects.example");
     expect(res.body.status).toBe("ACTIVE");
-    expect(res.body.institute.id).toBe(instituteId);
     expect(res.body._count.students).toBe(0);
     // Defaults to English when no languageId is supplied.
     expect(res.body.language.code).toBe("en");
@@ -60,46 +46,80 @@ describe("Projects API", () => {
 
   it("rejects a bad date order with 400", async () => {
     const res = await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PCRUDBAD",
       name: "Test Project CRUD Bad",
+      contactNumber: "+919876573102",
+      primaryEmail: "projbad@test-projects.example",
       fromDate: "2026-12-31",
       toDate: "2026-01-01",
     });
     expect(res.status).toBe(400);
   });
 
-  it("rejects an unknown instituteId with 400", async () => {
+  it("rejects an invalid phone number with 400", async () => {
     const res = await authRequest(app).post("/api/v1/projects").send({
-      instituteId: "clzzzzzzzzzzzzzzzzzzzzzzzz",
-      code: "PCRUDORPHAN",
-      name: "Test Project CRUD Orphan",
+      code: "PCRUDPHONE",
+      name: "Test Project CRUD BadPhone",
+      contactNumber: "not-a-phone",
+      primaryEmail: "projphone@test-projects.example",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
     expect(res.status).toBe(400);
   });
 
-  it("rejects a duplicate name within the same institute with 409", async () => {
+  it("rejects a duplicate name with 409", async () => {
     await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PCRUDDUP1",
       name: "Test Project CRUD Dup",
+      contactNumber: "+919876573103",
+      primaryEmail: "projdup1@test-projects.example",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
     const res = await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PCRUDDUP2",
       name: "Test Project CRUD Dup",
+      contactNumber: "+919876573104",
+      primaryEmail: "projdup2@test-projects.example",
       fromDate: "2026-02-01",
       toDate: "2026-11-30",
     });
     expect(res.status).toBe(409);
   });
 
+  it("rejects a duplicate contactNumber or primaryEmail with 409", async () => {
+    await authRequest(app).post("/api/v1/projects").send({
+      code: "PCRUDUNIQ1",
+      name: "Test Project CRUD Uniq1",
+      contactNumber: "+919876573105",
+      primaryEmail: "projuniq1@test-projects.example",
+      fromDate: "2026-01-01",
+      toDate: "2026-12-31",
+    });
+    const dupPhone = await authRequest(app).post("/api/v1/projects").send({
+      code: "PCRUDUNIQ2",
+      name: "Test Project CRUD Uniq2",
+      contactNumber: "+919876573105",
+      primaryEmail: "projuniq2@test-projects.example",
+      fromDate: "2026-01-01",
+      toDate: "2026-12-31",
+    });
+    expect(dupPhone.status).toBe(409);
+
+    const dupEmail = await authRequest(app).post("/api/v1/projects").send({
+      code: "PCRUDUNIQ3",
+      name: "Test Project CRUD Uniq3",
+      contactNumber: "+919876573106",
+      primaryEmail: "projuniq1@test-projects.example",
+      fromDate: "2026-01-01",
+      toDate: "2026-12-31",
+    });
+    expect(dupEmail.status).toBe(409);
+  });
+
   it("lists projects, filterable by status", async () => {
-    const all = await authRequest(app).get("/api/v1/projects").query({ instituteId });
+    const all = await authRequest(app).get("/api/v1/projects");
     expect(all.status).toBe(200);
     expect(all.body.length).toBeGreaterThan(0);
 
@@ -110,9 +130,10 @@ describe("Projects API", () => {
 
   it("gets, updates (incl. closing), and rejects a bad merged date range", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PCRUDUPD",
       name: "Test Project CRUD Update",
+      contactNumber: "+919876573107",
+      primaryEmail: "projupd@test-projects.example",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
@@ -136,9 +157,10 @@ describe("Projects API", () => {
 
   it("soft-deletes a project, hides it from the default list, and restores it", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PCRUDDEL",
       name: "Test Project CRUD Delete",
+      contactNumber: "+919876573108",
+      primaryEmail: "projdel@test-projects.example",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
@@ -153,9 +175,9 @@ describe("Projects API", () => {
     expect(got.body.status).toBe("DELETED");
 
     // Default list excludes it; status=DELETED lists only soft-deleted.
-    const defaultList = await authRequest(app).get("/api/v1/projects").query({ instituteId });
+    const defaultList = await authRequest(app).get("/api/v1/projects");
     expect(defaultList.body.some((p: { id: string }) => p.id === id)).toBe(false);
-    const deletedList = await authRequest(app).get("/api/v1/projects").query({ instituteId, status: "DELETED" });
+    const deletedList = await authRequest(app).get("/api/v1/projects").query({ status: "DELETED" });
     expect(deletedList.body.some((p: { id: string }) => p.id === id)).toBe(true);
     expect(deletedList.body.every((p: { status: string }) => p.status === "DELETED")).toBe(true);
 
@@ -163,15 +185,16 @@ describe("Projects API", () => {
     const restored = await authRequest(app).patch(`/api/v1/projects/${id}/restore`);
     expect(restored.status).toBe(200);
     expect(restored.body.status).toBe("ACTIVE");
-    const afterRestore = await authRequest(app).get("/api/v1/projects").query({ instituteId });
+    const afterRestore = await authRequest(app).get("/api/v1/projects");
     expect(afterRestore.body.some((p: { id: string }) => p.id === id)).toBe(true);
   });
 
   it("soft-delete works even when the project has students (data preserved, no 409)", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PCRUDWS",
       name: "Test Project CRUD WithStudents",
+      contactNumber: "+919876573109",
+      primaryEmail: "projws@test-projects.example",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
@@ -184,7 +207,8 @@ describe("Projects API", () => {
       mobile: "+919876573010",
       studentCode: "PRJ1",
       projectId: id,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876573011",
       parentEmail: "parent-proj@test-projects.example",
       fatherName: "F",
@@ -203,9 +227,10 @@ describe("Projects API", () => {
 
   it("rejects purging an ACTIVE project with 400, and 404s for an unknown id", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PPURGEACT",
       name: "Test Project CRUD PurgeActive",
+      contactNumber: "+919876573110",
+      primaryEmail: "projpurgeact@test-projects.example",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
@@ -223,9 +248,10 @@ describe("Projects API", () => {
 
   it("purges a CLOSED project: hard-deletes the row, its students and their User accounts, and the ProjectCounsellor link — but leaves the Counsellor and its User account intact", async () => {
     const created = await authRequest(app).post("/api/v1/projects").send({
-      instituteId,
       code: "PPURGE",
       name: "Test Project CRUD Purge",
+      contactNumber: "+919876573111",
+      primaryEmail: "projpurge@test-projects.example",
       fromDate: "2026-01-01",
       toDate: "2026-12-31",
     });
@@ -249,7 +275,8 @@ describe("Projects API", () => {
       mobile: "+919876573021",
       studentCode: "PRGS1",
       projectId: id,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876573022",
       parentEmail: "purge-parent@test-projects.example",
       fatherName: "F",
@@ -295,7 +322,14 @@ describe("Projects API", () => {
     const asCounsellor = await request(app)
       .post("/api/v1/projects")
       .set("Authorization", bearer("COUNSELLOR"))
-      .send({ instituteId, code: "PCRUDNOPERM", name: "Test Project CRUD NoPerm", fromDate: "2026-01-01", toDate: "2026-12-31" });
+      .send({
+        code: "PCRUDNOPERM",
+        name: "Test Project CRUD NoPerm",
+        contactNumber: "+919876573112",
+        primaryEmail: "projnoperm@test-projects.example",
+        fromDate: "2026-01-01",
+        toDate: "2026-12-31",
+      });
     expect(asCounsellor.status).toBe(403);
   });
 });

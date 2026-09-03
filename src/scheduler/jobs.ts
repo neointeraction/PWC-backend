@@ -89,20 +89,15 @@ type NudgePlan = { student: EmailTemplateKey; parent: EmailTemplateKey };
 // Maps a flagged student's derived stage → the student+parent reminder templates. This is
 // product copy routing; adjust here if the desired template for a stage changes. Returns
 // null for stages that shouldn't be nudged.
-function resolveNudgeTemplates(
-  stage: DerivedStage,
-  reason: FlagReason | null,
-  mustChangePassword: boolean
-): NudgePlan | null {
+function resolveNudgeTemplates(stage: DerivedStage, reason: FlagReason | null): NudgePlan | null {
   if (reason === "MISSED_SESSION") {
     return { student: "SESSION_MISSED_STUDENT", parent: "SESSION_MISSED_PARENT" };
   }
   switch (stage) {
-    case "LOGIN_ACTIVATED":
-      // Not logged in yet vs logged in but profile not confirmed.
-      return mustChangePassword
-        ? { student: "LOGIN_ACTIVATION_REMINDER_STUDENT", parent: "LOGIN_ACTIVATION_REMINDER_PARENT" }
-        : { student: "PROFILE_COMPLETION_REMINDER_STUDENT", parent: "PROFILE_COMPLETION_REMINDER_PARENT" };
+    case "INVITED": // not logged in yet
+      return { student: "LOGIN_ACTIVATION_REMINDER_STUDENT", parent: "LOGIN_ACTIVATION_REMINDER_PARENT" };
+    case "LOGIN_ACTIVATED": // logged in, profile not confirmed
+      return { student: "PROFILE_COMPLETION_REMINDER_STUDENT", parent: "PROFILE_COMPLETION_REMINDER_PARENT" };
     case "PROFILE_COMPLETED": // profile done, both pre-counselling forms pending
       return { student: "PRE_COUNSELLING_STUDENT_FORM_REMINDER_STUDENT", parent: "PRE_COUNSELLING_PARENT_FORM_REMINDER_PARENT" };
     case "PRE_COUNSELLING_STUDENT": // student's form in, parent's pending
@@ -135,7 +130,7 @@ export async function runFollowUpNudges(
       ...(scope.projectId ? { projectId: scope.projectId } : {}),
     },
     include: {
-      user: { select: { firstName: true, lastName: true, email: true, mustChangePassword: true } },
+      user: { select: { firstName: true, lastName: true, email: true, passwordChangedAt: true } },
       ...stageRelationsInclude,
     },
   });
@@ -147,7 +142,7 @@ export async function runFollowUpNudges(
     // Cooldown: don't re-nudge within the throttle window.
     if (s.lastNudgeAt && calendarDaysBetween(s.lastNudgeAt, now) < cooldownDays) continue;
 
-    const plan = resolveNudgeTemplates(info.stage, info.flagReason, s.user.mustChangePassword);
+    const plan = resolveNudgeTemplates(info.stage, info.flagReason);
     if (!plan) continue;
 
     // Missed-session copy wants the session date; find the offending session.

@@ -7,7 +7,6 @@ import { runSessionDayReminders, runFollowUpNudges } from "../src/scheduler/jobs
 // Everything is created in one dedicated project so the jobs can be scoped to it and never
 // touch data from other test files (they scan globally in production).
 let projectId: string;
-let divisionId: string;
 let counsellorId: string;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const suffix = Date.now().toString().slice(-6);
@@ -31,7 +30,8 @@ async function makeStudent(opts: {
       userId: user.id,
       studentCode: `SCHED-${opts.key}-${suffix}`,
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       mobile: `+9199${suffix}${opts.key.charCodeAt(0)}`.slice(0, 13),
       parentMobile: `+9188${suffix}${opts.key.charCodeAt(0)}`.slice(0, 13),
       parentEmail: `sched-${opts.key}-parent-${suffix}@test-scheduler.example`,
@@ -44,27 +44,18 @@ async function makeStudent(opts: {
 
 describe("Scheduler jobs", () => {
   beforeAll(async () => {
-    const institute = await prisma.institute.create({
+    const project = await prisma.project.create({
       data: {
-        name: `Sched Institute ${suffix}`,
+        code: `P-SCHED-${suffix}`,
+        name: `Sched Project ${suffix}`,
         address: "1 St",
         contactNumber: `+9177${suffix}0`,
         primaryEmail: `sched-inst-${suffix}@test-scheduler.example`,
-      },
-    });
-    const project = await prisma.project.create({
-      data: {
-        instituteId: institute.id,
-        code: `P-SCHED-${suffix}`,
-        name: `Sched Project ${suffix}`,
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2030-12-31"),
       },
     });
     projectId = project.id;
-    const klass = await prisma.instituteClass.create({ data: { name: "9", instituteId: institute.id } });
-    const division = await prisma.instituteDivision.create({ data: { name: "A", classId: klass.id } });
-    divisionId = division.id;
 
     const counsellorUser = await prisma.user.create({
       data: {
@@ -79,7 +70,6 @@ describe("Scheduler jobs", () => {
       data: {
         userId: counsellorUser.id,
         counsellorCode: `SCHED-CN-${suffix}`,
-        instituteId: institute.id,
         mobile: `+9166${suffix}0`,
       },
     });
@@ -91,7 +81,6 @@ describe("Scheduler jobs", () => {
     await prisma.session.deleteMany({ where: { counsellorId } });
     await prisma.user.deleteMany({ where: { email: { contains: "@test-scheduler.example" } } });
     await prisma.project.deleteMany({ where: { name: { startsWith: "Sched Project" } } });
-    await prisma.institute.deleteMany({ where: { name: { startsWith: "Sched Institute" } } });
     await prisma.$disconnect();
   });
 

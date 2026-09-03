@@ -21,20 +21,19 @@ function addMinutes(date: Date, minutes: number): Date {
   return new Date(date.getTime() + minutes * 60_000);
 }
 
-let instituteId: string;
 let projectId: string;
-let divisionId: string;
 let counsellorAId: string;
 let counsellorBId: string;
 let studentId: string;
 
-async function cleanupInstitute(name: string): Promise<void> {
-  const inst = await prisma.institute.findUnique({ where: { name } });
-  if (!inst) return;
-  const projects = await prisma.project.findMany({ where: { instituteId: inst.id } });
+async function cleanupProjectTree(namePrefix: string): Promise<void> {
+  const projects = await prisma.project.findMany({ where: { name: { startsWith: namePrefix } } });
   const projectIds = projects.map((p) => p.id);
+  if (projectIds.length === 0) return;
   const students = await prisma.student.findMany({ where: { projectId: { in: projectIds } } });
-  const counsellors = await prisma.counsellor.findMany({ where: { instituteId: inst.id } });
+  const counsellors = await prisma.counsellor.findMany({
+    where: { projects: { some: { projectId: { in: projectIds } } } },
+  });
   const userIds = [...students.map((s) => s.userId), ...counsellors.map((c) => c.userId)];
 
   await prisma.session.deleteMany({ where: { studentId: { in: students.map((s) => s.id) } } });
@@ -44,7 +43,6 @@ async function cleanupInstitute(name: string): Promise<void> {
   await prisma.counsellor.deleteMany({ where: { id: { in: counsellors.map((c) => c.id) } } });
   await prisma.project.deleteMany({ where: { id: { in: projectIds } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
-  await prisma.institute.delete({ where: { id: inst.id } });
 }
 
 // Anchor "now" to a fixed minute boundary so slot start/end times stay predictable.
@@ -61,34 +59,20 @@ const session2End = addMinutes(session2Start, 45);
 
 describe("Sessions API", () => {
   beforeAll(async () => {
-    await cleanupInstitute("Test Institute Sessions");
-
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Sessions",
-      address: "1 Session St",
-      contactNumber: "+919876570001",
-      primaryEmail: "sessions@test-institute.example",
-    });
-    instituteId = institute.body.id;
+    await cleanupProjectTree("Test Project Sessions");
 
     const project = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-SESS",
         name: "Test Project Sessions",
+        address: "1 Session St",
+        contactNumber: "+919876570001",
+        primaryEmail: "sessions@test-project.example",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
       },
     });
     projectId = project.id;
-
-    const klass = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes`)
-      .send({ name: "Grade 9" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "A" });
-    divisionId = division.body.id;
 
     const passwordHash = await argon2.hash("temp-password");
 
@@ -96,7 +80,7 @@ describe("Sessions API", () => {
       data: { email: "counsellor-a@test.example", passwordHash, role: "COUNSELLOR", firstName: "Asha", lastName: "Rao" },
     });
     const counsellorA = await prisma.counsellor.create({
-      data: { userId: counsellorAUser.id, counsellorCode: "CN-SESS-A", instituteId, mobile: "+919876570002" },
+      data: { userId: counsellorAUser.id, counsellorCode: "CN-SESS-A", mobile: "+919876570002" },
     });
     counsellorAId = counsellorA.id;
 
@@ -104,7 +88,7 @@ describe("Sessions API", () => {
       data: { email: "counsellor-b@test.example", passwordHash, role: "COUNSELLOR", firstName: "Bala", lastName: "Iyer" },
     });
     const counsellorB = await prisma.counsellor.create({
-      data: { userId: counsellorBUser.id, counsellorCode: "CN-SESS-B", instituteId, mobile: "+919876570003" },
+      data: { userId: counsellorBUser.id, counsellorCode: "CN-SESS-B", mobile: "+919876570003" },
     });
     counsellorBId = counsellorB.id;
 
@@ -123,7 +107,8 @@ describe("Sessions API", () => {
         userId: studentUser.id,
         studentCode: "SESS-1",
         projectId,
-        divisionId,
+        className: "Grade 9",
+        divisionName: "A",
         mobile: "+919876570004",
         parentMobile: "+919876570005",
         parentEmail: "parent-sessions@test.example",
@@ -138,7 +123,7 @@ describe("Sessions API", () => {
   });
 
   afterAll(async () => {
-    await cleanupInstitute("Test Institute Sessions");
+    await cleanupProjectTree("Test Project Sessions");
     await prisma.$disconnect();
   });
 
@@ -181,7 +166,9 @@ describe("Sessions API", () => {
     const session1Option = res.body.find((s: { startTime: string }) => s.startTime === hm(session1Start));
     expect(session1Option).toBeDefined();
     // slotDate is now rendered in the generic display format ("01 Aug 2026"), not ISO.
-    expect(session1Option.slotDate).toMatch(/^\d{2} [A-Z][a-z]{2} \d{4}$/);
+    // en-GB short month is usually 3 letters (e.g. "Aug") but ICU renders September as
+    // "Sept" (4 letters) — accept either so this doesn't flake depending on the month.
+    expect(session1Option.slotDate).toMatch(/^\d{2} [A-Z][a-z]{2,3} \d{4}$/);
   });
 
   it("previews Session 2 options locked to Session 1's would-be counsellor", async () => {
@@ -238,7 +225,8 @@ describe("Sessions API", () => {
         userId: otherUser.id,
         studentCode: "SESS-2",
         projectId,
-        divisionId,
+        className: "Grade 9",
+        divisionName: "A",
         mobile: "+919876570006",
         parentMobile: "+919876570007",
         parentEmail: "parent-sessions-2@test.example",
@@ -357,7 +345,7 @@ describe("Sessions API", () => {
 
     it("rejects a projectId the counsellor isn't assigned to", async () => {
       const otherProject = await prisma.project.create({
-        data: { instituteId, code: "P-SESS-UNASSIGNED", name: "Test Project Sessions Unassigned", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+        data: { code: "P-SESS-UNASSIGNED", name: "Test Project Sessions Unassigned", address: "", contactNumber: "+919876570099", primaryEmail: "sessions-unassigned@test-project.example", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
       });
       const res = await authRequest(app)
         .get(`/api/v1/sessions/counsellors/${counsellorAId}/my-students`)
@@ -453,7 +441,8 @@ describe("Sessions API", () => {
           userId: user.id,
           studentCode: `SESS-RESCHED-${fixtureCounter}`,
           projectId,
-          divisionId,
+          className: "Grade 9",
+        divisionName: "A",
           mobile: `+91987659${(1000 + fixtureCounter).toString().padStart(4, "0")}`,
           parentMobile: `+91987660${(1000 + fixtureCounter).toString().padStart(4, "0")}`,
           parentEmail: `parent-resched-${fixtureCounter}@test.example`,
@@ -703,7 +692,8 @@ describe("Sessions API", () => {
           userId: user.id,
           studentCode: `SESS-NOSHOW-${noShowFixtureCounter}`,
           projectId,
-          divisionId,
+          className: "Grade 9",
+        divisionName: "A",
           mobile: `+91987657${(1000 + noShowFixtureCounter).toString().padStart(4, "0")}`,
           parentMobile: `+91987658${(1000 + noShowFixtureCounter).toString().padStart(4, "0")}`,
           parentEmail: `parent-noshow-${noShowFixtureCounter}@test.example`,
@@ -820,7 +810,8 @@ describe("Sessions API", () => {
           userId: orphanUser.id,
           studentCode: "SESS-ORPHAN",
           projectId,
-          divisionId,
+          className: "Grade 9",
+        divisionName: "A",
           mobile: "+919876570008",
           parentMobile: "+919876570009",
           parentEmail: "parent-orphan@test.example",

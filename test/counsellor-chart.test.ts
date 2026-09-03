@@ -43,28 +43,17 @@ describe("SCRI band computation", () => {
 
 describe("Counsellor Chart API", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Counsellor Chart",
-      address: "9 Chart Rd",
-      contactNumber: "+919555000001",
-      primaryEmail: `institute${SUFFIX}`,
-    });
-    const instituteId = institute.body.id;
     const project = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-CCHART",
         name: "Test Project Counsellor Chart",
+        address: "9 Chart Rd",
+        contactNumber: "+919555000001",
+        primaryEmail: `institute${SUFFIX}`,
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
       },
     });
-    const klass = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes`)
-      .send({ name: "Grade 10" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "B" });
     const student = await authRequest(app).post("/api/v1/students").send({
       firstName: "Meera",
       lastName: "Nair",
@@ -72,7 +61,8 @@ describe("Counsellor Chart API", () => {
       mobile: "+919555000002",
       studentCode: "CC1",
       projectId: project.id,
-      divisionId: division.body.id,
+      className: "Grade 10",
+      divisionName: "B",
       parentMobile: "+919555000003",
       parentEmail: `parent-meera${SUFFIX}`,
       fatherName: "Nair Sr",
@@ -100,7 +90,6 @@ describe("Counsellor Chart API", () => {
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { contains: SUFFIX } } });
     await prisma.project.deleteMany({ where: { name: "Test Project Counsellor Chart" } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute Counsellor Chart" } });
     await prisma.$disconnect();
   });
 

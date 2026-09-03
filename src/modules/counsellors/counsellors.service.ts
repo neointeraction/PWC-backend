@@ -12,7 +12,6 @@ import type {
 
 const counsellorInclude = {
   user: { select: { id: true, email: true, firstName: true, lastName: true, isActive: true } },
-  institute: { select: { id: true, name: true } },
   projects: {
     select: { projectId: true, project: { select: { id: true, name: true } } },
   },
@@ -23,7 +22,7 @@ function generateTempPassword(): string {
 }
 
 // Ensures every project in `projectIds` exists. Counsellors are a flat, tenant-wide
-// directory (not institute-scoped), so a project's institute is irrelevant here.
+// directory, so this is the only project-existence check needed.
 async function assertProjectsExist(projectIds: string[]) {
   if (projectIds.length === 0) return;
   const projects = await prisma.project.findMany({
@@ -37,12 +36,6 @@ async function assertProjectsExist(projectIds: string[]) {
 
 export async function createCounsellor(input: CreateCounsellorInput) {
   const projectIds = input.projectIds ?? [];
-  if (input.instituteId) {
-    const institute = await prisma.institute.findUnique({ where: { id: input.instituteId } });
-    if (!institute) {
-      throw new BadRequestError("instituteId does not exist");
-    }
-  }
   await assertProjectsExist(projectIds);
 
   // Import sheets may carry the temp password; otherwise generate one. mustChangePassword
@@ -66,7 +59,6 @@ export async function createCounsellor(input: CreateCounsellorInput) {
         data: {
           userId: user.id,
           counsellorCode: input.counsellorCode,
-          instituteId: input.instituteId,
           mobile: input.mobile,
           meetingLink: input.meetingLink,
           projects: projectIds.length > 0 ? { create: projectIds.map((projectId) => ({ projectId })) } : undefined,
@@ -84,7 +76,6 @@ export async function createCounsellor(input: CreateCounsellorInput) {
 export async function listCounsellors(query: ListCounsellorsQuery) {
   return prisma.counsellor.findMany({
     where: {
-      instituteId: query.instituteId,
       projects: query.projectId ? { some: { projectId: query.projectId } } : undefined,
     },
     include: counsellorInclude,
@@ -167,8 +158,8 @@ export async function assignProject(id: string, input: AssignProjectBody) {
   }
 
   try {
-    // Counsellors are tenant-wide, not institute-scoped: the same counsellor can be
-    // assigned to any number of projects/institutes concurrently.
+    // Counsellors are tenant-wide: the same counsellor can be assigned to any number of
+    // projects concurrently.
     await prisma.projectCounsellor.create({
       data: { counsellorId: id, projectId: input.projectId },
     });

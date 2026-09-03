@@ -10,30 +10,38 @@ const COHORT = "CLASS_9_10";
 // other suite is covered with an admin token via authRequest). No DB writes here.
 describe("Auth enforcement", () => {
   it("401s a protected route with no token", async () => {
-    const res = await request(app).get("/api/v1/institutes");
+    const res = await request(app).get("/api/v1/projects");
     expect(res.status).toBe(401);
   });
 
   it("401s a protected route with a malformed/invalid token", async () => {
-    const res = await request(app).get("/api/v1/institutes").set("Authorization", "Bearer not-a-jwt");
+    const res = await request(app).get("/api/v1/projects").set("Authorization", "Bearer not-a-jwt");
     expect(res.status).toBe(401);
   });
 
   it("403s when the role is insufficient (STUDENT hitting a staff route)", async () => {
-    const res = await request(app).get("/api/v1/institutes").set("Authorization", bearer("STUDENT"));
+    const res = await request(app).get("/api/v1/projects").set("Authorization", bearer("STUDENT"));
     expect(res.status).toBe(403);
   });
 
-  it("403s when a COUNSELLOR hits an admin-only route (create institute)", async () => {
+  it("403s when a COUNSELLOR hits an admin-only route (create project)", async () => {
     const res = await request(app)
-      .post("/api/v1/institutes")
+      .post("/api/v1/projects")
       .set("Authorization", bearer("COUNSELLOR"))
-      .send({ name: "X", address: "Y", contactNumber: "+919000000000", primaryEmail: "x@example.test" });
+      .send({
+        code: "X",
+        name: "X",
+        address: "Y",
+        contactNumber: "+919000000000",
+        primaryEmail: "x@example.test",
+        fromDate: "2026-01-01",
+        toDate: "2026-12-31",
+      });
     expect(res.status).toBe(403); // 403, not a validation 400 — guard runs before the body is processed
   });
 
   it("allows a staff role through a staff route", async () => {
-    const res = await request(app).get("/api/v1/institutes").set("Authorization", bearer("COUNSELLOR"));
+    const res = await request(app).get("/api/v1/projects").set("Authorization", bearer("COUNSELLOR"));
     expect(res.status).toBe(200);
   });
 

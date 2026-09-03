@@ -6,52 +6,42 @@ import { authRequest, bearer } from "./helpers/http.js";
 
 const app = createApp();
 
-let instituteId: string;
-let otherInstituteId: string;
 let projectId: string;
 let otherProjectId: string;
-let divisionId: string;
 
 describe("Counsellors API", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Counsellors",
-      address: "1 CN St",
-      contactNumber: "+919876572001",
-      primaryEmail: "counsellors@test-institute.example",
-    });
-    instituteId = institute.body.id;
-
-    const other = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Counsellors Other",
-      address: "2 CN St",
-      contactNumber: "+919876572002",
-      primaryEmail: "counsellors-other@test-institute.example",
-    });
-    otherInstituteId = other.body.id;
-
     const project = await prisma.project.create({
-      data: { instituteId, code: "P-CN", name: "Test Project Counsellors", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: {
+        code: "P-CN",
+        name: "Test Project Counsellors",
+        address: "1 CN St",
+        contactNumber: "+919876572001",
+        primaryEmail: "counsellors@test-project.example",
+        fromDate: new Date("2026-01-01"),
+        toDate: new Date("2026-12-31"),
+      },
     });
     projectId = project.id;
     const otherProject = await prisma.project.create({
-      data: { instituteId: otherInstituteId, code: "P-CN-OTHER", name: "Test Project Counsellors Other", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: {
+        code: "P-CN-OTHER",
+        name: "Test Project Counsellors Other",
+        address: "2 CN St",
+        contactNumber: "+919876572002",
+        primaryEmail: "counsellors-other@test-project.example",
+        fromDate: new Date("2026-01-01"),
+        toDate: new Date("2026-12-31"),
+      },
     });
     otherProjectId = otherProject.id;
-
-    const klass = await authRequest(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 9" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "A" });
-    divisionId = division.body.id;
   });
 
   afterAll(async () => {
     // Sessions RESTRICT the counsellor delete cascade — remove the directly-inserted one first.
-    await prisma.session.deleteMany({ where: { counsellor: { institute: { name: { startsWith: "Test Institute Counsellors" } } } } });
+    await prisma.session.deleteMany({ where: { student: { project: { name: { startsWith: "Test Project Counsellors" } } } } });
     await prisma.user.deleteMany({ where: { email: { contains: "@test-counsellor.example" } } });
     await prisma.project.deleteMany({ where: { name: { startsWith: "Test Project Counsellors" } } });
-    await prisma.institute.deleteMany({ where: { name: { startsWith: "Test Institute Counsellors" } } });
     await prisma.$disconnect();
   });
 
@@ -62,13 +52,11 @@ describe("Counsellors API", () => {
       email: "cyrus@test-counsellor.example",
       mobile: "+919876572010",
       counsellorCode: "CN1",
-      instituteId,
       projectIds: [projectId],
     });
     expect(res.status).toBe(201);
     expect(res.body.tempPassword).toBeTypeOf("string");
     expect(res.body.counsellor.user).toMatchObject({ email: "cyrus@test-counsellor.example" });
-    expect(res.body.counsellor.institute.id).toBe(instituteId);
     expect(res.body.counsellor.projects).toHaveLength(1);
     expect(res.body.counsellor.projects[0].projectId).toBe(projectId);
   });
@@ -79,7 +67,6 @@ describe("Counsellors API", () => {
       lastName: "Counsellor",
       email: "nocode@test-counsellor.example",
       mobile: "+919876572077",
-      instituteId,
     });
     expect(res.status).toBe(400);
   });
@@ -91,12 +78,11 @@ describe("Counsellors API", () => {
       email: "dupcode@test-counsellor.example",
       mobile: "+919876572011",
       counsellorCode: "CN1", // same as above
-      instituteId,
     });
     expect(res.status).toBe(409);
   });
 
-  it("creates a counsellor with no instituteId (unassigned pool) and assigns it to projects across institutes", async () => {
+  it("assigns a newly created counsellor to projects across projects freely (counsellors are tenant-wide)", async () => {
     const res = await authRequest(app).post("/api/v1/counsellors").send({
       firstName: "Pool",
       lastName: "Counsellor",
@@ -105,16 +91,12 @@ describe("Counsellors API", () => {
       counsellorCode: "CN-POOL",
     });
     expect(res.status).toBe(201);
-    expect(res.body.counsellor.institute).toBeNull();
     const id = res.body.counsellor.id;
 
     const assign = await authRequest(app).post(`/api/v1/counsellors/${id}/projects`).send({ projectId });
     expect(assign.status).toBe(200);
-    // instituteId is informational only and is never backfilled by assignment.
-    expect(assign.body.institute).toBeNull();
 
-    // Counsellors are tenant-wide, not institute-scoped: assignment to a project under a
-    // different institute succeeds too, and both assignments coexist.
+    // Assignment to a different project succeeds too, and both assignments coexist.
     const otherAssign = await authRequest(app).post(`/api/v1/counsellors/${id}/projects`).send({ projectId: otherProjectId });
     expect(otherAssign.status).toBe(200);
     expect(otherAssign.body.projects.map((p: { projectId: string }) => p.projectId).sort()).toEqual(
@@ -122,7 +104,7 @@ describe("Counsellors API", () => {
     );
   });
 
-  it("allows projectIds on creation without instituteId", async () => {
+  it("allows projectIds on creation", async () => {
     const res = await authRequest(app).post("/api/v1/counsellors").send({
       firstName: "Bad",
       lastName: "NoInstitute",
@@ -134,21 +116,8 @@ describe("Counsellors API", () => {
     expect(res.status).toBe(201);
   });
 
-  it("allows a projectId from a different institute than instituteId on creation", async () => {
-    const res = await authRequest(app).post("/api/v1/counsellors").send({
-      firstName: "Bad",
-      lastName: "Project",
-      email: "badproject@test-counsellor.example",
-      mobile: "+919876572012",
-      counsellorCode: "CN2",
-      instituteId,
-      projectIds: [otherProjectId],
-    });
-    expect(res.status).toBe(201);
-  });
-
   it("lists counsellors, filterable by project", async () => {
-    const all = await authRequest(app).get("/api/v1/counsellors").query({ instituteId });
+    const all = await authRequest(app).get("/api/v1/counsellors");
     expect(all.status).toBe(200);
     expect(all.body.length).toBeGreaterThan(0);
 
@@ -164,7 +133,6 @@ describe("Counsellors API", () => {
       email: "uma@test-counsellor.example",
       mobile: "+919876572013",
       counsellorCode: "CN3",
-      instituteId,
     });
     const id = created.body.counsellor.id;
 
@@ -189,7 +157,6 @@ describe("Counsellors API", () => {
       email: "assign@test-counsellor.example",
       mobile: "+919876572014",
       counsellorCode: "CN4",
-      instituteId,
     });
     const id = created.body.counsellor.id;
 
@@ -215,7 +182,6 @@ describe("Counsellors API", () => {
       email: "deleteme@test-counsellor.example",
       mobile: "+919876572015",
       counsellorCode: "CN5",
-      instituteId,
     });
     const id = created.body.counsellor.id;
 
@@ -233,7 +199,6 @@ describe("Counsellors API", () => {
       email: "busy@test-counsellor.example",
       mobile: "+919876572016",
       counsellorCode: "CN6",
-      instituteId,
     });
     const id = created.body.counsellor.id;
 
@@ -245,7 +210,8 @@ describe("Counsellors API", () => {
       mobile: "+919876572017",
       studentCode: "CNS1",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876572018",
       parentEmail: "parent-sess@test-counsellor.example",
       fatherName: "F",
@@ -276,7 +242,6 @@ describe("Counsellors API", () => {
       email: "linkbearer@test-counsellor.example",
       mobile: "+919876572060",
       counsellorCode: "CN-LINK",
-      instituteId,
       meetingLink: "https://meet.example.com/link-bearer",
     });
     expect(created.status).toBe(201);
@@ -301,7 +266,6 @@ describe("Counsellors API", () => {
       email: "selfservice@test-counsellor.example",
       mobile: "+919876572050",
       counsellorCode: "CN-ME",
-      instituteId,
     });
     const userId = created.body.counsellor.user.id;
 
@@ -327,7 +291,7 @@ describe("Counsellors API", () => {
     const asCounsellor = await request(app)
       .post("/api/v1/counsellors")
       .set("Authorization", bearer("COUNSELLOR"))
-      .send({ firstName: "X", lastName: "Y", email: "x@test-counsellor.example", mobile: "+919876572030", counsellorCode: "CN9", instituteId });
+      .send({ firstName: "X", lastName: "Y", email: "x@test-counsellor.example", mobile: "+919876572030", counsellorCode: "CN9" });
     expect(asCounsellor.status).toBe(403);
   });
 });

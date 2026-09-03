@@ -2,7 +2,7 @@ import { z } from "zod";
 import { workflowStatusSchema } from "../students/students.schema.js";
 
 // "HH:mm", 24h — matches CounsellorSlot/Session.startTime/endTime.
-const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Time must be in HH:mm 24h format");
+export const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Time must be in HH:mm 24h format");
 
 // Accepts either machine form "YYYY-MM-DD" or the display form "01 Aug 2026" that responses
 // now emit (so a slot picked from a booking-options response can be sent straight back), and
@@ -11,7 +11,7 @@ const MONTHS: Record<string, string> = {
   jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
   jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
 };
-const dateSchema = z
+export const dateSchema = z
   .string()
   .trim()
   .transform((val, ctx) => {
@@ -135,7 +135,6 @@ export type CreateSessionBody = z.infer<typeof createSessionBodySchema>;
 
 export const listSessionsQuerySchema = z.object({
   projectId: z.string().cuid().optional(),
-  instituteId: z.string().cuid().optional(),
   studentId: z.string().cuid().optional(),
   counsellorId: z.string().cuid().optional(),
   status: z.enum(["SCHEDULED", "COMPLETED", "RESCHEDULED", "CANCELLED"]).optional(),

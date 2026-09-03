@@ -11,46 +11,43 @@ import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
 
-const INSTITUTE = "Test Institute Slot Admin";
+const PROJECT_NAME_PREFIX = "Test Project Slot Admin";
 
-let instituteId: string;
 let projectId: string;
 let counsellorAId: string; // in the original import
 let counsellorBId: string; // assigned to the project later
 let counsellorOutsiderId: string; // never assigned to the project
 
-async function cleanupInstitute(name: string): Promise<void> {
-  const inst = await prisma.institute.findUnique({ where: { name } });
-  if (!inst) return;
-  const projects = await prisma.project.findMany({ where: { instituteId: inst.id } });
+async function cleanupProjectTree(namePrefix: string): Promise<void> {
+  const projects = await prisma.project.findMany({ where: { name: { startsWith: namePrefix } } });
   const projectIds = projects.map((p) => p.id);
-  const counsellors = await prisma.counsellor.findMany({ where: { instituteId: inst.id } });
+  const counsellors = await prisma.counsellor.findMany({
+    where: {
+      OR: [
+        { projects: { some: { projectId: { in: projectIds } } } },
+        { user: { email: { contains: "counsellor-slot-" } } },
+      ],
+    },
+  });
 
   await prisma.counsellorSlot.deleteMany({ where: { projectId: { in: projectIds } } });
   await prisma.projectCounsellor.deleteMany({ where: { projectId: { in: projectIds } } });
   await prisma.counsellor.deleteMany({ where: { id: { in: counsellors.map((c) => c.id) } } });
   await prisma.project.deleteMany({ where: { id: { in: projectIds } } });
   await prisma.user.deleteMany({ where: { id: { in: counsellors.map((c) => c.userId) } } });
-  await prisma.institute.delete({ where: { id: inst.id } });
 }
 
 describe("Counsellor slot inventory maintenance", () => {
   beforeAll(async () => {
-    await cleanupInstitute(INSTITUTE);
-
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: INSTITUTE,
-      address: "9 Slot Rd",
-      contactNumber: "+919876571001",
-      primaryEmail: "slots@test-institute.example",
-    });
-    instituteId = institute.body.id;
+    await cleanupProjectTree(PROJECT_NAME_PREFIX);
 
     const project = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-SLOTADM",
-        name: "Test Project Slot Admin",
+        name: PROJECT_NAME_PREFIX,
+        address: "9 Slot Rd",
+        contactNumber: "+919876571001",
+        primaryEmail: "slots@test-project.example",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
       },
@@ -63,7 +60,7 @@ describe("Counsellor slot inventory maintenance", () => {
         data: { email, passwordHash, role: "COUNSELLOR", firstName: "Slot", lastName: code },
       });
       const counsellor = await prisma.counsellor.create({
-        data: { userId: user.id, counsellorCode: code, instituteId, mobile },
+        data: { userId: user.id, counsellorCode: code, mobile },
       });
       return counsellor.id;
     };
@@ -84,7 +81,7 @@ describe("Counsellor slot inventory maintenance", () => {
   });
 
   afterAll(async () => {
-    await cleanupInstitute(INSTITUTE);
+    await cleanupProjectTree(PROJECT_NAME_PREFIX);
     await prisma.$disconnect();
   });
 

@@ -5,6 +5,7 @@ import { requireStaff, requireAdmin } from "../../common/middlewares/auth.js";
 import * as projectsController from "./projects.controller.js";
 import {
   createProjectSchema,
+  createProjectWizardSchema,
   listProjectsQuerySchema,
   projectIdParamsSchema,
   updateProjectSchema,
@@ -12,12 +13,21 @@ import {
 
 export const projectsRouter = Router();
 
-// Reads = staff; writes/management = admin. Mirrors the students/institutes/counsellors split.
+// Reads = staff; writes/management = admin. Mirrors the students/counsellors split.
 projectsRouter.post(
   "/",
   ...requireAdmin,
   validate({ body: createProjectSchema }),
   asyncHandler(projectsController.createProject)
+);
+
+// Combined "Finish" call for the create-project wizard: project + student roster +
+// counsellor-availability import, all in one transaction. See projects.schema.ts.
+projectsRouter.post(
+  "/wizard",
+  ...requireAdmin,
+  validate({ body: createProjectWizardSchema }),
+  asyncHandler(projectsController.createProjectWizard)
 );
 
 projectsRouter.get(

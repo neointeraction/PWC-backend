@@ -15,7 +15,7 @@ import {
 export const counsellorsRouter = Router();
 
 // Reads = staff (counsellor + admin); writes/management = admin (create/edit/delete,
-// project assignment). Mirrors the students/institutes access split.
+// project assignment). Mirrors the students access split.
 counsellorsRouter.post(
   "/",
   ...requireAdmin,

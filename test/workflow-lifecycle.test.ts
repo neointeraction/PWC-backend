@@ -35,26 +35,17 @@ async function submitFeedback(id: string, formType: string): Promise<void> {
 
 describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Workflow Lifecycle",
-      address: "12 Lifecycle Ln",
-      contactNumber: "+919557000001",
-      primaryEmail: `institute${SUFFIX}`,
-    });
-    const instituteId = institute.body.id;
     const project = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-WFLC",
         name: "Test Project Workflow Lifecycle",
+        address: "12 Lifecycle Ln",
+        contactNumber: "+919557000001",
+        primaryEmail: `institute${SUFFIX}`,
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
       },
     });
-    const klass = await authRequest(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 10" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "W" });
 
     // A student with a scored assessment (so the report endpoint resolves), plus their
     // own STUDENT token — ownership compares the token's `sub` to Student.userId.
@@ -62,7 +53,7 @@ describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () =>
       const res = await authRequest(app).post("/api/v1/students").send({
         firstName: "Wf", lastName: `Student${n}`, email: `student${n}${SUFFIX}`,
         mobile: `+91955700010${n}`, studentCode: `WF${n}`, projectId: project.id,
-        divisionId: division.body.id, parentMobile: `+91955700020${n}`, parentEmail: `parent${n}${SUFFIX}`,
+        className: "Grade 10", divisionName: "W", parentMobile: `+91955700020${n}`, parentEmail: `parent${n}${SUFFIX}`,
         fatherName: "F", fatherOccupation: "Eng", motherName: "M", motherOccupation: "Dr",
       });
       const id = res.body.student.id as string;
@@ -92,7 +83,6 @@ describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () =>
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { contains: SUFFIX } } });
     await prisma.project.deleteMany({ where: { name: "Test Project Workflow Lifecycle" } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute Workflow Lifecycle" } });
     await prisma.$disconnect();
   });
 

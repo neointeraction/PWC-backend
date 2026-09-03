@@ -33,9 +33,7 @@ export async function assembleChart(studentId: string) {
     where: { id: studentId },
     include: {
       user: { select: { firstName: true, lastName: true, email: true } },
-      division: {
-        include: { class: { include: { institute: { select: { name: true, address: true } } } } },
-      },
+      project: { select: { name: true, address: true } },
     },
   });
   if (!student) {
@@ -58,10 +56,10 @@ export async function assembleChart(studentId: string) {
   const ourChampion = {
     name: `${student.user.firstName} ${student.user.lastName}`.trim(),
     currentAcademicYear: student.academicYear,
-    institute: student.division.class.institute.name,
-    instituteLocation: student.division.class.institute.address,
-    class: student.division.class.name,
-    division: student.division.name,
+    institute: student.project?.name ?? null,
+    instituteLocation: student.project?.address ?? null,
+    class: student.className,
+    division: student.divisionName,
     fatherName: student.fatherName,
     fatherOccupationCompany: [student.fatherOccupation, student.fatherEmployer]
       .filter(Boolean)

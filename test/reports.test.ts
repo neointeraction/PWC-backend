@@ -13,7 +13,7 @@ let studentBId: string;
 
 interface Q { fieldKey: string; format: string; options: { value: string }[] | null }
 
-async function makeStudent(suffix: string, mobile: string, parentMobile: string, projectId: string, divisionId: string) {
+async function makeStudent(suffix: string, mobile: string, parentMobile: string, projectId: string) {
   const res = await authRequest(app).post("/api/v1/students").send({
     firstName: "Rep",
     lastName: suffix,
@@ -21,7 +21,8 @@ async function makeStudent(suffix: string, mobile: string, parentMobile: string,
     mobile,
     studentCode: `REP${suffix}`,
     projectId,
-    divisionId,
+    className: "Grade 9",
+    divisionName: "A",
     parentMobile,
     parentEmail: `parent-${suffix}@test-reports.example`,
     fatherName: "F",
@@ -34,22 +35,20 @@ async function makeStudent(suffix: string, mobile: string, parentMobile: string,
 
 describe("Reports — student assessment report", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Reports",
-      address: "1 Rep St",
-      contactNumber: "+919876575001",
-      primaryEmail: "reports@test-institute.example",
-    });
     const project = await prisma.project.create({
-      data: { instituteId: institute.body.id, code: "P-REP", name: "Test Project Reports", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: {
+        code: "P-REP",
+        name: "Test Project Reports",
+        address: "1 Rep St",
+        contactNumber: "+919876575001",
+        primaryEmail: "reports@test-project.example",
+        fromDate: new Date("2026-01-01"),
+        toDate: new Date("2026-12-31"),
+      },
     });
-    const klass = await authRequest(app).post(`/api/v1/institutes/${institute.body.id}/classes`).send({ name: "Grade 9" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${institute.body.id}/classes/${klass.body.id}/divisions`)
-      .send({ name: "A" });
 
-    studentAId = await makeStudent("A", "+919876575002", "+919876575003", project.id, division.body.id);
-    studentBId = await makeStudent("B", "+919876575004", "+919876575005", project.id, division.body.id);
+    studentAId = await makeStudent("A", "+919876575002", "+919876575003", project.id);
+    studentBId = await makeStudent("B", "+919876575004", "+919876575005", project.id);
 
     const rowA = await prisma.student.findUnique({ where: { id: studentAId }, select: { userId: true } });
     studentAToken = bearer("STUDENT", { userId: rowA!.userId });
@@ -65,7 +64,6 @@ describe("Reports — student assessment report", () => {
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { contains: "@test-reports.example" } } });
     await prisma.project.deleteMany({ where: { name: "Test Project Reports" } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute Reports" } });
     await prisma.$disconnect();
   });
 
@@ -74,7 +72,7 @@ describe("Reports — student assessment report", () => {
     expect(res.status).toBe(200);
     const b = res.body;
     expect(b.student.name).toBe("Rep A");
-    expect(b.student.institute).toBe("Test Institute Reports");
+    expect(b.student.institute).toBe("Test Project Reports");
     expect(b.championProfile.dominantCareerStyle.code).toHaveLength(3);
     expect(b.championProfile.dominantPersonalityStyle.code).toContain("-");
     expect(b.traitMap.riasec.scores).toHaveLength(6);

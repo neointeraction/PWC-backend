@@ -8,8 +8,7 @@ const app = createApp();
 const COHORT = "CLASS_9_10";
 
 let studentId: string;
-let instituteId: string;
-let divisionId: string;
+let projectId: string;
 
 interface TemplateQuestion {
   fieldKey: string;
@@ -39,31 +38,18 @@ function buildAnswer(question: TemplateQuestion): unknown {
 
 describe("Forms submission API", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Forms Submission",
-      address: "1 Form St",
-      contactNumber: "+919876550001",
-      primaryEmail: "forms-submission@test-institute.example",
-    });
-    instituteId = institute.body.id;
-
     const project = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-FSUB",
         name: "Test Project Forms Submission",
+        address: "1 Form St",
+        contactNumber: "+919876550001",
+        primaryEmail: "forms-submission@test-project.example",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
       },
     });
-
-    const klass = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes`)
-      .send({ name: "Grade 9" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "A" });
-    divisionId = division.body.id;
+    projectId = project.id;
 
     const student = await authRequest(app).post("/api/v1/students").send({
       firstName: "Priya",
@@ -72,7 +58,8 @@ describe("Forms submission API", () => {
       mobile: "+919876550002",
       studentCode: "FSUB1",
       projectId: project.id,
-      divisionId: division.body.id,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876550003",
       parentEmail: "parent-priya@test-form-submission.example",
       fatherName: "Menon Sr",
@@ -85,8 +72,7 @@ describe("Forms submission API", () => {
 
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { contains: "@test-form-submission.example" } } });
-    await prisma.project.deleteMany({ where: { name: "Test Project Forms Submission" } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute Forms Submission" } });
+    await prisma.project.deleteMany({ where: { name: { startsWith: "Test Project Forms Submission" } } });
     await prisma.$disconnect();
   });
 
@@ -175,9 +161,11 @@ describe("Forms submission API", () => {
     // A student whose project ended yesterday — the no-login link must be closed.
     const expiredProject = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-FSUB-EXP",
         name: "Test Project Forms Submission Expired",
+        address: "",
+        contactNumber: "+919876550008",
+        primaryEmail: "forms-submission-expired@test-project.example",
         fromDate: new Date("2025-01-01"),
         toDate: new Date("2025-12-31"),
       },
@@ -189,7 +177,8 @@ describe("Forms submission API", () => {
       mobile: "+919876550009",
       studentCode: "FSUBEXP",
       projectId: expiredProject.id,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876550010",
       parentEmail: "parent-old@test-form-submission.example",
       fatherName: "Cohort Sr",
@@ -218,9 +207,11 @@ describe("Forms submission API", () => {
     const now = new Date();
     const endsToday = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-FSUB-TODAY",
         name: "Test Project Forms Submission EndsToday",
+        address: "",
+        contactNumber: "+919876550013",
+        primaryEmail: "forms-submission-endstoday@test-project.example",
         fromDate: new Date("2025-01-01"),
         toDate: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),
       },
@@ -232,7 +223,8 @@ describe("Forms submission API", () => {
       mobile: "+919876550011",
       studentCode: "FSUBTODAY",
       projectId: endsToday.id,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876550012",
       parentEmail: "parent-today@test-form-submission.example",
       fatherName: "Today Sr",

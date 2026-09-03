@@ -7,13 +7,10 @@ this doc whenever the schema changes meaningfully.
 ## Entity overview
 
 ```
-Institute (tenant)
- ├─ InstituteClass ─ InstituteDivision ─┐
- ├─ Counsellor ── ProjectCounsellor ─┐  │
- └─ Project (counselling cycle)     │  │
-       ├─ Student ─────────────────┴──┘
-       ├─ CounsellorSlot
-       └─ ProjectCounsellor
+Project (counselling cycle — IS the institute; no separate Institute entity)
+ ├─ Student
+ ├─ CounsellorSlot
+ └─ ProjectCounsellor ── Counsellor
 
 Student
  ├─ User (1:1, role=STUDENT)
@@ -30,20 +27,24 @@ Counsellor
  └─ Session (as the assigned counsellor)
 ```
 
-## Why `Project` sits between `Institute` and `Student`
+## `Project` is the institute
 
-An `Institute` is the permanent tenant record (a school). A `Project` is one dated
-counselling cohort/cycle run for that institute (e.g. "2026 Batch, Class 9–10"), with
-its own student roster and its own assigned counsellors. Closing a `Project`
-(`status = CLOSED`) is the data-retention/purge boundary described in the functional
-spec — everything hanging off a `Student` (forms, assessment, sessions, chart, reports)
-is scoped to that student's single `Project`, so purging a closed project purges its
-full downstream graph via cascading deletes.
+There used to be a separate `Institute` tenant model (a permanent school record) that a
+`Project` (one dated counselling cohort/cycle, e.g. "2026 Batch, Class 9–10") belonged to.
+That layer was removed — `Project` now carries the institute's own identity fields
+directly (`name`, `address`, `contactNumber`, `primaryEmail`, all unique per project), so
+there's no institute-level entity above it. Each project is both the tenant record and the
+dated cohort in one row.
 
-A `Student` therefore belongs to exactly one `Project`, not directly to an `Institute` —
-the institute is reached via `Student → Project → Institute`. Class/division structure
-(`InstituteClass` / `InstituteDivision`) is a property of the institute itself, not the
-project, since the same class/division taxonomy is reused across an institute's cohorts.
+Closing a `Project` (`status = CLOSED`) is still the data-retention/purge boundary
+described in the functional spec — everything hanging off a `Student` (forms, assessment,
+sessions, chart, reports) is scoped to that student's single `Project`, so purging a
+closed project purges its full downstream graph via cascading deletes.
+
+A `Student` belongs to exactly one `Project`. Class/division is no longer a shared,
+institute-owned taxonomy — `Student.className`/`Student.divisionName` are plain free-text
+fields entered per student, since there's no institute-level lookup for them to reference
+anymore.
 
 ## Tables
 
@@ -62,6 +63,7 @@ the base user yet).
 | isActive | Boolean | default true |
 | mustChangePassword | Boolean | default true; forces reset on first login (Student and Counsellor both get admin-generated temp passwords) |
 | lastLoginAt | DateTime? | null until the first successful password login; set on every `POST /auth/login` (token refreshes don't touch it). Backs the admin list's "Last Active" column |
+| passwordChangedAt | DateTime? | null until this user first changes their password via `POST /auth/change-password` or a reset-password confirm (both clear `mustChangePassword` at the same time). For students, distinguishes the derived `INVITED` (null) vs `LOGIN_ACTIVATED` (non-null) stage — see `studentStage.ts` — without a new `workflowStatus` value |
 | createdAt, updatedAt | DateTime | |
 
 ### `RefreshToken`
@@ -128,47 +130,31 @@ carry a language (see `Project`).
 | isDefault | Boolean | default false; exactly one row (English) is the default used when a project omits `languageId` |
 | displayOrder | Int | default 0; dropdown ordering |
 
-### `Institute`
-The tenant. Onboarded by Super Admin.
-
-| Field | Type | Notes |
-|---|---|---|
-| id | String (cuid) | PK |
-| name | String | unique |
-| address | String | |
-| contactNumber | String | unique, E.164 |
-| primaryEmail | String | unique |
-
-### `InstituteClass` / `InstituteDivision`
-Institute-defined class/division taxonomy (e.g. "Grade 10" → "A", "B"). Free text,
-institute-scoped, not a global enum.
-
-`InstituteClass`: `id, name, instituteId (FK, cascade)`, unique on `(instituteId, name)`.
-`InstituteDivision`: `id, name, classId (FK, cascade)`, unique on `(classId, name)`.
-
 ### `Project`
-A counselling cycle/cohort under an institute.
+A counselling cycle/cohort — **is** the institute (there's no separate Institute entity;
+these fields used to live there).
 
 | Field | Type | Notes |
 |---|---|---|
 | id | String (cuid) | PK |
 | code | String | unique; admin-supplied human-readable id, e.g. `P0001`. Required on create — the service no longer generates it. |
-| instituteId | String | FK → Institute, cascade delete |
-| name | String | unique per institute |
+| name | String | unique (globally — no more per-institute scoping, since there's no institute above it) |
+| address | String | not-null; stored as `""` when omitted on create |
+| contactNumber | String | unique, E.164 |
+| primaryEmail | String | unique |
 | fromDate, toDate | DateTime | cohort duration |
 | status | `ProjectStatus` enum | ACTIVE / CLOSED / DELETED (DELETED = reversible soft-delete via `DELETE` + `PATCH /:id/restore`; hidden from default listings). A `CLOSED` or `DELETED` project can additionally be permanently purged via `DELETE /:id/purge` — see Data retention below. |
 | languageId | String? | FK → Language. Nullable at the DB level (pre-language backfill), but the service resolves the default (English) on create, so new projects always carry one. Future: admins pick another language at creation. |
 
 ### `Counsellor`
-Extends `User` (role=COUNSELLOR). Belongs to at most one institute; assigned to
-specific projects via `ProjectCounsellor`.
+Extends `User` (role=COUNSELLOR). A flat, tenant-wide directory; assigned to specific
+projects via `ProjectCounsellor`.
 
 | Field | Type | Notes |
 |---|---|---|
 | id | String (cuid) | PK |
 | userId | String | FK → User, unique, cascade delete |
 | counsellorCode | String | unique; admin-supplied login id, e.g. `C0001`. Required on create — the service no longer generates it. |
-| instituteId | String? | FK → Institute. Nullable — a counsellor can be created into an unassigned pool with no institute, and picks one up when it's first assigned to a project (`POST /counsellors/{id}/projects`, which backfills this from the project's institute) |
 | mobile | String | unique, E.164 |
 | meetingLink | String? | the counsellor's one fixed meeting room (their own Zoom/Meet room) — plain opaque string, no Calendly/Google Meet integration. Every session assigned to this counsellor shares this same link; `Session` has no link field of its own (resolve via `session.counsellor.meetingLink`). |
 
@@ -207,7 +193,8 @@ Extends `User` (role=STUDENT).
 | userId | String | FK → User, unique, cascade delete |
 | studentCode | String | unique; admin-supplied login id, e.g. `S0001`. Required on create — the service no longer generates it. |
 | projectId | String | FK → Project, cascade delete |
-| divisionId | String | FK → InstituteDivision |
+| className | String | free text (e.g. "Grade 10") — no institute-owned lookup, entered per student |
+| divisionName | String | free text (e.g. "A") — same, no lookup |
 | mobile | String | unique, E.164 |
 | whatsappNumber | String? | optional, only if different from mobile |
 | parentMobile | String | unique, E.164; primary contact for session links/notifications (Student Profile Form, Section A) |
@@ -745,5 +732,5 @@ slots. `Counsellor` rows and their `User` accounts are untouched: `ProjectCounse
 cascades from `Counsellor` (so deleting a counsellor drops their project links), not the
 reverse, so purging a project never touches the counsellors that were assigned to it. No
 fixed retention window is
-modeled per-institute yet — if an institute's contract requires a delay before purge,
-that would need a `retentionDays`-style field on `Institute`, not yet added.
+modeled per-project yet — if an institute's contract requires a delay before purge,
+that would need a `retentionDays`-style field on `Project`, not yet added.

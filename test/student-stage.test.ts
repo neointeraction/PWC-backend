@@ -21,6 +21,7 @@ function student(overrides: Partial<StudentForStage>): StudentForStage {
     formSubmissions: [],
     assessmentAttempts: [],
     sessions: [],
+    user: { passwordChangedAt: null },
     ...overrides,
   };
 }
@@ -35,8 +36,24 @@ describe("computeStageInfo — ageing & flags", () => {
     expect(AGEING_FLAG_THRESHOLD_DAYS).toBe(2);
   });
 
-  it("DRAFT → Login Activated, aged from createdAt", () => {
+  it("DRAFT with no login yet → Invited, aged from createdAt", () => {
     const info = computeStageInfo(student({ workflowStatus: "DRAFT", createdAt: daysAgo(5) }), NOW);
+    expect(info.stage).toBe("INVITED");
+    expect(info.stageLabel).toBe("Invited");
+    expect(info.ageDays).toBe(5);
+    expect(info.flagged).toBe(true);
+    expect(info.flagReason).toBe("IDLE");
+  });
+
+  it("DRAFT after password change → Login Activated, aged from passwordChangedAt", () => {
+    const info = computeStageInfo(
+      student({
+        workflowStatus: "DRAFT",
+        createdAt: daysAgo(10),
+        user: { passwordChangedAt: daysAgo(5) },
+      }),
+      NOW
+    );
     expect(info.stage).toBe("LOGIN_ACTIVATED");
     expect(info.stageLabel).toBe("Login Activated");
     expect(info.ageDays).toBe(5);

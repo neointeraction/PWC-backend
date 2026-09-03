@@ -8,7 +8,7 @@ const viewOnly = bearer("VIEW_ONLY_ADMIN");
 
 describe("VIEW_ONLY_ADMIN — read everything, write nothing", () => {
   it("can READ the staff/admin views", async () => {
-    for (const path of ["/api/v1/institutes", "/api/v1/projects", "/api/v1/counsellors", "/api/v1/cohorts", "/api/v1/career-library/filters"]) {
+    for (const path of ["/api/v1/projects", "/api/v1/counsellors", "/api/v1/cohorts", "/api/v1/career-library/filters"]) {
       const res = await request(app).get(path).set("Authorization", viewOnly);
       expect(res.status, `GET ${path}`).toBe(200);
     }
@@ -16,9 +16,17 @@ describe("VIEW_ONLY_ADMIN — read everything, write nothing", () => {
 
   it("is BLOCKED (403) on every write, before the route runs", async () => {
     const post = await request(app)
-      .post("/api/v1/institutes")
+      .post("/api/v1/projects")
       .set("Authorization", viewOnly)
-      .send({ name: "X", address: "Y", contactNumber: "+919000000001", primaryEmail: "vo@example.test" });
+      .send({
+        code: "VO1",
+        name: "X",
+        address: "Y",
+        contactNumber: "+919000000001",
+        primaryEmail: "vo@example.test",
+        fromDate: "2026-01-01",
+        toDate: "2026-12-31",
+      });
     expect(post.status).toBe(403);
     expect(post.body.error.message).toMatch(/view-only/i);
 
@@ -53,7 +61,7 @@ describe("VIEW_ONLY_ADMIN — read everything, write nothing", () => {
   });
 
   it("still requires a valid token (no token → 401, not a silent pass)", async () => {
-    const res = await request(app).get("/api/v1/institutes");
+    const res = await request(app).get("/api/v1/projects");
     expect(res.status).toBe(401);
   });
 });

@@ -14,7 +14,7 @@ let studentAToken: string; // Bearer for student A's own user
 let studentBId: string;
 let studentBToken: string;
 
-async function makeStudent(suffix: string, mobile: string, parentMobile: string, divisionId: string, projectId: string) {
+async function makeStudent(suffix: string, mobile: string, parentMobile: string, projectId: string) {
   const res = await authRequest(app).post("/api/v1/students").send({
     firstName: "Own",
     lastName: suffix,
@@ -22,7 +22,8 @@ async function makeStudent(suffix: string, mobile: string, parentMobile: string,
     mobile,
     studentCode: `OWN${suffix}`,
     projectId,
-    divisionId,
+    className: "Grade 9",
+    divisionName: "A",
     parentMobile,
     parentEmail: `parent-${suffix}@test-ownership.example`,
     fatherName: "F",
@@ -37,27 +38,26 @@ async function makeStudent(suffix: string, mobile: string, parentMobile: string,
 
 describe("Ownership scoping (student self-service)", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Ownership",
-      address: "1 Own St",
-      contactNumber: "+919876571101",
-      primaryEmail: "ownership@test-institute.example",
-    });
-    const instituteId = institute.body.id;
-
     const project = await prisma.project.create({
-      data: { instituteId, code: "P-OWN", name: "Test Project Ownership", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: {
+        code: "P-OWN",
+        name: "Test Project Ownership",
+        address: "1 Own St",
+        contactNumber: "+919876579101",
+        primaryEmail: "ownership@test-project.example",
+        fromDate: new Date("2026-01-01"),
+        toDate: new Date("2026-12-31"),
+      },
     });
 
-    const klass = await authRequest(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 9" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "A" });
-
-    const a = await makeStudent("A", "+919876571002", "+919876571003", division.body.id, project.id);
+    // Note: this range (+919876579xxx) is deliberately distinct from the +919876571xxx
+    // block that test/sessions.test.ts's noShowFixtureCounter dynamically generates —
+    // vitest runs test files concurrently against the same shared test DB, and a fixed
+    // literal here previously collided with that counter's output under parallel runs.
+    const a = await makeStudent("A", "+919876579002", "+919876579003", project.id);
     studentAId = a.id;
     studentAToken = a.token;
-    const b = await makeStudent("B", "+919876571004", "+919876571005", division.body.id, project.id);
+    const b = await makeStudent("B", "+919876579004", "+919876579005", project.id);
     studentBId = b.id;
     studentBToken = b.token;
   });
@@ -65,7 +65,6 @@ describe("Ownership scoping (student self-service)", () => {
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { contains: "@test-ownership.example" } } });
     await prisma.project.deleteMany({ where: { name: "Test Project Ownership" } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute Ownership" } });
     await prisma.$disconnect();
   });
 

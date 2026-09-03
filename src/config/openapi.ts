@@ -5,14 +5,6 @@ import {
 } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import {
-  classIdParamsSchema,
-  createInstituteClassSchema,
-  createInstituteDivisionSchema,
-  createInstituteSchema,
-  instituteIdParamsSchema,
-  updateInstituteSchema,
-} from "../modules/institutes/institutes.schema.js";
-import {
   createStudentSchema,
   discontinueStudentBodySchema,
   listStudentsQuerySchema,
@@ -76,6 +68,7 @@ import {
 } from "../modules/counsellors/counsellors.schema.js";
 import {
   createProjectSchema,
+  createProjectWizardSchema,
   listProjectsQuerySchema,
   projectIdParamsSchema,
   updateProjectSchema,
@@ -245,123 +238,6 @@ registry.registerPath({
   responses: {
     204: { description: "Password reset" },
     400: errorResponses[400],
-  },
-});
-
-// --- Institutes ---
-
-registry.registerPath({
-  method: "post",
-  path: "/api/v1/institutes",
-  tags: ["Institutes"],
-  summary: "Create an institute",
-  request: { body: { content: { "application/json": { schema: createInstituteSchema } } } },
-  responses: {
-    201: { description: "Institute created", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "get",
-  path: "/api/v1/institutes",
-  tags: ["Institutes"],
-  summary: "List institutes",
-  responses: {
-    200: { description: "List of institutes", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
-  },
-});
-
-registry.registerPath({
-  method: "get",
-  path: "/api/v1/institutes/{id}",
-  tags: ["Institutes"],
-  summary: "Get an institute by id",
-  request: { params: instituteIdParamsSchema },
-  responses: {
-    200: { description: "Institute", content: { "application/json": { schema: genericObjectSchema } } },
-    404: errorResponses[404],
-  },
-});
-
-registry.registerPath({
-  method: "patch",
-  path: "/api/v1/institutes/{id}",
-  tags: ["Institutes"],
-  summary: "Update an institute",
-  request: {
-    params: instituteIdParamsSchema,
-    body: { content: { "application/json": { schema: updateInstituteSchema } } },
-  },
-  responses: {
-    200: { description: "Updated institute", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "delete",
-  path: "/api/v1/institutes/{id}",
-  tags: ["Institutes"],
-  summary: "Delete an institute",
-  request: { params: instituteIdParamsSchema },
-  responses: {
-    204: { description: "Deleted" },
-    404: errorResponses[404],
-  },
-});
-
-registry.registerPath({
-  method: "post",
-  path: "/api/v1/institutes/{id}/classes",
-  tags: ["Institutes"],
-  summary: "Create a class under an institute",
-  request: {
-    params: instituteIdParamsSchema,
-    body: { content: { "application/json": { schema: createInstituteClassSchema } } },
-  },
-  responses: {
-    201: { description: "Class created", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "get",
-  path: "/api/v1/institutes/{id}/classes",
-  tags: ["Institutes"],
-  summary: "List classes under an institute",
-  request: { params: instituteIdParamsSchema },
-  responses: {
-    200: { description: "List of classes", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
-    404: errorResponses[404],
-  },
-});
-
-registry.registerPath({
-  method: "post",
-  path: "/api/v1/institutes/{id}/classes/{classId}/divisions",
-  tags: ["Institutes"],
-  summary: "Create a division under a class",
-  request: {
-    params: classIdParamsSchema,
-    body: { content: { "application/json": { schema: createInstituteDivisionSchema } } },
-  },
-  responses: {
-    201: { description: "Division created", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "get",
-  path: "/api/v1/institutes/{id}/classes/{classId}/divisions",
-  tags: ["Institutes"],
-  summary: "List divisions under a class",
-  request: { params: classIdParamsSchema },
-  responses: {
-    200: { description: "List of divisions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
-    404: errorResponses[404],
   },
 });
 
@@ -680,7 +556,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/sessions/slots/import",
   tags: ["Sessions"],
-  summary: "One-time bulk import of the institute's counsellor-availability sheet for a project (single upload only, ever)",
+  summary: "One-time bulk import of the counsellor-availability sheet for a project (single upload only, ever)",
   request: { body: { content: { "application/json": { schema: importSlotsBodySchema } } } },
   responses: {
     201: { description: "Slots imported", content: { "application/json": { schema: genericObjectSchema } } },
@@ -811,7 +687,7 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/sessions",
   tags: ["Sessions"],
-  summary: "Admin oversight: list/filter all sessions (institute/project/student/counsellor/status/date range)",
+  summary: "Admin oversight: list/filter all sessions (project/student/counsellor/status/date range)",
   request: { query: listSessionsQuerySchema },
   responses: {
     200: { description: "List of sessions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
@@ -1077,7 +953,7 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/counsellors",
   tags: ["Counsellors"],
-  summary: "List counsellors (with user, institute, assigned projects). Staff.",
+  summary: "List counsellors (with user, assigned projects). Staff.",
   request: { query: listCounsellorsQuerySchema },
   responses: {
     200: { description: "List of counsellors", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
@@ -1088,7 +964,7 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/counsellors/me",
   tags: ["Counsellors"],
-  summary: "Counsellor self-service: the logged-in counsellor's own record (id, counsellorCode, institute, assigned projects). The entry point for every counsellor-facing page that needs the Counsellor id (sessions, feedback score, my-students). 404 for a non-counsellor account.",
+  summary: "Counsellor self-service: the logged-in counsellor's own record (id, counsellorCode, assigned projects). The entry point for every counsellor-facing page that needs the Counsellor id (sessions, feedback score, my-students). 404 for a non-counsellor account.",
   responses: {
     200: { description: "The caller's own counsellor record", content: { "application/json": { schema: genericObjectSchema } } },
     ...errorResponses,
@@ -1162,7 +1038,7 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/projects",
   tags: ["Projects"],
-  summary: "Create a project (counselling cycle for an institute). code is admin-supplied (e.g. P0001). Admin only.",
+  summary: "Create a project (a project is the institute — carries name/address/contact directly). code is admin-supplied (e.g. P0001). Admin only.",
   request: { body: { content: { "application/json": { schema: createProjectSchema } } } },
   responses: {
     201: { description: "Project created", content: { "application/json": { schema: genericObjectSchema } } },
@@ -1171,10 +1047,22 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "post",
+  path: "/api/v1/projects/wizard",
+  tags: ["Projects"],
+  summary: "Combined 'Finish' call for the create-project wizard: creates the project, onboards its student roster, and imports its counsellor-availability sheet (matching/creating counsellors by counsellorCode) in one transaction. Admin only.",
+  request: { body: { content: { "application/json": { schema: createProjectWizardSchema } } } },
+  responses: {
+    201: { description: "Project created with students onboarded and slots imported", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
   method: "get",
   path: "/api/v1/projects",
   tags: ["Projects"],
-  summary: "List projects (with institute + counts). Staff.",
+  summary: "List projects (with counts). Staff.",
   request: { query: listProjectsQuerySchema },
   responses: {
     200: { description: "List of projects", content: { "application/json": { schema: z.array(genericObjectSchema) } } },

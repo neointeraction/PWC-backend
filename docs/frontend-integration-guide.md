@@ -200,53 +200,138 @@ highlighting which form fields are missing).
 
 ---
 
-## 5. Institutes
+## 5. Projects (the institute lives here now)
 
-Base path: `/api/v1/institutes`
+There is no separate Institutes API — a **Project is the institute**. What used to be a
+standalone `Institute` record (name/address/contact) now lives directly on `Project`
+alongside its cohort dates. There's also no institute-owned class/division lookup
+anymore — students carry `className`/`divisionName` as plain free-text fields (§6).
+
+Base path: `/api/v1/projects`
 
 | Method | Path | Body / Query |
 |---|---|---|
-| POST | `/` | `{ name, address, contactNumber, primaryEmail }` — all required, all unique |
-| GET | `/` | — (no filters, no pagination — returns all institutes) |
+| POST | `/` | `{ code, name, address?, contactNumber, primaryEmail, fromDate, toDate, status?, languageId? }` — `code`/`name`/`contactNumber`/`primaryEmail` all unique; `address` optional (stored as `""` if omitted) |
+| GET | `/` | query: `status?` (no filters otherwise) |
 | GET | `/{id}` | — |
 | PATCH | `/{id}` | any subset of the POST body fields |
-| DELETE | `/{id}` | — cascades to the institute's classes/divisions/projects |
-| POST | `/{id}/classes` | `{ name }` |
-| GET | `/{id}/classes` | — returns classes with their `divisions` nested |
-| POST | `/{id}/classes/{classId}/divisions` | `{ name }` |
-| GET | `/{id}/classes/{classId}/divisions` | — |
+| DELETE | `/{id}` | soft-delete (`status: DELETED`), reversible via `PATCH /{id}/restore` |
+| DELETE | `/{id}/purge` | hard-delete, irreversible — only once `CLOSED`/`DELETED` |
+| PATCH | `/{id}/restore` | back to `status: ACTIVE` |
 
 **Create request example:**
 ```json
 {
-  "name": "Sunrise Public School",
-  "address": "12 MG Road, Bengaluru",
-  "contactNumber": "+919876543210",
-  "primaryEmail": "admin@sunrisepublic.example"
-}
-```
-
-**Response** (POST/GET single) is the raw institute row:
-```json
-{
-  "id": "cm...",
-  "name": "Sunrise Public School",
+  "code": "P0001",
+  "name": "Sunrise Public School — 2026 Batch",
   "address": "12 MG Road, Bengaluru",
   "contactNumber": "+919876543210",
   "primaryEmail": "admin@sunrisepublic.example",
+  "fromDate": "2026-09-01",
+  "toDate": "2027-03-31"
+}
+```
+
+**Response** (POST/GET single):
+```json
+{
+  "id": "cm...",
+  "code": "P0001",
+  "name": "Sunrise Public School — 2026 Batch",
+  "address": "12 MG Road, Bengaluru",
+  "contactNumber": "+919876543210",
+  "primaryEmail": "admin@sunrisepublic.example",
+  "fromDate": "2026-09-01T...",
+  "toDate": "2027-03-31T...",
+  "status": "ACTIVE",
+  "language": { "id": "cm...", "code": "en", "name": "English" },
   "createdAt": "2026-08-05T...",
   "updatedAt": "2026-08-05T..."
 }
 ```
-`GET /{id}` additionally nests `classes: [{ ...class, divisions: [...] }]`.
 
-**Note**: Project CRUD now exists (`/api/v1/projects` — see `docs/api-list.md`).
 Each project has a **delivery language**: `POST /projects` accepts an optional
 `languageId`, and **omitting it defaults to English** — the only language seeded today.
 Populate the picker from `GET /api/v1/languages` (staff; returns
 `{ id, code, name, isDefault, displayOrder }`), and project responses include
 `language: { id, code, name }`. Selecting a non-English language is wired end-to-end but
 there's only English to choose for now.
+
+### 5.1 Create-project wizard: one call for "Finish"
+
+If your create-project flow is a multi-step wizard (institute details → students →
+counsellor availability) that submits everything together on a final "Finish" step,
+use `POST /api/v1/projects/wizard` instead of sequencing `POST /projects` → N ×
+`POST /students` → counsellor matching calls → `POST /sessions/slots/import` yourself.
+It does all of that **in one transaction** — if anything fails (a duplicate email, an
+unrecognized counsellor code with no identity given), nothing is created, including the
+project itself, so you never end up with a half-onboarded project to clean up.
+
+```json
+POST /api/v1/projects/wizard
+{
+  "project": {
+    "code": "P0001",
+    "name": "Sunrise Public School — 2026 Batch",
+    "address": "12 MG Road, Bengaluru",
+    "contactNumber": "+919876543210",
+    "primaryEmail": "admin@sunrisepublic.example",
+    "fromDate": "2026-09-01",
+    "toDate": "2027-03-31"
+  },
+  "students": [
+    {
+      "firstName": "Aditi", "lastName": "Rao",
+      "email": "aditi.rao@example.com", "mobile": "+919876500001",
+      "studentCode": "S0001", "className": "Grade 9", "divisionName": "A",
+      "parentMobile": "+919876500003", "parentEmail": "parent-aditi@example.com"
+    }
+  ],
+  "counsellorSlots": [
+    {
+      "counsellorCode": "C001",
+      "firstName": "Anil", "lastName": "Iyer",
+      "email": "anil.iyer1@outlook.com", "mobile": "+919876543211",
+      "date": "2026-09-10", "startTime": "10:00", "endTime": "10:30"
+    },
+    {
+      "counsellorCode": "C001",
+      "date": "2026-09-10", "startTime": "11:00", "endTime": "11:30"
+    }
+  ]
+}
+```
+
+Notes on the shape:
+- `students` is exactly the `POST /students` body, minus `projectId` (it's implied).
+  Each still gets its own `LOGIN_CREDENTIALS_STUDENT` + `PRE_COUNSELLING_PARENT` email,
+  sent only after the whole thing commits — same as calling `POST /students` yourself.
+- `counsellorSlots` is **one row per bookable slot**, not one row per counsellor — a
+  counsellor with 5 open slots is 5 rows sharing the same `counsellorCode`. This is the
+  same "Counsellor ID, Date, Start Time, End Time" shape as the standalone
+  `POST /sessions/slots/import` sheet, just extended with optional identity fields.
+- **Matching an existing counsellor**: if `counsellorCode` already exists
+  (`GET /counsellors` to check beforehand, or just try it — unrecognized codes fail
+  clearly), only `counsellorCode` + `date`/`startTime`/`endTime` are needed; any
+  `firstName`/`email`/`mobile` on that row are ignored, and the existing counsellor is
+  assigned to the new project automatically.
+- **A brand-new counsellor**: if the code doesn't exist yet, **at least one row** for
+  that code must carry `firstName`, `lastName`, `email`, and `mobile` (as in the `C001`
+  example above — only the first of its two rows needs them) so a Counsellor + User can
+  be created. Omitting identity entirely for an unrecognized code is a `400`.
+- Both `students` and `counsellorSlots` can be empty arrays or omitted — nothing stops
+  you from creating just the project here and onboarding students/counsellors
+  individually afterward through their own endpoints, same as today.
+
+**Response:**
+```json
+{
+  "project": { "id": "cm...", "code": "P0001", "name": "...", "...": "..." },
+  "studentsCreated": 1,
+  "counsellorsAssigned": 1,
+  "slotsImported": 2
+}
+```
 
 ---
 
@@ -259,7 +344,7 @@ Base path: `/api/v1/students`
 | POST | `/` | see below (admin) |
 | GET | `/me` | **student self-service — start here (§6.0)**; no params, resolves the caller from their token |
 | PATCH | `/me` | **student self-service edit (§6.0.1)** — partial body, contact/parent fields only; resolves the caller from their token |
-| GET | `/` | query: `projectId?`, `divisionId?`, `workflowStatus?`, `stage?`, `flagged?`, `discontinued?` (staff) |
+| GET | `/` | query: `projectId?`, `className?`, `divisionName?`, `workflowStatus?`, `stage?`, `flagged?`, `discontinued?` (staff) |
 | GET | `/{id}` | staff only — students use `/me` |
 | PATCH | `/{id}` | partial body, same fields as create minus `email`/`studentCode`/`projectId` (immutable) (admin) |
 | DELETE | `/{id}` | deletes the linked `User` too (cascades) — also releases any `CounsellorSlot` the student's sessions had booked back to `OPEN`, so deleting a student never strands a slot (admin) |
@@ -286,9 +371,10 @@ Response is the same nested student shape as `GET /{id}`, **plus** an active `co
   "id": "cm...",                     // ← the studentId every downstream route needs
   "studentCode": "S0001",
   "workflowStatus": "DRAFT",
-  "project": { "id": "cm...", "name": "...", "instituteId": "cm..." },
-  "division": { "id": "cm...", "name": "A", "class": { "id": "cm...", "name": "Grade 9", "instituteId": "cm..." } },
-  "user": { "id": "cm...", "email": "...", "firstName": "...", "lastName": "...", "isActive": true },
+  "project": { "id": "cm...", "name": "..." },
+  "className": "Grade 9",
+  "divisionName": "A",
+  "user": { "id": "cm...", "email": "...", "firstName": "...", "lastName": "...", "isActive": true, "passwordChangedAt": null },
   "cohort": { "code": "CLASS_9_10", "name": "Class 9 & 10" }
 }
 ```
@@ -321,7 +407,7 @@ PATCH /api/v1/students/me     Authorization: Bearer <accessToken>
 ```
 
 Those nine fields are the **only** ones a student may change. Identity/enrolment fields —
-`firstName`/`lastName`, `email`, primary `mobile`, `studentCode`, `divisionId`,
+`firstName`/`lastName`, `email`, primary `mobile`, `studentCode`, `className`/`divisionName`,
 `projectId`, `workflowStatus` — are **not accepted here** (unknown keys are stripped by
 validation); they remain admin-only via `PATCH /students/{id}`. Render those as read-only
 on the student screen. Editing is allowed at **any** workflow stage (it's independent of
@@ -341,7 +427,8 @@ non-student account.
   "whatsappNumber": "+919876500002",
   "studentCode": "S0001",
   "projectId": "cm...",
-  "divisionId": "cm...",
+  "className": "Grade 9",
+  "divisionName": "A",
   "parentMobile": "+919876500003",
   "parentEmail": "parent-aditi@example.com",
   "fatherName": "Ramesh Rao",
@@ -375,8 +462,9 @@ student:
     "motherEmployer": "City Hospital",
     "workflowStatus": "DRAFT",
     "user": { "id": "cm...", "email": "aditi.rao@example.com", "firstName": "Aditi", "lastName": "Rao", "isActive": true },
-    "project": { "id": "cm...", "name": "...", "instituteId": "cm..." },
-    "division": { "id": "cm...", "name": "A", "class": { "id": "cm...", "name": "Grade 9", "instituteId": "cm..." } }
+    "project": { "id": "cm...", "name": "..." },
+    "className": "Grade 9",
+    "divisionName": "A"
   },
   "tempPassword": "aB3xK9pQ..."
 }
@@ -397,7 +485,7 @@ no login, so this is their only prompt to fill it in until the idle-nudge remind
 `SESSION_2_COMPLETED`, `COUNSELLOR_FEEDBACK`, `STUDENT_PARENT_FEEDBACK`, `CLOSED` — a
 strictly forward-moving sequence.
 
-GET responses use the same nested shape (`user`, `project`, `division`) minus
+GET responses use the same shape (`user`, `project`, `className`, `divisionName`) minus
 `tempPassword`.
 
 ### 6.1 Workflow status — how it advances
@@ -457,10 +545,16 @@ the rule and returns the result.
 - **Not every row can be flagged.** `SESSION_BOOKED`, `SESSION_1/2_COMPLETED`, the
   counsellor-feedback stages and `CLOSED` always come back `flagged: false` unless there's
   a missed session — they're waiting on a scheduled date or on staff, not idle students.
+- **`INVITED` vs `LOGIN_ACTIVATED`** — the old single `DRAFT`-backed stage is now two: a
+  student comes back as `INVITED` (record created, credentials issued, no successful
+  login/password change yet) until they log in and change their default password, then
+  flips to `LOGIN_ACTIVATED` (profile still not confirmed). The signal is
+  `user.passwordChangedAt` on the student row (`null` = still `INVITED`) — use it directly
+  if you need the raw "did it happen"/"when" rather than the derived stage string.
 
-**Filters** (combine with `projectId` / `divisionId`):
+**Filters** (combine with `projectId` / `className` / `divisionName`):
 - `GET /students?stage=PRE_COUNSELLING_STUDENT` — the "All Stages" dropdown. Valid keys:
-  `LOGIN_ACTIVATED`, `PROFILE_COMPLETED`, `PRE_COUNSELLING_STUDENT`,
+  `INVITED`, `LOGIN_ACTIVATED`, `PROFILE_COMPLETED`, `PRE_COUNSELLING_STUDENT`,
   `PRE_COUNSELLING_PARENT`, `ASSESSMENT_PENDING`, `ASSESSMENT_COMPLETED`, `SESSION_BOOKED`,
   `SESSION_1_COMPLETED`, `COUNSELLOR_FEEDBACK_REPORT`, `SESSION_2_COMPLETED`,
   `COUNSELLOR_FEEDBACK`, `FEEDBACK_STUDENT`, `FEEDBACK_PARENT`, `FEEDBACK_PENDING`,

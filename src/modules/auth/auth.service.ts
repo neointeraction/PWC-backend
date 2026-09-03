@@ -120,7 +120,7 @@ export async function changePassword(userId: string, input: ChangePasswordBody):
   const passwordHash = await argon2.hash(input.newPassword);
   await prisma.user.update({
     where: { id: userId },
-    data: { passwordHash, mustChangePassword: false },
+    data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() },
   });
   await revokeAllRefreshTokens(userId);
 }
@@ -166,7 +166,7 @@ export async function resetPassword(rawToken: string, newPassword: string): Prom
   await prisma.$transaction([
     prisma.user.update({
       where: { id: stored.userId },
-      data: { passwordHash, mustChangePassword: false },
+      data: { passwordHash, mustChangePassword: false, passwordChangedAt: new Date() },
     }),
     prisma.passwordResetToken.update({ where: { id: stored.id }, data: { usedAt: new Date() } }),
   ]);

@@ -17,12 +17,16 @@ import type {
 
 const studentInclude = {
   user: {
-    select: { id: true, email: true, firstName: true, lastName: true, isActive: true },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      lastName: true,
+      isActive: true,
+      passwordChangedAt: true,
+    },
   },
-  project: { select: { id: true, name: true, instituteId: true } },
-  division: {
-    include: { class: { select: { id: true, name: true, instituteId: true } } },
-  },
+  project: { select: { id: true, name: true } },
 } as const;
 
 function generateTempPassword(): string {
@@ -48,24 +52,15 @@ function attachStageInfo<T extends StudentForStage>(student: T, now: Date) {
   return { ...rest, stageInfo: computeStageInfo(student, now) };
 }
 
-async function assertDivisionBelongsToProject(divisionId: string, projectId: string) {
-  const [division, project] = await Promise.all([
-    prisma.instituteDivision.findUnique({
-      where: { id: divisionId },
-      include: { class: true },
-    }),
-    prisma.project.findUnique({ where: { id: projectId } }),
-  ]);
+async function assertProjectExists(projectId: string) {
+  const project = await prisma.project.findUnique({ where: { id: projectId } });
   if (!project) {
     throw new BadRequestError("projectId does not exist");
-  }
-  if (!division || division.class.instituteId !== project.instituteId) {
-    throw new BadRequestError("divisionId does not belong to the given project's institute");
   }
 }
 
 export async function createStudent(input: CreateStudentInput) {
-  await assertDivisionBelongsToProject(input.divisionId, input.projectId);
+  await assertProjectExists(input.projectId);
 
   // Bulk imports may carry the temp password in the sheet; otherwise generate one.
   // Either way mustChangePassword defaults to true, so it's changed at first login.
@@ -89,7 +84,8 @@ export async function createStudent(input: CreateStudentInput) {
           userId: user.id,
           studentCode: input.studentCode,
           projectId: input.projectId,
-          divisionId: input.divisionId,
+          className: input.className,
+          divisionName: input.divisionName,
           mobile: input.mobile,
           whatsappNumber: input.whatsappNumber,
           parentMobile: input.parentMobile,
@@ -131,7 +127,8 @@ export async function listStudents(query: ListStudentsQuery) {
   const students = await prisma.student.findMany({
     where: {
       projectId: query.projectId,
-      divisionId: query.divisionId,
+      className: query.className,
+      divisionName: query.divisionName,
       workflowStatus: query.workflowStatus,
       isDiscontinued: query.discontinued,
     },
@@ -188,11 +185,7 @@ export async function getStudentByUserId(userId: string) {
 }
 
 export async function updateStudent(id: string, input: UpdateStudentInput) {
-  const existing = await getStudentById(id);
-
-  if (input.divisionId) {
-    await assertDivisionBelongsToProject(input.divisionId, existing.projectId);
-  }
+  const existing = await getStudentById(id); // 404 if missing
 
   const { firstName, lastName, ...studentFields } = input;
 

@@ -19,7 +19,8 @@ export const createStudentSchema = z.object({
   studentCode: z.string().trim().min(1),
   password: z.string().min(1).optional(), // temp password from the import sheet; generated if omitted
   projectId: z.string().cuid(),
-  divisionId: z.string().cuid(),
+  className: z.string().trim().min(1),
+  divisionName: z.string().trim().min(1),
   parentMobile: phoneSchema,
   parentEmail: emailSchema,
   // Parent/guardian breakdown is optional — bulk imports may carry only a single
@@ -38,7 +39,8 @@ export const updateStudentSchema = z.object({
   lastName: z.string().trim().min(1).optional(),
   mobile: phoneSchema.optional(),
   whatsappNumber: phoneSchema.optional(),
-  divisionId: z.string().cuid().optional(),
+  className: z.string().trim().min(1).optional(),
+  divisionName: z.string().trim().min(1).optional(),
   parentMobile: phoneSchema.optional(),
   parentEmail: emailSchema.optional(),
   fatherName: z.string().trim().min(1).optional(),
@@ -74,7 +76,8 @@ export const studentIdParamsSchema = z.object({
 
 export const listStudentsQuerySchema = z.object({
   projectId: z.string().cuid().optional(),
-  divisionId: z.string().cuid().optional(),
+  className: z.string().trim().min(1).optional(),
+  divisionName: z.string().trim().min(1).optional(),
   workflowStatus: workflowStatusSchema.optional(),
   // Derived-stage dropdown (the "All Stages" filter) — finer-grained than workflowStatus.
   stage: z.enum(DERIVED_STAGES).optional(),

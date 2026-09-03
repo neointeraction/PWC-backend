@@ -15,7 +15,6 @@ import { errorHandler, notFoundHandler } from "./common/middlewares/errorHandler
 import { blockViewOnlyWrites } from "./common/middlewares/auth.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
-import { institutesRouter } from "./modules/institutes/institutes.routes.js";
 import { studentsRouter } from "./modules/students/students.routes.js";
 import { counsellorsRouter } from "./modules/counsellors/counsellors.routes.js";
 import { adminsRouter } from "./modules/admins/admins.routes.js";
@@ -58,7 +57,6 @@ export function createApp(): Express {
   // write (non-GET). Mounted after /auth so login/refresh/logout/change-password still work.
   app.use(blockViewOnlyWrites);
 
-  app.use("/api/v1/institutes", institutesRouter);
   app.use("/api/v1/students", studentsRouter);
   app.use("/api/v1/counsellors", counsellorsRouter);
   app.use("/api/v1/admins", adminsRouter);
@@ -78,7 +76,9 @@ export function createApp(): Express {
 
   // Dev/QA scoring-preview harness (same-origin, so it can call the API without CORS).
   // A single static page served only outside production — see public/assessment-tester.html.
-  if (env.NODE_ENV !== "production") {
+  // ENABLE_ASSESSMENT_TESTER force-enables it on a production deploy for one-off testing,
+  // without flipping NODE_ENV (which would also change other production-gated behavior).
+  if (env.NODE_ENV !== "production" || env.ENABLE_ASSESSMENT_TESTER) {
     const testerPath = fileURLToPath(new URL("../public/assessment-tester.html", import.meta.url));
     app.get("/dev/assessment", (_req, res) => {
       // The tester is a single self-contained page (inline script/style); drop helmet's

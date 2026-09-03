@@ -544,7 +544,6 @@ export async function getCounsellorMyStudents(counsellorId: string, query: Couns
     where: { projectId: { in: projectIds }, workflowStatus: query.workflowStatus },
     include: {
       user: { select: { firstName: true, lastName: true, email: true } },
-      division: { include: { class: { select: { name: true } } } },
       formSubmissions: {
         where: { submittedAt: { not: null } },
         select: { formTemplate: { select: { formType: true } } },
@@ -570,8 +569,8 @@ export async function getCounsellorMyStudents(counsellorId: string, query: Couns
       lastName: student.user.lastName,
       email: student.user.email,
       mobile: student.mobile,
-      class: student.division.class.name,
-      division: student.division.name,
+      class: student.className,
+      division: student.divisionName,
       fatherName: student.fatherName,
       motherName: student.motherName,
       parentMobile: student.parentMobile,
@@ -590,7 +589,7 @@ export async function listSessions(query: ListSessionsQuery) {
     studentId: query.studentId,
     counsellorId: query.counsellorId,
     status: query.status,
-    student: query.projectId || query.instituteId ? { projectId: query.projectId, project: query.instituteId ? { instituteId: query.instituteId } : undefined } : undefined,
+    student: query.projectId ? { projectId: query.projectId } : undefined,
     studentNoShow: query.noShow === "STUDENT" ? true : undefined,
     counsellorNoShow: query.noShow === "COUNSELLOR" ? true : undefined,
   };

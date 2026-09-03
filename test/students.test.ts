@@ -6,68 +6,27 @@ import { prisma } from "../src/config/prisma.js";
 
 const app = createApp();
 
-let instituteId: string;
 let projectId: string;
-let divisionId: string;
-let otherProjectId: string;
 
 describe("Students API", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Students",
-      address: "1 Student St",
-      contactNumber: "+919876540001",
-      primaryEmail: "students@test-institute.example",
-    });
-    instituteId = institute.body.id;
-
-    const otherInstitute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Students Other",
-      address: "2 Student St",
-      contactNumber: "+919876540002",
-      primaryEmail: "students-other@test-institute.example",
-    });
-    const otherInstituteId = otherInstitute.body.id;
-
-    // No Projects module/routes yet — create directly via Prisma for this test setup.
     const project = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-STU",
         name: "Test Project Students",
+        address: "1 Student St",
+        contactNumber: "+919876540001",
+        primaryEmail: "students@test-project.example",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
       },
     });
     projectId = project.id;
-
-    const otherProject = await prisma.project.create({
-      data: {
-        instituteId: otherInstituteId,
-        code: "P-STU-OTHER",
-        name: "Test Project Students Other",
-        fromDate: new Date("2026-01-01"),
-        toDate: new Date("2026-12-31"),
-      },
-    });
-    otherProjectId = otherProject.id;
-
-    const klass = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes`)
-      .send({ name: "Grade 9" });
-
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "A" });
-    divisionId = division.body.id;
   });
 
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { contains: "@test-student.example" } } });
     await prisma.project.deleteMany({ where: { name: { startsWith: "Test Project Students" } } });
-    await prisma.institute.deleteMany({
-      where: { name: { startsWith: "Test Institute Students" } },
-    });
     await prisma.$disconnect();
   });
 
@@ -79,7 +38,8 @@ describe("Students API", () => {
       mobile: "+919876500001",
       studentCode: "CB1",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500002",
       parentEmail: "parent-asha@test-student.example",
       fatherName: "Rao Sr",
@@ -91,7 +51,8 @@ describe("Students API", () => {
     expect(res.status).toBe(201);
     expect(res.body.tempPassword).toBeTypeOf("string");
     expect(res.body.student.user).toMatchObject({ email: "asha@test-student.example" });
-    expect(res.body.student.division.id).toBe(divisionId);
+    expect(res.body.student.className).toBe("Grade 9");
+    expect(res.body.student.divisionName).toBe("A");
   });
 
   it("rejects a missing studentCode with 400 (no auto-generation)", async () => {
@@ -101,7 +62,8 @@ describe("Students API", () => {
       email: "nocode@test-student.example",
       mobile: "+919876500051",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500052",
       parentEmail: "parent-nocode@test-student.example",
       fatherName: "Code Sr",
@@ -118,7 +80,8 @@ describe("Students API", () => {
       mobile: "+919876500061",
       studentCode: "CB-SELF",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500062",
       parentEmail: "parent-self@test-student.example",
       fatherName: "Service Sr",
@@ -152,7 +115,8 @@ describe("Students API", () => {
       mobile: "+919876500091",
       studentCode: "CB-EDIT",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500092",
       parentEmail: "parent-editme@test-student.example",
       fatherName: "Old Father",
@@ -200,7 +164,8 @@ describe("Students API", () => {
       mobile: "+919876500071",
       studentCode: "CB-VICTIM",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500072",
       parentEmail: "parent-victim@test-student.example",
       fatherName: "Victim Sr",
@@ -228,18 +193,20 @@ describe("Students API", () => {
       mobile: "+919876500081",
       studentCode: "CB-IDLE",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500082",
       parentEmail: "parent-idle@test-student.example",
       fatherName: "Idle Sr",
     });
     const studentId: string = created.body.student.id;
 
-    // Freshly created (DRAFT, today) → Login Activated, not yet flagged.
+    // Freshly created (DRAFT, no login yet, today) → Invited, not yet flagged.
     const fresh = await authRequest(app).get(`/api/v1/students?projectId=${projectId}`);
     const freshRow = fresh.body.find((s: { id: string }) => s.id === studentId);
-    expect(freshRow.stageInfo).toMatchObject({ stage: "LOGIN_ACTIVATED", flagged: false });
+    expect(freshRow.stageInfo).toMatchObject({ stage: "INVITED", flagged: false });
     expect(freshRow.stageInfo.ageDays).toBe(0);
+    expect(freshRow.user.passwordChangedAt).toBeNull();
 
     // Backdate creation 5 days → now idle beyond the 2-day threshold.
     await prisma.student.update({
@@ -255,7 +222,7 @@ describe("Students API", () => {
 
     // Stage filter includes it; a different stage excludes it.
     const byStage = await authRequest(app).get(
-      `/api/v1/students?projectId=${projectId}&stage=LOGIN_ACTIVATED`
+      `/api/v1/students?projectId=${projectId}&stage=INVITED`
     );
     expect(byStage.body.some((s: { id: string }) => s.id === studentId)).toBe(true);
 
@@ -265,24 +232,36 @@ describe("Students API", () => {
     expect(otherStage.body.some((s: { id: string }) => s.id === studentId)).toBe(false);
   });
 
-  it("rejects a divisionId that doesn't belong to the given project's institute", async () => {
-    const res = await authRequest(app).post("/api/v1/students").send({
-      firstName: "Ravi",
-      lastName: "Kumar",
-      email: "ravi@test-student.example",
+  it("filters students by className and divisionName", async () => {
+    const created = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Classy",
+      lastName: "Student",
+      email: "classy@test-student.example",
       mobile: "+919876500003",
       studentCode: "CB2",
-      projectId: otherProjectId,
-      divisionId,
+      projectId,
+      className: "Grade 10",
+      divisionName: "B",
       parentMobile: "+919876500004",
-      parentEmail: "parent-ravi@test-student.example",
+      parentEmail: "parent-classy@test-student.example",
       fatherName: "Kumar Sr",
       fatherOccupation: "Engineer",
       motherName: "Kumar Jr",
       motherOccupation: "Doctor",
     });
+    expect(created.status).toBe(201);
+    const studentId: string = created.body.student.id;
 
-    expect(res.status).toBe(400);
+    const byClass = await authRequest(app)
+      .get("/api/v1/students")
+      .query({ projectId, className: "Grade 10", divisionName: "B" });
+    expect(byClass.status).toBe(200);
+    expect(byClass.body.some((s: { id: string }) => s.id === studentId)).toBe(true);
+
+    const otherClass = await authRequest(app)
+      .get("/api/v1/students")
+      .query({ projectId, className: "Grade 9" });
+    expect(otherClass.body.some((s: { id: string }) => s.id === studentId)).toBe(false);
   });
 
   it("rejects a duplicate parent mobile with 409", async () => {
@@ -293,7 +272,8 @@ describe("Students API", () => {
       mobile: "+919876500005",
       studentCode: "CB3",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500099",
       parentEmail: "parent-meera@test-student.example",
       fatherName: "Iyer Sr",
@@ -309,7 +289,8 @@ describe("Students API", () => {
       mobile: "+919876500006",
       studentCode: "CB4",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500099",
       parentEmail: "parent-nina@test-student.example",
       fatherName: "Iyer Sr",
@@ -329,7 +310,8 @@ describe("Students API", () => {
       mobile: "+919876500101",
       studentCode: "CB-DROP",
       projectId,
-      divisionId,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876500102",
       parentEmail: "parent-dropout@test-student.example",
       fatherName: "Dropout Sr",
@@ -377,7 +359,7 @@ describe("Students API", () => {
     expect(reinstated.body.isDiscontinued).toBe(false);
     expect(reinstated.body.discontinuedReason).toBeNull();
     // workflowStatus was untouched throughout, so the derived stage resumes.
-    expect(reinstated.body.stageInfo.stage).toBe("LOGIN_ACTIVATED");
+    expect(reinstated.body.stageInfo.stage).toBe("INVITED");
 
     const reinstateAgain = await authRequest(app).post(`/api/v1/students/${studentId}/reinstate`);
     expect(reinstateAgain.status).toBe(409);

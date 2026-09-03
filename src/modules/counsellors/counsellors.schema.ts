@@ -10,11 +10,7 @@ export const createCounsellorSchema = z.object({
   // by the service.
   counsellorCode: z.string().trim().min(1),
   password: z.string().min(1).optional(), // temp password from the import sheet; generated if omitted
-  // Optional and informational only — counsellors are a flat, tenant-wide directory,
-  // not scoped to a single institute. Project assignment (POST /counsellors/:id/projects)
-  // never checks this field.
-  instituteId: z.string().cuid().optional(),
-  // Optional: assign to these projects on creation. No institute-matching required.
+  // Optional: assign to these projects on creation.
   projectIds: z.array(z.string().cuid()).optional(),
   // The counsellor's one fixed meeting room (e.g. their own Zoom/Meet room). Every
   // session assigned to this counsellor uses this same link — sessions don't have their
@@ -38,7 +34,6 @@ export const counsellorIdParamsSchema = z.object({
 });
 
 export const listCounsellorsQuerySchema = z.object({
-  instituteId: z.string().cuid().optional(),
   projectId: z.string().cuid().optional(),
 });
 export type ListCounsellorsQuery = z.infer<typeof listCounsellorsQuerySchema>;

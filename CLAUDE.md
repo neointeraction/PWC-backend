@@ -119,7 +119,7 @@ pnpm db:seed:education    # re-derive Education Path only; --dry-run reports wit
 This is intentionally staged — we're building module by module. Built so far: Auth
 (login/refresh/logout — JWT access token + rotating httpOnly-cookie refresh token; no
 self-register, every `User` including the one Super Admin is created by an admin/seed
-with a temp password; see `src/modules/auth/`), Institutes, Students (including the
+with a temp password; see `src/modules/auth/`), Students (including the
 `workflowStatus` lifecycle — live/auto-advancing through `SESSION_2_COMPLETED`,
 admin-override-only beyond that), Forms (pre-counselling/feedback questionnaires,
 retrieval + submission), Assessment (question bank + attempt flow, no scoring yet),
@@ -161,6 +161,10 @@ instead. Password change + forgot/reset flows are built (`src/modules/auth/`), a
 Counsellor CRUD (`src/modules/counsellors/` — create/list/get/update/delete + project
 assign/unassign) and Project CRUD (`src/modules/projects/` — create/list/get/update/
 delete; `status:CLOSED` is the soft-close, delete is blocked when students exist) exist.
+**There is no separate Institute entity** — it was merged into `Project`, which now
+carries `name`/`address`/`contactNumber`/`primaryEmail` directly (all unique). There's
+also no institute-owned class/division lookup; `Student.className`/`Student.divisionName`
+are plain free-text strings.
 Career Library now has writes (`src/modules/career-library/` — create/update/delete
 with a `DRAFT`→`ACTIVE` publish step). **Adding a job role has two paths through the same
 `POST /career-library` route**: an admin's entry is `reviewStatus:APPROVED` immediately (send

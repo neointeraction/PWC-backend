@@ -26,30 +26,17 @@ function buildAnswer(question: AssessmentQuestion): unknown {
 
 describe("Assessment submission API", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Assessment Submission",
-      address: "1 Assessment St",
-      contactNumber: "+919876560001",
-      primaryEmail: "assessment-submission@test-institute.example",
-    });
-    const instituteId = institute.body.id;
-
     const project = await prisma.project.create({
       data: {
-        instituteId,
         code: "P-ASUB",
         name: "Test Project Assessment Submission",
+        address: "1 Assessment St",
+        contactNumber: "+919876560001",
+        primaryEmail: "assessment-submission@test-project.example",
         fromDate: new Date("2026-01-01"),
         toDate: new Date("2026-12-31"),
       },
     });
-
-    const klass = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes`)
-      .send({ name: "Grade 9" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "A" });
 
     const student = await authRequest(app).post("/api/v1/students").send({
       firstName: "Kabir",
@@ -58,7 +45,8 @@ describe("Assessment submission API", () => {
       mobile: "+919876560002",
       studentCode: "ASUB1",
       projectId: project.id,
-      divisionId: division.body.id,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876560003",
       parentEmail: "parent-kabir@test-assessment-submission.example",
       fatherName: "Shah Sr",
@@ -75,7 +63,8 @@ describe("Assessment submission API", () => {
       mobile: "+919876560004",
       studentCode: "ASUB2",
       projectId: project.id,
-      divisionId: division.body.id,
+      className: "Grade 9",
+      divisionName: "A",
       parentMobile: "+919876560005",
       parentEmail: "parent-meera@test-assessment-submission.example",
       fatherName: "Rao Sr",
@@ -91,7 +80,6 @@ describe("Assessment submission API", () => {
       where: { email: { contains: "@test-assessment-submission.example" } },
     });
     await prisma.project.deleteMany({ where: { name: "Test Project Assessment Submission" } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute Assessment Submission" } });
     await prisma.$disconnect();
   });
 

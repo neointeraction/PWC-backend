@@ -92,26 +92,23 @@ async function submitFeedback(studentId: string, formType: string, scaleValue: s
 
 describe("Feedback score API", () => {
   beforeAll(async () => {
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute Feedback",
-      address: "10 Feedback Rd",
-      contactNumber: "+919556000001",
-      primaryEmail: `institute${SUFFIX}`,
-    });
-    const instituteId = institute.body.id;
     const project = await prisma.project.create({
-      data: { instituteId, code: "P-FB", name: "Test Project Feedback", fromDate: new Date("2026-01-01"), toDate: new Date("2026-12-31") },
+      data: {
+        code: "P-FB",
+        name: "Test Project Feedback",
+        address: "10 Feedback Rd",
+        contactNumber: "+919556000001",
+        primaryEmail: `institute${SUFFIX}`,
+        fromDate: new Date("2026-01-01"),
+        toDate: new Date("2026-12-31"),
+      },
     });
-    const klass = await authRequest(app).post(`/api/v1/institutes/${instituteId}/classes`).send({ name: "Grade 9" });
-    const division = await authRequest(app)
-      .post(`/api/v1/institutes/${instituteId}/classes/${klass.body.id}/divisions`)
-      .send({ name: "F" });
-    const divisionId = division.body.id;
 
     async function makeStudent(n: number): Promise<string> {
       const res = await authRequest(app).post("/api/v1/students").send({
         firstName: "Fb", lastName: `Student${n}`, email: `student${n}${SUFFIX}`,
-        mobile: `+91955600010${n}`, studentCode: `FB${n}`, projectId: project.id, divisionId,
+        mobile: `+91955600010${n}`, studentCode: `FB${n}`, projectId: project.id,
+        className: "Grade 9", divisionName: "F",
         parentMobile: `+91955600020${n}`, parentEmail: `parent${n}${SUFFIX}`,
         fatherName: "F", fatherOccupation: "Eng", motherName: "M", motherOccupation: "Dr",
       });
@@ -133,7 +130,7 @@ describe("Feedback score API", () => {
       },
     });
     const counsellor = await prisma.counsellor.create({
-      data: { userId: counsellorUser.id, counsellorCode: "FB-CN1", instituteId, mobile: "+919556000301" },
+      data: { userId: counsellorUser.id, counsellorCode: "FB-CN1", mobile: "+919556000301" },
     });
     counsellorId = counsellor.id;
     const times = ["10:00", "11:00"]; // distinct — counsellor slots are unique per (date, start)
@@ -152,7 +149,6 @@ describe("Feedback score API", () => {
     await prisma.counsellor.deleteMany({ where: { id: counsellorId } });
     await prisma.user.deleteMany({ where: { email: { contains: SUFFIX } } });
     await prisma.project.deleteMany({ where: { name: "Test Project Feedback" } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute Feedback" } });
     await prisma.$disconnect();
   });
 

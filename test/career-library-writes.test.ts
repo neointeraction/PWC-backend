@@ -33,19 +33,12 @@ describe("Career Library writes", () => {
     });
     testDomainId = domain.id;
 
-    const institute = await authRequest(app).post("/api/v1/institutes").send({
-      name: "Test Institute CareerLib",
-      address: "1 CL St",
-      contactNumber: "+919876574001",
-      primaryEmail: "careerlib@test-institute.example",
-    });
     const counsellor = await authRequest(app).post("/api/v1/counsellors").send({
       firstName: "Cara",
       lastName: "Libra",
       email: "cara@test-careerlib.example",
       mobile: "+919876574002",
       counsellorCode: "CLCN1",
-      instituteId: institute.body.id,
     });
     counsellorToken = bearer("COUNSELLOR", { userId: counsellor.body.counsellor.user.id });
   });
@@ -57,7 +50,6 @@ describe("Career Library writes", () => {
     await prisma.careerIndustry.deleteMany({ where: { name: "Test CL Industry" } });
     await prisma.careerCluster.deleteMany({ where: { name: "Test CL Cluster" } });
     await prisma.user.deleteMany({ where: { email: { contains: "@test-careerlib.example" } } });
-    await prisma.institute.deleteMany({ where: { name: "Test Institute CareerLib" } });
     await prisma.$disconnect();
   });
 

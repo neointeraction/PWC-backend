@@ -6,6 +6,11 @@ export async function createProject(req: Request, res: Response): Promise<void> 
   res.status(201).json(project);
 }
 
+export async function createProjectWizard(req: Request, res: Response): Promise<void> {
+  const result = await projectsService.createProjectWizard(req.body);
+  res.status(201).json(result);
+}
+
 export async function listProjects(req: Request, res: Response): Promise<void> {
   const projects = await projectsService.listProjects(req.query as never);
   res.status(200).json(projects);

@@ -25,6 +25,7 @@ export const AGEING_FLAG_THRESHOLD_DAYS = 2;
 // Derived stage keys the UI's "All Stages" dropdown filters on. Finer-grained than
 // WorkflowStatus (the "— Student/— Parent" halves), matching the mock.
 export const DERIVED_STAGES = [
+  "INVITED",
   "LOGIN_ACTIVATED",
   "PROFILE_COMPLETED",
   "PRE_COUNSELLING_STUDENT",
@@ -46,6 +47,7 @@ export const DERIVED_STAGES = [
 export type DerivedStage = (typeof DERIVED_STAGES)[number];
 
 export const STAGE_LABELS: Record<DerivedStage, string> = {
+  INVITED: "Invited",
   LOGIN_ACTIVATED: "Login Activated",
   PROFILE_COMPLETED: "Profile Completed",
   PRE_COUNSELLING_STUDENT: "Pre-Counselling — Student",
@@ -90,6 +92,7 @@ export interface StudentForStage {
   formSubmissions: SubmittedForm[];
   assessmentAttempts: AttemptRow[];
   sessions: SessionRow[];
+  user: { passwordChangedAt: Date | null };
 }
 
 // Prisma include fragment that loads exactly the child fields the resolver needs (and no
@@ -135,9 +138,13 @@ function resolveStage(s: StudentForStage): Resolved {
 
   switch (s.workflowStatus) {
     case "DRAFT":
-      // "Login Activated": account exists (and, once mustChangePassword clears, has been
-      // logged into) but the profile isn't confirmed. Clock from account creation.
-      return { stage: "LOGIN_ACTIVATED", actionable: true, clock: s.createdAt };
+      // Credentials issued but no successful login/password change yet vs. logged in
+      // (password changed) but profile not yet confirmed. `passwordChangedAt` is the
+      // authoritative "did it happen" signal — see User.passwordChangedAt.
+      if (!s.user.passwordChangedAt) {
+        return { stage: "INVITED", actionable: true, clock: s.createdAt };
+      }
+      return { stage: "LOGIN_ACTIVATED", actionable: true, clock: s.user.passwordChangedAt };
 
     case "PROFILE_COMPLETED":
       if (preStudent && !preParent)

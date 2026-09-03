@@ -14,10 +14,7 @@ export async function assembleStudentAssessmentReport(studentId: string) {
     where: { id: studentId },
     include: {
       user: { select: { firstName: true, lastName: true, email: true } },
-      division: {
-        include: { class: { include: { institute: { select: { name: true, address: true } } } } },
-      },
-      project: { select: { id: true, name: true } },
+      project: { select: { id: true, name: true, address: true } },
     },
   });
   if (!student) {
@@ -78,9 +75,9 @@ export async function assembleStudentAssessmentReport(studentId: string) {
       studentCode: student.studentCode,
       academicYear: student.academicYear,
       workflowStatus: student.workflowStatus,
-      institute: student.division.class.institute.name,
-      class: student.division.class.name,
-      division: student.division.name,
+      institute: student.project?.name ?? null,
+      class: student.className,
+      division: student.divisionName,
       project: student.project?.name ?? null,
     },
     // Champion's Profile — the two dominant style codes/labels.

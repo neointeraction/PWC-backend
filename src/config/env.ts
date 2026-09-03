@@ -52,6 +52,14 @@ const envSchema = z.object({
   // Don't re-nudge the same student more often than this many days (avoids daily spam
   // while they stay idle).
   IDLE_NUDGE_COOLDOWN_DAYS: z.coerce.number().int().positive().default(2),
+
+  // Force-enables the /dev/assessment scoring-preview tester even when NODE_ENV=production
+  // — a one-off override for testing on a deployed environment without flipping NODE_ENV
+  // (which would also change other production-gated behavior). Leave unset/"false" normally.
+  ENABLE_ASSESSMENT_TESTER: z
+    .enum(["true", "false"])
+    .transform((v) => v === "true")
+    .default("false"),
 });
 
 const parsed = envSchema.safeParse(process.env);
