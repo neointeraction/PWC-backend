@@ -626,10 +626,14 @@ export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
     throw new BadRequestError("This session has already ended");
   }
 
+  const isFirstStudentJoin = role === "STUDENT" && session.studentJoinedAt === null;
   const data = role === "STUDENT" ? { studentJoinedAt: session.studentJoinedAt ?? now } : { counsellorJoinedAt: session.counsellorJoinedAt ?? now };
   const updated = await prisma.session.update({ where: { id }, data, include: sessionInclude });
 
-  if (role === "STUDENT" && updated.student.parentEmail) {
+  // Only notify the parent on the student's first join — the write above is already
+  // idempotent on studentJoinedAt, but without this guard a repeat /join call (refresh,
+  // retry, reopening the join screen) would re-send the notification every time.
+  if (isFirstStudentJoin && updated.student.parentEmail) {
     sendEmailBestEffort(updated.student.parentEmail, "SESSION_JOINED_PARENT", {
       parentName: "Parent",
       studentName: `${updated.student.user.firstName} ${updated.student.user.lastName}`,
@@ -999,7 +1003,8 @@ export async function sendNoShowReschedulePrompt(id: string) {
   return { sent: true };
 }
 
-// --- Day-of reminder (manual trigger — no scheduler exists yet, see email module README) ---
+// --- Day-of reminder (manual trigger — an ops override for a one-off resend/early send;
+// the scheduler's runSessionDayReminders (src/scheduler/jobs.ts) is the automatic path) ---
 
 export async function sendDayReminder(id: string, input: SendDayReminderBody) {
   const session = await getSessionById(id);
@@ -1027,6 +1032,12 @@ export async function sendDayReminder(id: string, input: SendDayReminderBody) {
     sessionTime: session.startTime,
     portalLink: input.portalLink,
   });
+
+  // Mark it sent so the scheduler's same-day batch (dayReminderSentAt: null guard,
+  // jobs.ts runSessionDayReminders) doesn't also send this session's reminder later today.
+  if (!session.dayReminderSentAt) {
+    await prisma.session.update({ where: { id }, data: { dayReminderSentAt: new Date() } });
+  }
 
   return { sent: true };
 }

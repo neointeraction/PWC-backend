@@ -13,6 +13,7 @@ import { env } from "../config/env.js";
 import { sendTemplateEmail } from "../modules/email/email.service.js";
 import type { EmailTemplateKey } from "../modules/email/templates/index.js";
 import { formatDisplayDate } from "../common/utils/dateFormat.js";
+import { buildFormLink } from "../common/utils/links.js";
 import { calendarDaysBetween, istDateUtcMidnight, istDayNumber } from "../common/utils/istDate.js";
 import {
   computeStageInfo,
@@ -86,7 +87,16 @@ export async function runSessionDayReminders(
 
 // --- Job B: follow-up nudges for flagged students --------------------------------------
 
-type NudgePlan = { student: EmailTemplateKey; parent: EmailTemplateKey };
+type NudgePlan = {
+  student: EmailTemplateKey;
+  parent: EmailTemplateKey;
+  // The form type each recipient's `formLink`/`feedbackFormLink` should deep-link to (only
+  // set when that recipient's template actually declares the field — see
+  // email/templates/reminders.ts). Templates that don't declare the field just ignore
+  // whatever we pass (z.object strips unknown keys), so it's harmless to always compute it.
+  studentFormType?: "PRE_COUNSELLING_STUDENT" | "FEEDBACK_STUDENT";
+  parentFormType?: "PRE_COUNSELLING_PARENT" | "FEEDBACK_PARENT";
+};
 
 // Maps a flagged student's derived stage → the student+parent reminder templates. This is
 // product copy routing; adjust here if the desired template for a stage changes. Returns
@@ -101,21 +111,47 @@ function resolveNudgeTemplates(stage: DerivedStage, reason: FlagReason | null): 
     case "LOGIN_ACTIVATED": // logged in, profile not confirmed
       return { student: "PROFILE_COMPLETION_REMINDER_STUDENT", parent: "PROFILE_COMPLETION_REMINDER_PARENT" };
     case "PROFILE_COMPLETED": // profile done, both pre-counselling forms pending
-      return { student: "PRE_COUNSELLING_STUDENT_FORM_REMINDER_STUDENT", parent: "PRE_COUNSELLING_PARENT_FORM_REMINDER_PARENT" };
+      return {
+        student: "PRE_COUNSELLING_STUDENT_FORM_REMINDER_STUDENT",
+        parent: "PRE_COUNSELLING_PARENT_FORM_REMINDER_PARENT",
+        studentFormType: "PRE_COUNSELLING_STUDENT",
+        parentFormType: "PRE_COUNSELLING_PARENT",
+      };
     case "PRE_COUNSELLING_STUDENT": // student's form in, parent's pending
-      return { student: "PRE_COUNSELLING_PARENT_FORM_REMINDER_STUDENT", parent: "PRE_COUNSELLING_PARENT_FORM_REMINDER_PARENT" };
+      return {
+        student: "PRE_COUNSELLING_PARENT_FORM_REMINDER_STUDENT",
+        parent: "PRE_COUNSELLING_PARENT_FORM_REMINDER_PARENT",
+        parentFormType: "PRE_COUNSELLING_PARENT",
+      };
     case "PRE_COUNSELLING_PARENT": // parent's form in, student's pending
-      return { student: "PRE_COUNSELLING_STUDENT_FORM_REMINDER_STUDENT", parent: "PRE_COUNSELLING_STUDENT_FORM_REMINDER_PARENT" };
+      return {
+        student: "PRE_COUNSELLING_STUDENT_FORM_REMINDER_STUDENT",
+        parent: "PRE_COUNSELLING_STUDENT_FORM_REMINDER_PARENT",
+        studentFormType: "PRE_COUNSELLING_STUDENT",
+      };
     case "ASSESSMENT_PENDING":
       return { student: "ASSESSMENT_REMINDER_STUDENT", parent: "ASSESSMENT_REMINDER_PARENT" };
     case "ASSESSMENT_COMPLETED": // needs to book a session
       return { student: "SESSION_SCHEDULING_REMINDER_STUDENT", parent: "SESSION_SCHEDULING_REMINDER_PARENT" };
     case "FEEDBACK_STUDENT": // student feedback in, parent's pending
-      return { student: "FEEDBACK_PARENT_PENDING_REMINDER_STUDENT", parent: "FEEDBACK_PARENT_PENDING_REMINDER_PARENT" };
+      return {
+        student: "FEEDBACK_PARENT_PENDING_REMINDER_STUDENT",
+        parent: "FEEDBACK_PARENT_PENDING_REMINDER_PARENT",
+        parentFormType: "FEEDBACK_PARENT",
+      };
     case "FEEDBACK_PARENT": // parent feedback in, student's pending
-      return { student: "FEEDBACK_STUDENT_PENDING_REMINDER_STUDENT", parent: "FEEDBACK_STUDENT_PENDING_REMINDER_PARENT" };
+      return {
+        student: "FEEDBACK_STUDENT_PENDING_REMINDER_STUDENT",
+        parent: "FEEDBACK_STUDENT_PENDING_REMINDER_PARENT",
+        studentFormType: "FEEDBACK_STUDENT",
+      };
     case "FEEDBACK_PENDING":
-      return { student: "FEEDBACK_STUDENT_PENDING_REMINDER_STUDENT", parent: "FEEDBACK_PARENT_PENDING_REMINDER_PARENT" };
+      return {
+        student: "FEEDBACK_STUDENT_PENDING_REMINDER_STUDENT",
+        parent: "FEEDBACK_PARENT_PENDING_REMINDER_PARENT",
+        studentFormType: "FEEDBACK_STUDENT",
+        parentFormType: "FEEDBACK_PARENT",
+      };
     default:
       return null; // SESSION_*/CLOSED etc. — not idle-nudged
   }
@@ -151,18 +187,29 @@ export async function runFollowUpNudges(
     const missed = s.sessions.find(
       (sn) => sn.studentNoShow || (sn.status === "SCHEDULED" && istDayNumber(sn.scheduledDate) < istDayNumber(now))
     );
-    const data = {
+    const base = {
       studentName: `${s.user.firstName} ${s.user.lastName}`,
       parentName: "Parent",
       sessionDateTime: missed ? formatDisplayDate(missed.scheduledDate) : "your recent session",
       portalLink: env.APP_WEB_URL,
       loginLink: env.APP_WEB_URL,
-      formLink: env.APP_WEB_URL,
-      feedbackFormLink: env.APP_WEB_URL,
+    };
+    // Deep-link straight to the specific pending form, not just the bare app URL —
+    // buildFormLink mirrors the API's `/forms/:formType/students/:studentId` path.
+    // Parent form types are public (no login), so this is the parent's only way in.
+    const studentData = {
+      ...base,
+      formLink: plan.studentFormType ? buildFormLink(plan.studentFormType, s.id) : env.APP_WEB_URL,
+      feedbackFormLink: plan.studentFormType ? buildFormLink(plan.studentFormType, s.id) : env.APP_WEB_URL,
+    };
+    const parentData = {
+      ...base,
+      formLink: plan.parentFormType ? buildFormLink(plan.parentFormType, s.id) : env.APP_WEB_URL,
+      feedbackFormLink: plan.parentFormType ? buildFormLink(plan.parentFormType, s.id) : env.APP_WEB_URL,
     };
 
-    const sentStudent = await sendBestEffort(s.user.email, plan.student, data);
-    const sentParent = s.parentEmail ? await sendBestEffort(s.parentEmail, plan.parent, data) : false;
+    const sentStudent = await sendBestEffort(s.user.email, plan.student, studentData);
+    const sentParent = s.parentEmail ? await sendBestEffort(s.parentEmail, plan.parent, parentData) : false;
     if (sentStudent || sentParent) {
       await prisma.student.update({ where: { id: s.id }, data: { lastNudgeAt: now } });
       nudgesSent++;

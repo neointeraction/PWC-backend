@@ -105,3 +105,26 @@ export const discontinueStudentBodySchema = z.object({
   reason: z.string().trim().min(1).optional(),
 });
 export type DiscontinueStudentBody = z.infer<typeof discontinueStudentBodySchema>;
+
+// Bulk-upload pre-check (StepStudents.tsx in the frontend project wizard): given the rows
+// parsed from an uploaded file, report which ones already exist ANYWHERE in the system
+// (email/studentCode/mobile are unique across all projects, not just the one being
+// created) so the frontend can flag them before POST /students is ever called per-row.
+// At least one of email/studentCode/mobile must be present per row to check.
+export const checkDuplicateStudentsBodySchema = z.object({
+  students: z
+    .array(
+      z
+        .object({
+          email: emailSchema.optional(),
+          studentCode: z.string().trim().min(1).optional(),
+          mobile: phoneSchema.optional(),
+        })
+        .refine((row) => row.email || row.studentCode || row.mobile, {
+          message: "At least one of email, studentCode, or mobile is required",
+        })
+    )
+    .min(1)
+    .max(2000),
+});
+export type CheckDuplicateStudentsBody = z.infer<typeof checkDuplicateStudentsBodySchema>;

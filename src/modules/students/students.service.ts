@@ -7,8 +7,10 @@ import { BadRequestError, ConflictError, NotFoundError } from "../../common/erro
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import { sendTemplateEmail } from "../email/email.service.js";
+import { buildFormLink } from "../../common/utils/links.js";
 import { computeStageInfo, stageRelationsInclude, type StudentForStage } from "./studentStage.js";
 import type {
+  CheckDuplicateStudentsBody,
   CreateStudentInput,
   ListStudentsQuery,
   UpdateMyStudentInput,
@@ -109,16 +111,6 @@ export async function createStudent(input: CreateStudentInput) {
       loginLink: env.APP_WEB_URL,
     });
 
-    // Profile creation is the student's "profiling form" — send the parent their
-    // pre-counselling form link right away rather than waiting on the idle-nudge
-    // reminder cycle (scheduler/jobs.ts), which only fires once SCHEDULER_ENABLED.
-    if (student.parentEmail) {
-      sendEmailBestEffort(student.parentEmail, "PRE_COUNSELLING_PARENT", {
-        parentName: student.fatherName || student.motherName || "Parent",
-        formLink: env.APP_WEB_URL,
-      });
-    }
-
     return { student, tempPassword };
   } catch (err) {
     handlePrismaError(err);
@@ -148,6 +140,69 @@ export async function listStudents(query: ListStudentsQuery) {
     if (query.stage && s.stageInfo.stage !== query.stage) return false;
     if (query.flagged !== undefined && s.stageInfo.flagged !== query.flagged) return false;
     return true;
+  });
+}
+
+// Bulk-upload pre-check: email/studentCode/mobile are each globally unique (see
+// prisma/schema.prisma), so a match anywhere in the system — not just the project being
+// created — means the row can't be inserted as-is. Runs three `IN (...)` queries (not one
+// per row) so a large uploaded sheet stays cheap, then maps matches back onto each input
+// row by index since a row's email/studentCode/mobile can belong to different existing
+// students.
+export async function checkDuplicateStudents(input: CheckDuplicateStudentsBody) {
+  const { students: rows } = input;
+
+  const emails = [...new Set(rows.map((r) => r.email).filter((v): v is string => !!v))];
+  const studentCodes = [...new Set(rows.map((r) => r.studentCode).filter((v): v is string => !!v))];
+  const mobiles = [...new Set(rows.map((r) => r.mobile).filter((v): v is string => !!v))];
+
+  const existing = await prisma.student.findMany({
+    where: {
+      OR: [
+        emails.length ? { user: { email: { in: emails } } } : undefined,
+        studentCodes.length ? { studentCode: { in: studentCodes } } : undefined,
+        mobiles.length ? { mobile: { in: mobiles } } : undefined,
+      ].filter((clause): clause is NonNullable<typeof clause> => !!clause),
+    },
+    select: {
+      id: true,
+      studentCode: true,
+      mobile: true,
+      user: { select: { email: true } },
+      project: { select: { id: true, name: true } },
+    },
+  });
+
+  const byEmail = new Map(existing.map((s) => [s.user.email, s]));
+  const byStudentCode = new Map(existing.map((s) => [s.studentCode, s]));
+  const byMobile = new Map(existing.map((s) => [s.mobile, s]));
+
+  return rows.map((row, index) => {
+    const matches: {
+      field: "email" | "studentCode" | "mobile";
+      value: string;
+      studentId: string;
+      projectId: string;
+      projectName: string;
+    }[] = [];
+
+    const push = (field: "email" | "studentCode" | "mobile", value: string | undefined, match: (typeof existing)[number] | undefined) => {
+      if (value && match) {
+        matches.push({
+          field,
+          value,
+          studentId: match.id,
+          projectId: match.project.id,
+          projectName: match.project.name,
+        });
+      }
+    };
+
+    push("email", row.email, row.email ? byEmail.get(row.email) : undefined);
+    push("studentCode", row.studentCode, row.studentCode ? byStudentCode.get(row.studentCode) : undefined);
+    push("mobile", row.mobile, row.mobile ? byMobile.get(row.mobile) : undefined);
+
+    return { index, isDuplicate: matches.length > 0, matches };
   });
 }
 
@@ -262,7 +317,19 @@ export async function confirmProfile(id: string) {
     throw new ConflictError("Profile has already been confirmed");
   }
   await advanceWorkflowStatus(prisma, id, "PROFILE_COMPLETED");
-  return getStudentById(id);
+  const student = await getStudentById(id);
+
+  // The parent's pre-counselling form only becomes relevant once the student has
+  // confirmed their own profile is correct — sending it any earlier (e.g. at student
+  // creation) would hand the parent a link before there's a real profile behind it.
+  if (student.parentEmail) {
+    sendEmailBestEffort(student.parentEmail, "PRE_COUNSELLING_PARENT", {
+      parentName: student.fatherName || student.motherName || "Parent",
+      formLink: buildFormLink("PRE_COUNSELLING_PARENT", student.id),
+    });
+  }
+
+  return student;
 }
 
 // Admin/ops override for the workflow stages that aren't wired to an automatic

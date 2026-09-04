@@ -5,6 +5,7 @@ import {
 } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
 import {
+  checkDuplicateStudentsBodySchema,
   createStudentSchema,
   discontinueStudentBodySchema,
   listStudentsQuerySchema,
@@ -269,6 +270,22 @@ registry.registerPath({
   request: { query: listStudentsQuerySchema },
   responses: {
     200: { description: "List of students, each with stageInfo", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/students/check-duplicates",
+  tags: ["Students"],
+  summary:
+    "Bulk pre-check for the project-creation wizard's student file upload: given up to 2000 rows of { email?, studentCode?, mobile? } (at least one field per row), reports which rows already exist ANYWHERE in the system (not scoped to a projectId) — email/studentCode/mobile are each globally unique. Returns one result per input row, in order, with which field(s) matched and the existing student/project. Staff only.",
+  request: { body: { content: { "application/json": { schema: checkDuplicateStudentsBodySchema } } } },
+  responses: {
+    200: {
+      description: "One result per input row: { index, isDuplicate, matches: [{ field, value, studentId, projectId, projectName }] }",
+      content: { "application/json": { schema: genericObjectSchema } },
+    },
+    ...errorResponses,
   },
 });
 

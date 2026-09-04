@@ -5,6 +5,7 @@ import { requireStaff, requireAdmin, requireStudentOrStaff } from "../../common/
 import { ownStudentIdParam } from "../../common/middlewares/ownership.js";
 import * as studentsController from "./students.controller.js";
 import {
+  checkDuplicateStudentsBodySchema,
   createStudentSchema,
   discontinueStudentBodySchema,
   listStudentsQuerySchema,
@@ -29,6 +30,17 @@ studentsRouter.get(
   ...requireStaff,
   validate({ query: listStudentsQuerySchema }),
   asyncHandler(studentsController.listStudents)
+);
+
+// Bulk-upload pre-check for the project-creation wizard's student file upload: reports
+// which rows already exist anywhere in the system (not scoped to a projectId) before the
+// wizard commits to POST /students per-row. Staff-tier, same as the list/read endpoints —
+// no project ownership implied since this deliberately searches across all projects.
+studentsRouter.post(
+  "/check-duplicates",
+  ...requireStaff,
+  validate({ body: checkDuplicateStudentsBodySchema }),
+  asyncHandler(studentsController.checkDuplicateStudents)
 );
 
 // Student self-service: the logged-in student's own record. Declared before "/:id" so

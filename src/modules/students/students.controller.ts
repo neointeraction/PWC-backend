@@ -1,10 +1,19 @@
 import type { Request, Response } from "express";
 import * as studentsService from "./students.service.js";
-import type { DiscontinueStudentBody, UpdateWorkflowStatusBody } from "./students.schema.js";
+import type {
+  CheckDuplicateStudentsBody,
+  DiscontinueStudentBody,
+  UpdateWorkflowStatusBody,
+} from "./students.schema.js";
 
 export async function createStudent(req: Request, res: Response): Promise<void> {
   const result = await studentsService.createStudent(req.body);
   res.status(201).json(result);
+}
+
+export async function checkDuplicateStudents(req: Request, res: Response): Promise<void> {
+  const results = await studentsService.checkDuplicateStudents(req.body as CheckDuplicateStudentsBody);
+  res.status(200).json({ results });
 }
 
 export async function listStudents(req: Request, res: Response): Promise<void> {

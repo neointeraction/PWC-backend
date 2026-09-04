@@ -304,8 +304,10 @@ POST /api/v1/projects/wizard
 
 Notes on the shape:
 - `students` is exactly the `POST /students` body, minus `projectId` (it's implied).
-  Each still gets its own `LOGIN_CREDENTIALS_STUDENT` + `PRE_COUNSELLING_PARENT` email,
-  sent only after the whole thing commits — same as calling `POST /students` yourself.
+  Each still gets its own `LOGIN_CREDENTIALS_STUDENT` email, sent only after the whole
+  thing commits — same as calling `POST /students` yourself. `PRE_COUNSELLING_PARENT`
+  is **not** sent here either (§6) — it waits for that student's own
+  `POST /students/{id}/confirm-profile` call, same as the standalone flow.
 - `counsellorSlots` is **one row per bookable slot**, not one row per counsellor — a
   counsellor with 5 open slots is 5 rows sharing the same `counsellorCode`. This is the
   same "Counsellor ID, Date, Start Time, End Time" shape as the standalone
@@ -342,6 +344,7 @@ Base path: `/api/v1/students`
 | Method | Path | Body / Query |
 |---|---|---|
 | POST | `/` | see below (admin) |
+| POST | `/check-duplicates` | **bulk pre-check before upload (§6.0.2)** — `{ students: [{ email?, studentCode?, mobile? }] }`, up to 2000 rows, searches across all projects (staff) |
 | GET | `/me` | **student self-service — start here (§6.0)**; no params, resolves the caller from their token |
 | PATCH | `/me` | **student self-service edit (§6.0.1)** — partial body, contact/parent fields only; resolves the caller from their token |
 | GET | `/` | query: `projectId?`, `className?`, `divisionName?`, `workflowStatus?`, `stage?`, `flagged?`, `discontinued?` (staff) |
@@ -417,6 +420,48 @@ The response is the same enriched shape as `GET /students/me` (nested student + 
 so the client can refresh its cached copy from the response directly. **404** for a
 non-student account.
 
+### 6.0.2 Bulk duplicate pre-check: `POST /students/check-duplicates`
+
+For the project-creation wizard's student roster upload (parses an Excel/CSV into rows,
+one per prospective student) — call this **before** the wizard submits anything, so a
+row that collides with a student already in the system anywhere (not just the project
+being created) can be flagged in the UI instead of surfacing as a raw 409 mid-submit.
+`email` (`User.email`), `studentCode`, and `mobile` (`Student`) are each globally unique,
+so this checks across **all projects**, unscoped by `projectId`.
+
+```
+POST /api/v1/students/check-duplicates     Authorization: Bearer <accessToken>
+```
+```json
+{
+  "students": [
+    { "email": "aditi@example.com", "studentCode": "S0001", "mobile": "+919876500001" },
+    { "email": "new-student@example.com", "studentCode": "S0042" }
+  ]
+}
+```
+At least one of `email`/`studentCode`/`mobile` is required per row; up to 2000 rows per
+call. Response has one entry per input row, **in the same order**:
+```json
+{
+  "results": [
+    {
+      "index": 0,
+      "isDuplicate": true,
+      "matches": [
+        { "field": "email", "value": "aditi@example.com", "studentId": "cm...", "projectId": "cm...", "projectName": "Greenwood High 2026" },
+        { "field": "studentCode", "value": "S0001", "studentId": "cm...", "projectId": "cm...", "projectName": "Greenwood High 2026" }
+      ]
+    },
+    { "index": 1, "isDuplicate": false, "matches": [] }
+  ]
+}
+```
+A row can have more than one `matches` entry (e.g. its email matches one existing student
+and its studentCode matches a different one) — surface all of them rather than assuming a
+single cause. This is a read-only check; it doesn't reserve or lock anything, so a genuine
+duplicate can still be caught again as a 409 if two uploads race.
+
 **Create request** — all fields required unless marked optional:
 ```json
 {
@@ -474,10 +519,16 @@ password"/resend flow yet (§2.4). Creation also sends the `LOGIN_CREDENTIALS_ST
 email (login ID + this same temp password) to the student's own email, best-effort —
 it doesn't fail the request if the send fails. There's no resend endpoint yet — if both
 the on-screen value and the email are lost, someone will need to regenerate the password
-directly against the DB for now. Separately, `parentEmail` gets a `PRE_COUNSELLING_PARENT`
-email (their pre-counselling form link) at the same time, also best-effort — parents have
-no login, so this is their only prompt to fill it in until the idle-nudge reminder cycle
-(`SCHEDULER_ENABLED`) picks it up.
+directly against the DB for now. `parentEmail` does **not** get anything at creation
+time — the `PRE_COUNSELLING_PARENT` email (their pre-counselling form link) only goes
+out once the student calls `POST /students/{id}/confirm-profile` (§6.1) and
+`workflowStatus` reaches `PROFILE_COMPLETED`, also best-effort. Sending it any earlier
+would hand the parent a link before there's a confirmed profile behind it. The link
+itself deep-links straight to the parent's form
+(`${APP_WEB_URL}/forms/PRE_COUNSELLING_PARENT/students/{studentId}` — parents have no
+login, so this is their only way in) rather than the bare app URL. Until the profile is
+confirmed the parent has no prompt at all; after that, the idle-nudge reminder cycle
+(`SCHEDULER_ENABLED`) picks it up if the form stays unsubmitted.
 
 `workflowStatus` is one of: `DRAFT`, `PROFILE_COMPLETED`,
 `PRE_COUNSELLING_FORMS_SUBMITTED`, `ASSESSMENT_PENDING`, `ASSESSMENT_COMPLETED`,
@@ -507,7 +558,9 @@ call anything extra, just watch `workflowStatus` change on subsequent `GET`s:
 **`POST /students/{id}/confirm-profile`** — no body. 200 with the updated student on
 success. **409** if `workflowStatus` isn't currently `DRAFT` (i.e. already confirmed —
 this is a one-time action, not idempotent-safe to call blindly; check the current
-status first if you're not sure).
+status first if you're not sure). This is also the trigger for the parent's
+`PRE_COUNSELLING_PARENT` email (§6, `parentEmail` best-effort) — nothing is sent to the
+parent before this call succeeds.
 
 The remaining 4 stages (`COUNSELLOR_FEEDBACK_REPORT`, `COUNSELLOR_FEEDBACK`,
 `STUDENT_PARENT_FEEDBACK`, `CLOSED`) depend on modules that don't exist yet (Counsellor
