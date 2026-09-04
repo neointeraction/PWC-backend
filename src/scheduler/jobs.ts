@@ -72,7 +72,9 @@ export async function runSessionDayReminders(
     };
 
     await sendBestEffort(s.student.user.email, `SESSION_${n}_DAY_REMINDER_STUDENT` as EmailTemplateKey, data);
-    await sendBestEffort(s.student.parentEmail, `SESSION_${n}_DAY_REMINDER_PARENT` as EmailTemplateKey, data);
+    if (s.student.parentEmail) {
+      await sendBestEffort(s.student.parentEmail, `SESSION_${n}_DAY_REMINDER_PARENT` as EmailTemplateKey, data);
+    }
     await sendBestEffort(s.counsellor.user.email, `SESSION_${n}_DAY_REMINDER_COUNSELLOR` as EmailTemplateKey, data);
 
     await prisma.session.update({ where: { id: s.id }, data: { dayReminderSentAt: now } });
@@ -160,7 +162,7 @@ export async function runFollowUpNudges(
     };
 
     const sentStudent = await sendBestEffort(s.user.email, plan.student, data);
-    const sentParent = await sendBestEffort(s.parentEmail, plan.parent, data);
+    const sentParent = s.parentEmail ? await sendBestEffort(s.parentEmail, plan.parent, data) : false;
     if (sentStudent || sentParent) {
       await prisma.student.update({ where: { id: s.id }, data: { lastNudgeAt: now } });
       nudgesSent++;

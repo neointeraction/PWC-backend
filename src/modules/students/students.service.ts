@@ -112,10 +112,12 @@ export async function createStudent(input: CreateStudentInput) {
     // Profile creation is the student's "profiling form" — send the parent their
     // pre-counselling form link right away rather than waiting on the idle-nudge
     // reminder cycle (scheduler/jobs.ts), which only fires once SCHEDULER_ENABLED.
-    sendEmailBestEffort(student.parentEmail, "PRE_COUNSELLING_PARENT", {
-      parentName: student.fatherName || student.motherName || "Parent",
-      formLink: env.APP_WEB_URL,
-    });
+    if (student.parentEmail) {
+      sendEmailBestEffort(student.parentEmail, "PRE_COUNSELLING_PARENT", {
+        parentName: student.fatherName || student.motherName || "Parent",
+        formLink: env.APP_WEB_URL,
+      });
+    }
 
     return { student, tempPassword };
   } catch (err) {

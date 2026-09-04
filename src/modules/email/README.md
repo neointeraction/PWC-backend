@@ -134,14 +134,15 @@ automatically by `sessions.service.ts` (`bookSessions`, `sendDayReminder`), same
 | `SESSION_2_DAY_REMINDER_COUNSELLOR` | `counsellorName`, `studentName`, `sessionTime`, `portalLink?` | 11 (not in source sheet — see note above) |
 | `SESSION_RESCHEDULED_STUDENT` | `studentName`, `sessionNumber` (`"1"` \| `"2"`), `newDateTime`, `portalLink?` | 12 — Session Rescheduled |
 | `SESSION_RESCHEDULED_PARENT` | `parentName`, `studentName`, `sessionNumber`, `newDateTime` | 12 |
+| `SESSION_RESCHEDULED_COUNSELLOR` | `counsellorName`, `studentName`, `sessionNumber`, `newDateTime`, `portalLink?` | Not in source sheet — sent to the assigned counsellor on every `POST /sessions/:id/reschedule`, regardless of who initiated it. |
 | `SESSION_CANCELLED_STUDENT` | `studentName`, `sessionNumber`, `originalDateTime`, `portalLink?` | 13 — Session Cancelled |
 | `SESSION_CANCELLED_PARENT` | `parentName`, `studentName`, `sessionNumber`, `originalDateTime` | 13 |
+| `SESSION_CANCELLED_COUNSELLOR` | `counsellorName`, `studentName`, `sessionNumber`, `originalDateTime`, `portalLink?` | Not in source sheet — sent to the assigned counsellor on every `POST /sessions/:id/cancel` (and each session cancelled via `/restart`), regardless of who initiated it. |
 | `SESSION_MISSED_STUDENT` | `studentName`, `sessionDateTime`, `portalLink?` | 14 — Session Missed (no-show). Reused as the "Admin permitted" reschedule prompt sent by `POST /sessions/:id/no-show/reschedule-prompt` after a student no-show. |
 | `SESSION_MISSED_PARENT` | `parentName`, `studentName`, `sessionDateTime` | 14 |
 | `SESSION_STUDENT_NO_SHOW_ADMIN` | `studentName`, `counsellorName`, `sessionNumber`, `sessionDateTime` | Not in source sheet — Admin alert fired by `POST /sessions/:id/no-show` (party `STUDENT`), see `docs/Session Handling_Cancellation  Rescheduling.pdf` §2. |
 | `SESSION_COUNSELLOR_NO_SHOW_ADMIN` | `studentName`, `counsellorName`, `sessionNumber`, `sessionDateTime` | Not in source sheet — Admin alert fired by `POST /sessions/:id/no-show` (party `COUNSELLOR`), same doc §4. |
 | `SESSION_COUNSELLOR_NO_SHOW_STUDENT` | `studentName`, `sessionDateTime`, `portalLink?` | Not in source sheet — apology + reschedule prompt sent automatically (no Admin gate) when the counsellor is the no-show party, same doc §4. |
-| `SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT` | `studentName`, `sessionNumber`, `reason`, `proposedDateTime`, `portalLink?` | Not in source sheet — sent when a counsellor proposes a reschedule (`POST /sessions/:id/reschedule-request`), see `docs/Session Handling_Cancellation  Rescheduling.pdf` §3. |
 | `FEEDBACK_STUDENT_PENDING_REMINDER_STUDENT` | `studentName`, `feedbackFormLink?` | 15 — Feedback Reminder, student pending |
 | `FEEDBACK_STUDENT_PENDING_REMINDER_PARENT` | `parentName`, `studentName` | 15 |
 | `FEEDBACK_PARENT_PENDING_REMINDER_STUDENT` | `studentName` | 16 — Feedback Reminder, parent pending |

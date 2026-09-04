@@ -13,7 +13,6 @@ import type {
   ListSessionsQuery,
   ListSlotsQuery,
   MarkNoShowBody,
-  RequestCounsellorRescheduleBody,
   RescheduleSessionBody,
   SendDayReminderBody,
   SetNotesBody,
@@ -120,25 +119,6 @@ export async function rescheduleSession(req: Request, res: Response): Promise<vo
 
 export async function cancelSession(req: Request, res: Response): Promise<void> {
   const session = await sessionsService.cancelSession(req.params.id as string, req.body as CancelSessionBody);
-  res.status(200).json(session);
-}
-
-export async function requestCounsellorReschedule(req: Request, res: Response): Promise<void> {
-  const session = await sessionsService.requestCounsellorReschedule(
-    req.params.id as string,
-    req.body as RequestCounsellorRescheduleBody,
-    { sub: req.user!.sub, role: req.user!.role }
-  );
-  res.status(200).json(session);
-}
-
-export async function acceptCounsellorRescheduleProposal(req: Request, res: Response): Promise<void> {
-  const session = await sessionsService.acceptCounsellorRescheduleProposal(req.params.id as string);
-  res.status(200).json(session);
-}
-
-export async function declineCounsellorRescheduleProposal(req: Request, res: Response): Promise<void> {
-  const session = await sessionsService.declineCounsellorRescheduleProposal(req.params.id as string);
   res.status(200).json(session);
 }
 

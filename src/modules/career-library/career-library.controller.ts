@@ -140,6 +140,19 @@ export async function rejectInstitution(req: Request, res: Response): Promise<vo
   res.status(200).json(await careerLibraryService.rejectInstitution(id));
 }
 
+export async function updateEntranceExam(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.updateEntranceExam(id, req.body));
+}
+export async function updateCourse(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.updateCourse(id, req.body));
+}
+export async function updateInstitution(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as LookupIdParams;
+  res.status(200).json(await careerLibraryService.updateInstitution(id, req.body));
+}
+
 // ---- Education Path entries (global canonical lookup) ----
 
 export async function listEducationEntries(req: Request, res: Response): Promise<void> {

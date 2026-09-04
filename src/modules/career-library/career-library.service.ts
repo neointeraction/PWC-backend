@@ -22,6 +22,9 @@ import type {
   SubmitEntranceExamInput,
   SubmitInstitutionInput,
   UpdateCareerEntryInput,
+  UpdateCourseInput,
+  UpdateEntranceExamInput,
+  UpdateInstitutionInput,
 } from "./career-library.schema.js";
 
 // The authenticated actor performing a write (from the access token).
@@ -781,6 +784,39 @@ export const approveCourse = (id: string) => approveLookup("course", id);
 export const rejectCourse = (id: string) => rejectLookup("course", id);
 export const approveInstitution = (id: string) => approveLookup("institution", id);
 export const rejectInstitution = (id: string) => rejectLookup("institution", id);
+
+// A direct edit of the canonical row (see updateEntranceExamSchema): unlike the "select
+// existing or add new" resolvers above, this always writes every provided field straight
+// through — correcting a wrong value is deliberate, not a side effect of linking it.
+export async function updateEntranceExam(id: string, input: UpdateEntranceExamInput) {
+  const existing = await prisma.entranceExam.findUnique({ where: { id } });
+  if (!existing) throw new NotFoundError("Entrance exam not found");
+  try {
+    return await prisma.entranceExam.update({ where: { id }, data: input });
+  } catch (err) {
+    handlePrismaError(err);
+  }
+}
+
+export async function updateCourse(id: string, input: UpdateCourseInput) {
+  const existing = await prisma.course.findUnique({ where: { id } });
+  if (!existing) throw new NotFoundError("Course not found");
+  try {
+    return await prisma.course.update({ where: { id }, data: input });
+  } catch (err) {
+    handlePrismaError(err);
+  }
+}
+
+export async function updateInstitution(id: string, input: UpdateInstitutionInput) {
+  const existing = await prisma.institution.findUnique({ where: { id } });
+  if (!existing) throw new NotFoundError("Institution not found");
+  try {
+    return await prisma.institution.update({ where: { id }, data: input });
+  } catch (err) {
+    handlePrismaError(err);
+  }
+}
 
 export async function deleteCareerEntry(id: string) {
   const entry = await prisma.careerLibraryEntry.findUnique({ where: { id } });

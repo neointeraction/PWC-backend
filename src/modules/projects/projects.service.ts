@@ -184,7 +184,7 @@ interface PendingStudentEmail {
   email: string;
   firstName: string;
   lastName: string;
-  parentEmail: string;
+  parentEmail: string | undefined;
   fatherName: string;
   motherName: string | null;
   tempPassword: string;
@@ -322,10 +322,12 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
         defaultPassword: s.tempPassword,
         loginLink: env.APP_WEB_URL,
       });
-      sendEmailBestEffort(s.parentEmail, "PRE_COUNSELLING_PARENT", {
-        parentName: s.fatherName || s.motherName || "Parent",
-        formLink: env.APP_WEB_URL,
-      });
+      if (s.parentEmail) {
+        sendEmailBestEffort(s.parentEmail, "PRE_COUNSELLING_PARENT", {
+          parentName: s.fatherName || s.motherName || "Parent",
+          formLink: env.APP_WEB_URL,
+        });
+      }
     }
 
     return {

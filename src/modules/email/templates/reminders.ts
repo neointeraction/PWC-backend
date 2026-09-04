@@ -412,6 +412,28 @@ export const SESSION_RESCHEDULED_PARENT = reminder({
     `Dear ${parentName}, ${studentName}'s session ${sessionNumber} has been rescheduled to ${newDateTime}.`,
 });
 
+// Not from the source WhatsApp sheet — added so the assigned counsellor also learns
+// of a reschedule that moved their own calendar slot, whoever initiated it.
+const sessionRescheduledCounsellorSchema = z.object({
+  counsellorName: z.string().trim().min(1),
+  studentName: z.string().trim().min(1),
+  sessionNumber: z.enum(["1", "2"]),
+  newDateTime: z.string().trim().min(1),
+  portalLink: z.string().url().optional(),
+});
+export const SESSION_RESCHEDULED_COUNSELLOR = reminder({
+  subject: "A Session Has Been Rescheduled",
+  schema: sessionRescheduledCounsellorSchema,
+  body: ({ counsellorName, studentName, sessionNumber, newDateTime, portalLink }) =>
+    withLink(
+      `Hi ${counsellorName}, your session ${sessionNumber} with ${studentName} has been rescheduled to ${newDateTime}. Please check your portal for the updated details.`,
+      "View My Sessions",
+      portalLink
+    ),
+  text: ({ counsellorName, studentName, sessionNumber, newDateTime }) =>
+    `Hi ${counsellorName}, your session ${sessionNumber} with ${studentName} has been rescheduled to ${newDateTime}.`,
+});
+
 // --- Row 13: Session Cancelled (whenever either party cancels) ---
 
 const sessionCancelledStudentSchema = z.object({
@@ -448,6 +470,28 @@ export const SESSION_CANCELLED_PARENT = reminder({
     ),
   text: ({ parentName, studentName, sessionNumber, originalDateTime }) =>
     `Dear ${parentName}, ${studentName}'s session ${sessionNumber} scheduled for ${originalDateTime} has been cancelled.`,
+});
+
+// Not from the source WhatsApp sheet — added so the assigned counsellor also learns
+// of a cancellation that freed up their own calendar slot, whoever initiated it.
+const sessionCancelledCounsellorSchema = z.object({
+  counsellorName: z.string().trim().min(1),
+  studentName: z.string().trim().min(1),
+  sessionNumber: z.enum(["1", "2"]),
+  originalDateTime: z.string().trim().min(1),
+  portalLink: z.string().url().optional(),
+});
+export const SESSION_CANCELLED_COUNSELLOR = reminder({
+  subject: "A Session Has Been Cancelled",
+  schema: sessionCancelledCounsellorSchema,
+  body: ({ counsellorName, studentName, sessionNumber, originalDateTime, portalLink }) =>
+    withLink(
+      `Hi ${counsellorName}, your session ${sessionNumber} with ${studentName} scheduled for ${originalDateTime} has been cancelled.`,
+      "View My Sessions",
+      portalLink
+    ),
+  text: ({ counsellorName, studentName, sessionNumber, originalDateTime }) =>
+    `Hi ${counsellorName}, your session ${sessionNumber} with ${studentName} scheduled for ${originalDateTime} has been cancelled.`,
 });
 
 // --- Row 14: Session Missed / No-show (same day, post no-show) ---
@@ -544,29 +588,6 @@ export const SESSION_COUNSELLOR_NO_SHOW_STUDENT = reminder({
     ),
   text: ({ studentName, sessionDateTime }) =>
     `Hi ${studentName}, we're sorry — your counsellor was unable to join your session scheduled for ${sessionDateTime}. Please rebook at your convenience.`,
-});
-
-// --- Counsellor-initiated reschedule (same doc, §3) ---
-// Not in either source sheet — added alongside the no-show templates above.
-
-const sessionCounsellorRescheduleRequestStudentSchema = z.object({
-  studentName: z.string().trim().min(1),
-  sessionNumber: z.enum(["1", "2"]),
-  reason: z.string().trim().min(1),
-  proposedDateTime: z.string().trim().min(1),
-  portalLink: z.string().url().optional(),
-});
-export const SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT = reminder({
-  subject: "Your Counsellor Needs to Reschedule",
-  schema: sessionCounsellorRescheduleRequestStudentSchema,
-  body: ({ studentName, sessionNumber, reason, proposedDateTime, portalLink }) =>
-    withLink(
-      `Hi ${studentName}, your counsellor needs to reschedule session ${sessionNumber} (${reason}). They've proposed a new time: ${proposedDateTime}. Please log in to the portal to accept it or let us know if it doesn't work.`,
-      "Review Proposed Time",
-      portalLink
-    ),
-  text: ({ studentName, sessionNumber, reason, proposedDateTime }) =>
-    `Hi ${studentName}, your counsellor needs to reschedule session ${sessionNumber} (${reason}). Proposed new time: ${proposedDateTime}.`,
 });
 
 // --- Row 15: Feedback Reminder — Student Pending (+2 days) ---

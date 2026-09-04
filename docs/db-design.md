@@ -197,8 +197,8 @@ Extends `User` (role=STUDENT).
 | divisionName | String | free text (e.g. "A") — same, no lookup |
 | mobile | String | unique, E.164 |
 | whatsappNumber | String? | optional, only if different from mobile |
-| parentMobile | String | unique, E.164; primary contact for session links/notifications (Student Profile Form, Section A) |
-| parentEmail | String | unique; primary contact, same as above |
+| parentMobile | String? | optional, unique when set, E.164; primary contact for session links/notifications (Student Profile Form, Section A) — left empty rather than falling back to the student's own `mobile` |
+| parentEmail | String? | optional, unique when set; primary contact, same as above — `PRE_COUNSELLING_PARENT` and the various session-lifecycle parent emails are skipped (not sent) when this is unset |
 | fatherName | String | Student Profile Form, Section B |
 | fatherOccupation | String? | optional (bulk imports may omit) |
 | fatherEmployer | String? | optional ("if applicable") |
@@ -274,8 +274,7 @@ constraint).
 | cancellationReason | `CancellationReason`? | STUDENT_UNAVAILABLE / COUNSELLOR_UNAVAILABLE / INSTITUTION_REQUEST / OTHER |
 | cancellationNotes | String? | free text |
 | rescheduledFromDate, rescheduledFromStart | nullable | prior date/time, for the "was X → now Y" display |
-| studentRescheduleUsed | Boolean | "only 1 self-service reschedule per session" (`docs/Session Handling_Cancellation  Rescheduling.pdf` §1) — set on a successful STUDENT-initiated reschedule, blocks a further one (routes to Admin). Not consumed by ADMIN/COUNSELLOR-initiated moves. Reset to false when a cancelled session is reactivated (fresh start), including via the Option B restart flow. |
-| counsellorRescheduleReason, counsellorProposedDate, counsellorProposedStartTime, counsellorProposedEndTime | nullable | a pending counsellor-initiated reschedule proposal (same doc, §3) — non-null `counsellorProposedDate` means one's awaiting the student's accept/decline. Doesn't move `scheduledDate`/`startTime`/`endTime` until accepted. Cleared on accept, decline, any other reschedule, or cancellation. |
+| studentRescheduleUsed | Boolean | "only 1 self-service reschedule per session" (`docs/Session Handling_Cancellation  Rescheduling.pdf` §1) — set on a successful STUDENT-initiated reschedule, blocks a further one (routes to Admin). Not consumed by an ADMIN-initiated move. Reset to false when a cancelled session is reactivated (fresh start), including via the Option B restart flow. There is no counsellor-initiated reschedule path — a counsellor who needs a session moved contacts Admin manually. |
 
 Unique constraints: `(studentId, sessionNumber)` — a student can't double-book the same
 session number; `(counsellorId, scheduledDate, startTime)` — prevents double-booking a

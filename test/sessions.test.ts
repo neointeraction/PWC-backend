@@ -569,61 +569,6 @@ describe("Sessions API", () => {
       expect(asAdmin.status).toBe(200);
     });
 
-    it("counsellor proposes a reschedule; student accepts; move performed without consuming the self-service limit", async () => {
-      const { session1Id, altDate, time } = await bookFreshPairForNewStudent();
-
-      const requested = await authRequest(app)
-        .post(`/api/v1/sessions/${session1Id}/reschedule-request`)
-        .send({ reason: "Family emergency", date: ymd(altDate), startTime: time });
-      expect(requested.status).toBe(200);
-      expect(requested.body.counsellorRescheduleReason).toBe("Family emergency");
-
-      const accepted = await authRequest(app).post(`/api/v1/sessions/${session1Id}/reschedule-request/accept`);
-      expect(accepted.status).toBe(200);
-      expect(accepted.body.status).toBe("SCHEDULED");
-      // scheduledDate comes back in the generic display format ("08 Jul 2027", IST) via
-      // formatResponseDates — compare against the same formatter rather than re-parsing
-      // the display string with `new Date(...)`, which reads it as local time and can
-      // drift a day off UTC-midnight values.
-      expect(accepted.body.scheduledDate).toBe(formatDisplayDate(altDate));
-      expect(accepted.body.counsellorProposedDate).toBeNull();
-      expect(accepted.body.studentRescheduleUsed).toBe(false); // not consumed
-
-      // The student's own 1 self-service reschedule is still available afterward.
-      const nextAlt = addDays(altDate, 20);
-      await authRequest(app).post("/api/v1/sessions/slots").send({
-        projectId,
-        counsellorId: counsellorAId,
-        slots: [{ date: ymd(nextAlt), startTime: time, endTime: "11:45" }],
-      });
-      const selfService = await authRequest(app)
-        .post(`/api/v1/sessions/${session1Id}/reschedule`)
-        .send({ date: ymd(nextAlt), startTime: time, initiatedBy: "STUDENT" });
-      expect(selfService.status).toBe(200);
-    });
-
-    it("student can decline a counsellor's proposal, which just clears it", async () => {
-      const { session1Id, altDate, time } = await bookFreshPairForNewStudent();
-      await authRequest(app)
-        .post(`/api/v1/sessions/${session1Id}/reschedule-request`)
-        .send({ reason: "Clinic day", date: ymd(altDate), startTime: time });
-
-      const declined = await authRequest(app).post(`/api/v1/sessions/${session1Id}/reschedule-request/decline`);
-      expect(declined.status).toBe(200);
-      expect(declined.body.counsellorProposedDate).toBeNull();
-      expect(declined.body.status).toBe("SCHEDULED"); // no auto-cancel
-    });
-
-    it("rejects a counsellor proposing a slot that isn't their own", async () => {
-      const { session1Id, altDate, time } = await bookFreshPairForNewStudent();
-      // altDate/time was also added for counsellorB above, but session1 is locked to A.
-      const res = await request(app)
-        .post(`/api/v1/sessions/${session1Id}/reschedule-request`)
-        .set("Authorization", bearer("COUNSELLOR", { userId: (await prisma.counsellor.findUniqueOrThrow({ where: { id: counsellorBId } })).userId }))
-        .send({ reason: "Not my session", date: ymd(altDate), startTime: time });
-      expect(res.status).toBe(403);
-    });
-
     it("restarts (Option B): cancels both sessions, then rebooking reactivates them fresh", async () => {
       const { studentId: freshStudentId, session1Id, session2Id } = await bookFreshPairForNewStudent();
 

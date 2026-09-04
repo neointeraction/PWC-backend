@@ -1,7 +1,7 @@
 import type { CancellationReason, Prisma, SessionNumber, SessionStatus } from "@prisma/client";
 import { env } from "../../config/env.js";
 import { prisma } from "../../config/prisma.js";
-import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../common/errors/AppError.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { advanceWorkflowStatus, WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
 import { sendTemplateEmail } from "../email/email.service.js";
@@ -317,8 +317,8 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
     const claim2 = await tx.counsellorSlot.updateMany({ where: { id: slot2.id, status: "OPEN" }, data: { status: "BOOKED" } });
     if (claim2.count !== 1) throw new ConflictError("That Session 2 slot was just booked by someone else — please pick another");
 
-    // Fresh start (Option B): a reactivated row also clears the reschedule allowance and
-    // any stale counsellor proposal, same as a single-session reschedule reactivation.
+    // Fresh start (Option B): a reactivated row also clears the reschedule allowance,
+    // same as a single-session reschedule reactivation.
     const freshFields = {
       status: "SCHEDULED" as const,
       cancellationReason: null,
@@ -328,10 +328,6 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
       studentNoShow: false,
       counsellorNoShow: false,
       studentRescheduleUsed: false,
-      counsellorRescheduleReason: null,
-      counsellorProposedDate: null,
-      counsellorProposedStartTime: null,
-      counsellorProposedEndTime: null,
     };
 
     const createdSession1 = existingSession1
@@ -385,11 +381,13 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
     studentName,
     sessionDateTime: s1DateTime,
   });
-  sendEmailBestEffort(session1.student.parentEmail, "SESSION_SCHEDULED_CONFIRMATION_PARENT", {
-    parentName: "Parent",
-    studentName,
-    sessionDateTime: s1DateTime,
-  });
+  if (session1.student.parentEmail) {
+    sendEmailBestEffort(session1.student.parentEmail, "SESSION_SCHEDULED_CONFIRMATION_PARENT", {
+      parentName: "Parent",
+      studentName,
+      sessionDateTime: s1DateTime,
+    });
+  }
   sendEmailBestEffort(counsellor.user.email, "SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR", {
     counsellorName,
     studentName,
@@ -631,7 +629,7 @@ export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
   const data = role === "STUDENT" ? { studentJoinedAt: session.studentJoinedAt ?? now } : { counsellorJoinedAt: session.counsellorJoinedAt ?? now };
   const updated = await prisma.session.update({ where: { id }, data, include: sessionInclude });
 
-  if (role === "STUDENT") {
+  if (role === "STUDENT" && updated.student.parentEmail) {
     sendEmailBestEffort(updated.student.parentEmail, "SESSION_JOINED_PARENT", {
       parentName: "Parent",
       studentName: `${updated.student.user.firstName} ${updated.student.user.lastName}`,
@@ -667,10 +665,9 @@ export async function setNotes(id: string, notes: string) {
 
 // --- Reschedule / cancel ---
 
-// Shared by rescheduleSession and acceptCounsellorRescheduleProposal: claims the new
-// slot, releases the old one (if any), and updates the session row. Doesn't touch
-// studentRescheduleUsed — callers decide whether this particular move consumes the
-// student's one-time self-service allowance.
+// Claims the new slot, releases the old one (if any), and updates the session row.
+// Doesn't touch studentRescheduleUsed — the caller decides whether this particular
+// move consumes the student's one-time self-service allowance.
 async function claimSlotAndUpdateSession(
   session: { id: string; counsellorId: string; scheduledDate: Date; startTime: string },
   targetDate: string,
@@ -713,11 +710,6 @@ async function claimSlotAndUpdateSession(
         counsellorJoinedAt: null,
         studentNoShow: false,
         counsellorNoShow: false,
-        // Any pending counsellor proposal was targeting the *old* date — stale now.
-        counsellorRescheduleReason: null,
-        counsellorProposedDate: null,
-        counsellorProposedStartTime: null,
-        counsellorProposedEndTime: null,
         ...extraData,
       },
       include: sessionInclude,
@@ -760,9 +752,10 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
     }
     // "Only 1 reschedule is allowed per student" (per session — docs/Session Handling_
     // Cancellation  Rescheduling.pdf §1, Option A). A further self-service attempt
-    // routes to Admin (same message shape as the 24h cutoff); Admin- or counsellor-
-    // initiated reschedules aren't limited. The student's other escape hatch is Option
-    // B — see restartStudentSessions below.
+    // routes to Admin (same message shape as the 24h cutoff); an Admin-initiated
+    // reschedule isn't limited. The student's other escape hatch is Option B — see
+    // restartStudentSessions below. (Counsellors have no reschedule endpoint at all —
+    // they contact Admin manually.)
     if (session.studentRescheduleUsed) {
       throw new BadRequestError(
         "You've already used your one self-service reschedule for this session. Please contact Admin for further changes."
@@ -772,8 +765,8 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
 
   await assertSessionGap(session.studentId, session.sessionNumber, input.date);
 
-  // Only a STUDENT-initiated move consumes the one-time allowance (ADMIN/COUNSELLOR
-  // don't); reactivating a cancelled session is a fresh start regardless of initiator;
+  // Only a STUDENT-initiated move consumes the one-time allowance (ADMIN doesn't);
+  // reactivating a cancelled session is a fresh start regardless of initiator;
   // otherwise leave the flag untouched (`undefined` = not included in the update).
   const studentRescheduleUsed =
     input.initiatedBy === "STUDENT" ? true : session.status === "CANCELLED" ? false : undefined;
@@ -781,6 +774,7 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
   const updated = await claimSlotAndUpdateSession(session, input.date, input.startTime, { studentRescheduleUsed });
 
   const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
+  const counsellorName = `${updated.counsellor.user.firstName} ${updated.counsellor.user.lastName}`;
   const newDateTime = formatDateTime(input.date, input.startTime);
   const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
 
@@ -789,127 +783,22 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
     sessionNumber: sessionNumberDigit,
     newDateTime,
   });
-  sendEmailBestEffort(updated.student.parentEmail, "SESSION_RESCHEDULED_PARENT", {
-    parentName: "Parent",
+  if (updated.student.parentEmail) {
+    sendEmailBestEffort(updated.student.parentEmail, "SESSION_RESCHEDULED_PARENT", {
+      parentName: "Parent",
+      studentName,
+      sessionNumber: sessionNumberDigit,
+      newDateTime,
+    });
+  }
+  sendEmailBestEffort(updated.counsellor.user.email, "SESSION_RESCHEDULED_COUNSELLOR", {
+    counsellorName,
     studentName,
     sessionNumber: sessionNumberDigit,
     newDateTime,
   });
 
   return updated;
-}
-
-// --- Counsellor-initiated reschedule (docs/Session Handling_Cancellation  Rescheduling.pdf §3) ---
-//
-// A three-step handshake, distinct from the student self-service path above and not
-// subject to its 1-reschedule limit: the counsellor proposes one alternative from their
-// own open inventory + a reason; the student either accepts (performs the actual move)
-// or declines (clears the proposal — restarting from there is the student's own next
-// action, via restartStudentSessions below).
-
-export async function requestCounsellorReschedule(
-  id: string,
-  input: { reason: string; date: string; startTime: string },
-  actingUser: { sub: string; role: string }
-) {
-  const session = await getSessionById(id);
-  if (session.status !== "SCHEDULED") {
-    throw new ConflictError(`A ${session.status.toLowerCase()} session can't be rescheduled`);
-  }
-
-  // A counsellor may only propose for their own session; Admin can act on any.
-  if (actingUser.role === "COUNSELLOR") {
-    const counsellor = await prisma.counsellor.findUnique({ where: { userId: actingUser.sub } });
-    if (!counsellor || counsellor.id !== session.counsellorId) {
-      throw new ForbiddenError("You can only request a reschedule for your own session");
-    }
-  }
-
-  // "The system shows the counsellor their own remaining open slots" — validated here
-  // by requiring the proposed slot to actually belong to this session's counsellor.
-  const proposedSlot = await prisma.counsellorSlot.findFirst({
-    where: { counsellorId: session.counsellorId, slotDate: toDate(input.date), startTime: input.startTime, status: "OPEN" },
-  });
-  if (!proposedSlot) {
-    throw new ConflictError("That date/time isn't one of this counsellor's own open slots");
-  }
-  await assertSessionGap(session.studentId, session.sessionNumber, input.date);
-
-  const updated = await prisma.session.update({
-    where: { id },
-    data: {
-      counsellorRescheduleReason: input.reason,
-      counsellorProposedDate: proposedSlot.slotDate,
-      counsellorProposedStartTime: proposedSlot.startTime,
-      counsellorProposedEndTime: proposedSlot.endTime,
-    },
-    include: sessionInclude,
-  });
-
-  const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
-  const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
-  const proposedDateTime = formatDateTime(input.date, input.startTime);
-
-  sendEmailBestEffort(updated.student.user.email, "SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT", {
-    studentName,
-    sessionNumber: sessionNumberDigit,
-    reason: input.reason,
-    proposedDateTime,
-    portalLink: env.APP_WEB_URL,
-  });
-
-  return updated;
-}
-
-export async function acceptCounsellorRescheduleProposal(id: string) {
-  const session = await getSessionById(id);
-  if (!session.counsellorProposedDate || !session.counsellorProposedStartTime) {
-    throw new BadRequestError("This session has no pending counsellor reschedule proposal");
-  }
-  if (session.status !== "SCHEDULED") {
-    throw new ConflictError(`A ${session.status.toLowerCase()} session can't be rescheduled`);
-  }
-
-  const targetDate = session.counsellorProposedDate.toISOString().slice(0, 10);
-  const targetStartTime = session.counsellorProposedStartTime;
-
-  // Counsellor-initiated — doesn't touch studentRescheduleUsed.
-  const updated = await claimSlotAndUpdateSession(session, targetDate, targetStartTime, {});
-
-  const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
-  const newDateTime = formatDateTime(targetDate, targetStartTime);
-  const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
-
-  sendEmailBestEffort(updated.student.user.email, "SESSION_RESCHEDULED_STUDENT", {
-    studentName,
-    sessionNumber: sessionNumberDigit,
-    newDateTime,
-  });
-  sendEmailBestEffort(updated.student.parentEmail, "SESSION_RESCHEDULED_PARENT", {
-    parentName: "Parent",
-    studentName,
-    sessionNumber: sessionNumberDigit,
-    newDateTime,
-  });
-
-  return updated;
-}
-
-export async function declineCounsellorRescheduleProposal(id: string) {
-  const session = await getSessionById(id);
-  if (!session.counsellorProposedDate) {
-    throw new BadRequestError("This session has no pending counsellor reschedule proposal");
-  }
-  return prisma.session.update({
-    where: { id },
-    data: {
-      counsellorRescheduleReason: null,
-      counsellorProposedDate: null,
-      counsellorProposedStartTime: null,
-      counsellorProposedEndTime: null,
-    },
-    include: sessionInclude,
-  });
 }
 
 // --- Restart (docs/Session Handling_Cancellation  Rescheduling.pdf §1, Option B) ---
@@ -950,10 +839,6 @@ export async function restartStudentSessions(studentId: string) {
             status: "CANCELLED",
             cancellationReason: "OTHER",
             cancellationNotes: "Student restarted booking from scratch (Option B)",
-            counsellorRescheduleReason: null,
-            counsellorProposedDate: null,
-            counsellorProposedStartTime: null,
-            counsellorProposedEndTime: null,
           },
           include: sessionInclude,
         })
@@ -966,8 +851,12 @@ export async function restartStudentSessions(studentId: string) {
   for (const s of cancelled) {
     const originalDateTime = formatDateTime(s.scheduledDate.toISOString().slice(0, 10), s.startTime);
     const sessionNumberDigit = s.sessionNumber === "SESSION_1" ? "1" : "2";
+    const counsellorName = `${s.counsellor.user.firstName} ${s.counsellor.user.lastName}`;
     sendEmailBestEffort(s.student.user.email, "SESSION_CANCELLED_STUDENT", { studentName, sessionNumber: sessionNumberDigit, originalDateTime });
-    sendEmailBestEffort(s.student.parentEmail, "SESSION_CANCELLED_PARENT", { parentName: "Parent", studentName, sessionNumber: sessionNumberDigit, originalDateTime });
+    if (s.student.parentEmail) {
+      sendEmailBestEffort(s.student.parentEmail, "SESSION_CANCELLED_PARENT", { parentName: "Parent", studentName, sessionNumber: sessionNumberDigit, originalDateTime });
+    }
+    sendEmailBestEffort(s.counsellor.user.email, "SESSION_CANCELLED_COUNSELLOR", { counsellorName, studentName, sessionNumber: sessionNumberDigit, originalDateTime });
   }
 
   return { cancelled };
@@ -992,17 +881,13 @@ export async function cancelSession(id: string, input: CancelSessionBody) {
         status: "CANCELLED",
         cancellationReason: input.reason as CancellationReason,
         cancellationNotes: input.notes,
-        // A pending counsellor proposal is moot once the session itself is cancelled.
-        counsellorRescheduleReason: null,
-        counsellorProposedDate: null,
-        counsellorProposedStartTime: null,
-        counsellorProposedEndTime: null,
       },
       include: sessionInclude,
     });
   });
 
   const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
+  const counsellorName = `${updated.counsellor.user.firstName} ${updated.counsellor.user.lastName}`;
   const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
 
   sendEmailBestEffort(updated.student.user.email, "SESSION_CANCELLED_STUDENT", {
@@ -1010,8 +895,16 @@ export async function cancelSession(id: string, input: CancelSessionBody) {
     sessionNumber: sessionNumberDigit,
     originalDateTime,
   });
-  sendEmailBestEffort(updated.student.parentEmail, "SESSION_CANCELLED_PARENT", {
-    parentName: "Parent",
+  if (updated.student.parentEmail) {
+    sendEmailBestEffort(updated.student.parentEmail, "SESSION_CANCELLED_PARENT", {
+      parentName: "Parent",
+      studentName,
+      sessionNumber: sessionNumberDigit,
+      originalDateTime,
+    });
+  }
+  sendEmailBestEffort(updated.counsellor.user.email, "SESSION_CANCELLED_COUNSELLOR", {
+    counsellorName,
     studentName,
     sessionNumber: sessionNumberDigit,
     originalDateTime,
@@ -1121,11 +1014,13 @@ export async function sendDayReminder(id: string, input: SendDayReminderBody) {
     sessionTime: session.startTime,
     portalLink: input.portalLink,
   });
-  sendEmailBestEffort(session.student.parentEmail, sessionTemplateParent, {
-    parentName: "Parent",
-    studentName,
-    sessionTime: session.startTime,
-  });
+  if (session.student.parentEmail) {
+    sendEmailBestEffort(session.student.parentEmail, sessionTemplateParent, {
+      parentName: "Parent",
+      studentName,
+      sessionTime: session.startTime,
+    });
+  }
   sendEmailBestEffort(session.counsellor.user.email, sessionTemplateCounsellor, {
     counsellorName,
     studentName,

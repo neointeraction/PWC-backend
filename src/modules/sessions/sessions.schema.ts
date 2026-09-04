@@ -27,7 +27,10 @@ export const dateSchema = z
   });
 
 const sessionNumberSchema = z.enum(["SESSION_1", "SESSION_2"]);
-const initiatedBySchema = z.enum(["STUDENT", "COUNSELLOR", "ADMIN"]);
+// Reschedule has no COUNSELLOR path — a counsellor who needs a session moved contacts
+// Admin manually, who reschedules on their behalf via ADMIN.
+const rescheduleInitiatedBySchema = z.enum(["STUDENT", "ADMIN"]);
+const cancelInitiatedBySchema = z.enum(["STUDENT", "COUNSELLOR", "ADMIN"]);
 const joinRoleSchema = z.enum(["STUDENT", "COUNSELLOR"]);
 const cancellationReasonSchema = z.enum([
   "STUDENT_UNAVAILABLE",
@@ -179,25 +182,16 @@ export type SetNotesBody = z.infer<typeof setNotesBodySchema>;
 export const rescheduleSessionBodySchema = z.object({
   date: dateSchema,
   startTime: timeSchema,
-  initiatedBy: initiatedBySchema,
+  initiatedBy: rescheduleInitiatedBySchema,
 });
 export type RescheduleSessionBody = z.infer<typeof rescheduleSessionBodySchema>;
 
 export const cancelSessionBodySchema = z.object({
   reason: cancellationReasonSchema,
   notes: z.string().trim().min(1).optional(),
-  initiatedBy: initiatedBySchema,
+  initiatedBy: cancelInitiatedBySchema,
 });
 export type CancelSessionBody = z.infer<typeof cancelSessionBodySchema>;
-
-// --- Counsellor-initiated reschedule ---
-
-export const requestCounsellorRescheduleBodySchema = z.object({
-  reason: z.string().trim().min(1),
-  date: dateSchema,
-  startTime: timeSchema,
-});
-export type RequestCounsellorRescheduleBody = z.infer<typeof requestCounsellorRescheduleBodySchema>;
 
 // --- No-show tracking ---
 

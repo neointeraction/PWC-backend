@@ -125,4 +125,62 @@ describe("Reference data review (counsellor proposes, admin approves/rejects)", 
       .set("Authorization", bearer("COUNSELLOR"));
     expect(counsellorApprove.status).toBe(403);
   });
+
+  describe("Directly editing a canonical row (admin)", () => {
+    it("edits an entrance exam's fields, 404s a missing id, and 403s a non-admin", async () => {
+      const created = await authRequest(app)
+        .post("/api/v1/career-library/entrance-exams")
+        .send({ name: "Test Rev Edit Exam", level: "UG", conductingBody: "Old Body" });
+      expect(created.status).toBe(201);
+
+      const updated = await authRequest(app)
+        .patch(`/api/v1/career-library/entrance-exams/${created.body.id}`)
+        .send({ conductingBody: "New Body" });
+      expect(updated.status).toBe(200);
+      expect(updated.body).toMatchObject({ id: created.body.id, name: "Test Rev Edit Exam", conductingBody: "New Body" });
+
+      const missing = await authRequest(app)
+        .patch("/api/v1/career-library/entrance-exams/cknownid0000000000000000")
+        .send({ conductingBody: "X" });
+      expect(missing.status).toBe(404);
+
+      const forbidden = await request(app)
+        .patch(`/api/v1/career-library/entrance-exams/${created.body.id}`)
+        .set("Authorization", bearer("COUNSELLOR"))
+        .send({ conductingBody: "X" });
+      expect(forbidden.status).toBe(403);
+    });
+
+    it("409s an entrance exam edit that clashes with another row's name+level", async () => {
+      const a = await authRequest(app)
+        .post("/api/v1/career-library/entrance-exams")
+        .send({ name: "Test Rev Clash A", level: "UG" });
+      await authRequest(app).post("/api/v1/career-library/entrance-exams").send({ name: "Test Rev Clash B", level: "UG" });
+
+      const clash = await authRequest(app)
+        .patch(`/api/v1/career-library/entrance-exams/${a.body.id}`)
+        .send({ name: "Test Rev Clash B" });
+      expect(clash.status).toBe(409);
+    });
+
+    it("edits a course and an institution row", async () => {
+      const course = await authRequest(app)
+        .post("/api/v1/career-library/courses")
+        .send({ name: "Test Rev Edit Course", level: "UG" });
+      const updatedCourse = await authRequest(app)
+        .patch(`/api/v1/career-library/courses/${course.body.id}`)
+        .send({ durationYears: "4" });
+      expect(updatedCourse.status).toBe(200);
+      expect(updatedCourse.body.durationYears).toBe("4");
+
+      const institution = await authRequest(app)
+        .post("/api/v1/career-library/institutions")
+        .send({ name: "Test Rev Edit College" });
+      const updatedInstitution = await authRequest(app)
+        .patch(`/api/v1/career-library/institutions/${institution.body.id}`)
+        .send({ city: "New City" });
+      expect(updatedInstitution.status).toBe(200);
+      expect(updatedInstitution.body.city).toBe("New City");
+    });
+  });
 });

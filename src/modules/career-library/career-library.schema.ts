@@ -309,3 +309,52 @@ export type SubmitInstitutionInput = z.infer<typeof submitInstitutionSchema>;
 
 // Reject hard-deletes the row (no REJECTED-but-kept state), so there's nothing to carry in
 // the body — same as approve.
+
+// --- Standalone reference-data edits (admin) ---
+// A direct edit of the canonical row (e.g. fixing a typo entered via the inline "add new"),
+// unlike `fillBlanks` which only ever fills columns that are still blank on reuse. All fields
+// optional (omit = unchanged); `status` here is the same publish/unpublish toggle as
+// `updateEducationEntrySchema`.
+
+export const updateEntranceExamSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  level: z.enum(QUALIFICATION_LEVELS).optional(),
+  fullForm: detail,
+  conductingBody: detail,
+  officialWebsite: detail,
+  examMode: detail,
+  frequency: detail,
+  applicableFor: detail,
+  subjectRequirements12th: detail,
+  applicationWindow: detail,
+  status: z.enum(CAREER_LIBRARY_STATUSES).optional(),
+});
+export type UpdateEntranceExamInput = z.infer<typeof updateEntranceExamSchema>;
+
+export const updateCourseSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  level: z.enum(QUALIFICATION_LEVELS).optional(),
+  fullForm: detail,
+  durationYears: detail,
+  stream12thRequirements: detail,
+  relevantEntranceExams: detail,
+  programmesOffered: detail,
+  topColleges: detail,
+  furtherStudyOptions: detail,
+  status: z.enum(CAREER_LIBRARY_STATUSES).optional(),
+});
+export type UpdateCourseInput = z.infer<typeof updateCourseSchema>;
+
+export const updateInstitutionSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  shortName: detail,
+  city: detail,
+  state: detail,
+  type: detail,
+  website: detail,
+  entranceExamsRequired: detail,
+  programmesOffered: detail,
+  ranking: detail,
+  status: z.enum(CAREER_LIBRARY_STATUSES).optional(),
+});
+export type UpdateInstitutionInput = z.infer<typeof updateInstitutionSchema>;

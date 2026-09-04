@@ -20,6 +20,9 @@ import {
   submitEntranceExamSchema,
   submitInstitutionSchema,
   updateCareerEntrySchema,
+  updateCourseSchema,
+  updateEntranceExamSchema,
+  updateInstitutionSchema,
 } from "./career-library.schema.js";
 
 export const careerLibraryRouter = Router();
@@ -191,6 +194,27 @@ careerLibraryRouter.post(
   ...requireAdmin,
   validate({ params: lookupIdParamsSchema }),
   asyncHandler(careerLibraryController.rejectInstitution)
+);
+
+// Direct edit of a canonical row (e.g. fixing a typo entered via the inline "add new").
+// Admin-only, same as approve/reject.
+careerLibraryRouter.patch(
+  "/entrance-exams/:id",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema, body: updateEntranceExamSchema }),
+  asyncHandler(careerLibraryController.updateEntranceExam)
+);
+careerLibraryRouter.patch(
+  "/courses/:id",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema, body: updateCourseSchema }),
+  asyncHandler(careerLibraryController.updateCourse)
+);
+careerLibraryRouter.patch(
+  "/institutions/:id",
+  ...requireAdmin,
+  validate({ params: lookupIdParamsSchema, body: updateInstitutionSchema }),
+  asyncHandler(careerLibraryController.updateInstitution)
 );
 
 // --- Single entry by id (must be last: "/:id" is a catch-all) ---

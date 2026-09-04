@@ -18,7 +18,6 @@ import {
   listSessionsQuerySchema,
   listSlotsQuerySchema,
   markNoShowBodySchema,
-  requestCounsellorRescheduleBodySchema,
   rescheduleSessionBodySchema,
   sendDayReminderBodySchema,
   sessionIdParamsSchema,
@@ -115,30 +114,6 @@ sessionsRouter.post(
   validate({ params: sessionIdParamsSchema, body: cancelSessionBodySchema }),
   ownSessionParam,
   asyncHandler(sessionsController.cancelSession)
-);
-
-// Counsellor-initiated reschedule — the counsellor proposes one alternative from their
-// own open slots + a reason; the student accepts (performs the move) or declines
-// (clears it). Not subject to the student's 1-reschedule limit.
-sessionsRouter.post(
-  "/:id/reschedule-request",
-  ...requireStaff,
-  validate({ params: sessionIdParamsSchema, body: requestCounsellorRescheduleBodySchema }),
-  asyncHandler(sessionsController.requestCounsellorReschedule)
-);
-sessionsRouter.post(
-  "/:id/reschedule-request/accept",
-  ...requireStudentOrStaff,
-  validate({ params: sessionIdParamsSchema }),
-  ownSessionParam,
-  asyncHandler(sessionsController.acceptCounsellorRescheduleProposal)
-);
-sessionsRouter.post(
-  "/:id/reschedule-request/decline",
-  ...requireStudentOrStaff,
-  validate({ params: sessionIdParamsSchema }),
-  ownSessionParam,
-  asyncHandler(sessionsController.declineCounsellorRescheduleProposal)
 );
 
 // Restart (Option B) — cancel both sessions and clear the way to rebook via the normal

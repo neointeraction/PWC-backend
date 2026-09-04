@@ -38,6 +38,9 @@ import {
   submitEntranceExamSchema,
   submitInstitutionSchema,
   updateCareerEntrySchema,
+  updateCourseSchema,
+  updateEntranceExamSchema,
+  updateInstitutionSchema,
 } from "../modules/career-library/career-library.schema.js";
 import {
   createClusterSchema,
@@ -112,7 +115,6 @@ import {
   listSessionsQuerySchema,
   listSlotsQuerySchema,
   markNoShowBodySchema,
-  requestCounsellorRescheduleBodySchema,
   rescheduleSessionBodySchema,
   sendDayReminderBodySchema,
   sessionIdParamsSchema,
@@ -768,42 +770,6 @@ registry.registerPath({
 
 registry.registerPath({
   method: "post",
-  path: "/api/v1/sessions/{id}/reschedule-request",
-  tags: ["Sessions"],
-  summary: "Counsellor proposes one alternative slot from their own open inventory + a reason. Not subject to the student's 1-reschedule limit.",
-  request: { params: sessionIdParamsSchema, body: { content: { "application/json": { schema: requestCounsellorRescheduleBodySchema } } } },
-  responses: {
-    200: { description: "Updated session with pending proposal", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "post",
-  path: "/api/v1/sessions/{id}/reschedule-request/accept",
-  tags: ["Sessions"],
-  summary: "Student (or staff) accepts the pending counsellor reschedule proposal — performs the actual move.",
-  request: { params: sessionIdParamsSchema },
-  responses: {
-    200: { description: "Rescheduled session", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "post",
-  path: "/api/v1/sessions/{id}/reschedule-request/decline",
-  tags: ["Sessions"],
-  summary: "Student (or staff) declines the pending counsellor reschedule proposal — clears it, no other side effects.",
-  request: { params: sessionIdParamsSchema },
-  responses: {
-    200: { description: "Updated session, proposal cleared", content: { "application/json": { schema: genericObjectSchema } } },
-    ...errorResponses,
-  },
-});
-
-registry.registerPath({
-  method: "post",
   path: "/api/v1/sessions/{id}/no-show",
   tags: ["Sessions"],
   summary: "Staff. Mark a party as having missed the session (party: STUDENT|COUNSELLOR), at or after startTime. STUDENT alerts Admin only; COUNSELLOR alerts Admin and immediately emails the student an apology + reschedule prompt, no Admin gate. Idempotent per party.",
@@ -1293,6 +1259,16 @@ registry.registerPath({
   request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Rejected entrance exam", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-library/entrance-exams/{id}",
+  tags: ["Career Library"],
+  summary:
+    "Directly edit a canonical entrance exam row (admin) — e.g. fixing a value entered wrong via the inline \"add new\". All fields optional; omit to leave unchanged. 409 on a name+level clash with another row, 404 if missing.",
+  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: updateEntranceExamSchema } } } },
+  responses: { 200: { description: "Updated entrance exam", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
 registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/courses",
@@ -1320,6 +1296,16 @@ registry.registerPath({
   request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Rejected course", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-library/courses/{id}",
+  tags: ["Career Library"],
+  summary:
+    "Directly edit a canonical course row (admin) — e.g. fixing a value entered wrong via the inline \"add new\". All fields optional; omit to leave unchanged. 409 on a name+level clash with another row, 404 if missing.",
+  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: updateCourseSchema } } } },
+  responses: { 200: { description: "Updated course", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
 registry.registerPath({
   method: "post",
   path: "/api/v1/career-library/institutions",
@@ -1346,6 +1332,16 @@ registry.registerPath({
   summary: "Reject a DRAFT institution (admin) — hard delete. 409 if active, or linked to a job role.",
   request: { params: lookupIdParamsSchema },
   responses: { 200: { description: "Rejected institution", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-library/institutions/{id}",
+  tags: ["Career Library"],
+  summary:
+    "Directly edit a canonical institution row (admin) — e.g. fixing a value entered wrong via the inline \"add new\". All fields optional; omit to leave unchanged. 409 on a name clash with another row, 404 if missing.",
+  request: { params: lookupIdParamsSchema, body: { content: { "application/json": { schema: updateInstitutionSchema } } } },
+  responses: { 200: { description: "Updated institution", content: { "application/json": { schema: genericObjectSchema } } }, ...errorResponses },
 });
 
 // --- Assessment (score preview) ---

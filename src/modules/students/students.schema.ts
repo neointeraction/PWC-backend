@@ -21,8 +21,8 @@ export const createStudentSchema = z.object({
   projectId: z.string().cuid(),
   className: z.string().trim().min(1),
   divisionName: z.string().trim().min(1),
-  parentMobile: phoneSchema,
-  parentEmail: emailSchema,
+  parentMobile: phoneSchema.optional(),
+  parentEmail: emailSchema.optional(),
   // Parent/guardian breakdown is optional — bulk imports may carry only a single
   // "parent" contact. Stored as "" when omitted (columns are NOT NULL).
   fatherName: z.string().trim().min(1).optional(),

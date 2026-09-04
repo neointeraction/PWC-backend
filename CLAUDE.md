@@ -136,20 +136,20 @@ a student no-show alerts Admin and waits for `POST /sessions/:id/no-show/resched
 `GET /sessions?noShow=STUDENT|COUNSELLOR` filters for the operational-metric read.
 `studentRescheduleUsed` caps self-service `POST /sessions/:id/reschedule` at one
 STUDENT-initiated move per session (further requests route to Admin, same doc §1 Option
-A) — not consumed by ADMIN/COUNSELLOR-initiated reschedules, and reset on reactivation.
-Counsellor-initiated reschedule (§3) is a propose/accept/decline handshake:
-`POST /sessions/:id/reschedule-request` (counsellor proposes one alternative from their
-own open slots + a reason, doesn't move the session yet) →
-`.../reschedule-request/accept` (student performs the move, doesn't consume the
-self-service limit) or `.../reschedule-request/decline` (clears it, no auto-cancel).
+A) — not consumed by an ADMIN-initiated reschedule, and reset on reactivation. There is
+no counsellor-initiated reschedule path — `initiatedBy` on `/reschedule` is `STUDENT`\|
+`ADMIN` only; a counsellor who needs a session moved contacts Admin manually, who
+reschedules on their behalf. `/reschedule` and `/cancel` (and `/restart`, below) email
+the assigned counsellor (`SESSION_RESCHEDULED_COUNSELLOR`/`SESSION_CANCELLED_COUNSELLOR`)
+regardless of who initiated the change.
 Option B — `POST /sessions/students/:studentId/restart` — cancels both sessions together
 (before Session 1 has started) so the student can rebook fresh via the normal
 booking-options/book flow, blind to a possibly-new counsellor; `bookSessions` now
 reactivates two `CANCELLED` rows in place instead of 409ing once any row exists. Email
 (configurable provider — `console` for local dev, Mailgun for real sends — with the 9
-kREATE lifecycle templates, 31 reminder/session-status templates, plus 5 no-show/
-reschedule/join templates (`SESSION_STUDENT_NO_SHOW_ADMIN`, `SESSION_COUNSELLOR_NO_SHOW_ADMIN`,
-`SESSION_COUNSELLOR_NO_SHOW_STUDENT`, `SESSION_COUNSELLOR_RESCHEDULE_REQUEST_STUDENT`,
+kREATE lifecycle templates, 31 reminder/session-status templates, plus no-show/
+reschedule/cancel/join templates (`SESSION_STUDENT_NO_SHOW_ADMIN`, `SESSION_COUNSELLOR_NO_SHOW_ADMIN`,
+`SESSION_COUNSELLOR_NO_SHOW_STUDENT`, `SESSION_RESCHEDULED_COUNSELLOR`, `SESSION_CANCELLED_COUNSELLOR`,
 `SESSION_JOINED_PARENT`) not in either source sheet; most sends are still a manual
 `POST /api/v1/email/send` call, though booking/reschedule/cancel/no-show/restart/join in
 Sessions trigger the relevant template automatically), OpenAPI/Swagger docs. **Route-level auth is now
