@@ -459,8 +459,11 @@ describe("Sessions API", () => {
       // of headroom between them to never collide on (counsellorId, date, startTime).
       const base = addDays(now, 100 + fixtureCounter * 200);
       const s1Date = base;
-      const s2Date = addDays(base, 3);
-      const altDate = addDays(base, 10); // spare slot for reschedule targets
+      const altDate = addDays(base, 10); // spare slot for Session 1 reschedule targets
+      // Session 1 must stay chronologically before Session 2 (assertSessionGap is
+      // direction-aware, not just a >=2-day gap) — s2Date needs enough headroom past
+      // every Session-1 reschedule target below (altDate, and altDate+20 further down).
+      const s2Date = addDays(base, 40);
       const time = "11:00";
       const endTime = "11:45";
 
@@ -527,6 +530,67 @@ describe("Sessions API", () => {
       expect(reschedule.status).toBe(200);
     });
 
+    it("lets a student discover and rebook Session 2 solo after cancelling it, locked to the same counsellor", async () => {
+      const { studentId: freshStudentId, session2Id, altDate, time } = await bookFreshPairForNewStudent();
+
+      const cancelled = await authRequest(app)
+        .post(`/api/v1/sessions/${session2Id}/cancel`)
+        .send({ initiatedBy: "STUDENT", reason: "STUDENT_UNAVAILABLE" });
+      expect(cancelled.status).toBe(200);
+
+      // Session 1's date/time is now BOOKED, not OPEN — the session1Date/session1StartTime
+      // discovery form can't resolve a counsellor from it. rescheduleSessionId is the only
+      // way in for a solo Session 2 rebook.
+      const blindForm = await authRequest(app)
+        .get(`/api/v1/sessions/students/${freshStudentId}/booking-options`)
+        .query({ sessionNumber: "SESSION_2" });
+      expect(blindForm.status).toBe(400);
+
+      const preview = await authRequest(app)
+        .get(`/api/v1/sessions/students/${freshStudentId}/booking-options`)
+        .query({ sessionNumber: "SESSION_2", rescheduleSessionId: session2Id });
+      expect(preview.status).toBe(200);
+      const match = preview.body.find(
+        (s: { startTime: string; slotDate: string }) => s.startTime === time && s.slotDate === formatDisplayDate(altDate)
+      );
+      expect(match).toBeDefined();
+
+      const rebook = await authRequest(app)
+        .post(`/api/v1/sessions/${session2Id}/reschedule`)
+        .send({ date: ymd(altDate), startTime: time, initiatedBy: "STUDENT" });
+      expect(rebook.status).toBe(200);
+      expect(rebook.body.status).toBe("SCHEDULED");
+      expect(rebook.body.counsellor.id).toBe(counsellorAId);
+      // Reactivating a cancelled session is a fresh start — it must not burn the
+      // student's one-time SCHEDULED-session reschedule allowance.
+      expect(rebook.body.studentRescheduleUsed).toBe(false);
+    });
+
+    it("404s the Session 2 rebook preview for a session that isn't this student's SESSION_2, and 400s if Session 1 isn't booked", async () => {
+      const a = await bookFreshPairForNewStudent();
+      const b = await bookFreshPairForNewStudent();
+
+      const wrongStudent = await authRequest(app)
+        .get(`/api/v1/sessions/students/${b.studentId}/booking-options`)
+        .query({ sessionNumber: "SESSION_2", rescheduleSessionId: a.session2Id });
+      expect(wrongStudent.status).toBe(404);
+
+      const wrongSessionNumber = await authRequest(app)
+        .get(`/api/v1/sessions/students/${a.studentId}/booking-options`)
+        .query({ sessionNumber: "SESSION_2", rescheduleSessionId: a.session1Id });
+      expect(wrongSessionNumber.status).toBe(404);
+
+      // Cancel both of a's sessions (Option B) so Session 1 is no longer active, then
+      // reuse the now-cancelled Session 2 id — there's no active Session 1 to anchor the
+      // ≥2-day gap against.
+      const restart = await authRequest(app).post(`/api/v1/sessions/students/${a.studentId}/restart`).send({});
+      expect(restart.status).toBe(200);
+      const noSession1 = await authRequest(app)
+        .get(`/api/v1/sessions/students/${a.studentId}/booking-options`)
+        .query({ sessionNumber: "SESSION_2", rescheduleSessionId: a.session2Id });
+      expect(noSession1.status).toBe(400);
+    });
+
     it("404s the Session 1 reschedule preview for a session that isn't this student's SESSION_1", async () => {
       const a = await bookFreshPairForNewStudent();
       const b = await bookFreshPairForNewStudent();
@@ -567,6 +631,29 @@ describe("Sessions API", () => {
         .post(`/api/v1/sessions/${session1Id}/reschedule`)
         .send({ date: ymd(nextAlt), startTime: time, initiatedBy: "ADMIN" });
       expect(asAdmin.status).toBe(200);
+    });
+
+    it("blocks a reschedule that would invert Session 1 / Session 2 chronological order", async () => {
+      const { session1Id, session2Id } = await bookFreshPairForNewStudent();
+      const session2Before = await prisma.session.findUniqueOrThrow({ where: { id: session2Id } });
+      const afterSession2 = addDays(session2Before.scheduledDate, 10);
+      const time = "09:00";
+      await authRequest(app).post("/api/v1/sessions/slots").send({
+        projectId,
+        counsellorId: counsellorAId,
+        slots: [{ date: ymd(afterSession2), startTime: time, endTime: "09:45" }],
+      });
+
+      // Moving Session 1 to a date past Session 2 satisfies the >=2-day gap in
+      // isolation but would invert the two sessions' chronological order.
+      const res = await authRequest(app)
+        .post(`/api/v1/sessions/${session1Id}/reschedule`)
+        .send({ date: ymd(afterSession2), startTime: time, initiatedBy: "ADMIN" });
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/Session 1 must stay .* before Session 2/);
+
+      const session1After = await prisma.session.findUniqueOrThrow({ where: { id: session1Id } });
+      expect(ymd(session1After.scheduledDate)).not.toBe(ymd(afterSession2)); // rejected, not applied
     });
 
     it("restarts (Option B): cancels both sessions, then rebooking reactivates them fresh", async () => {

@@ -44,11 +44,18 @@ export async function getBookingOptions(req: Request, res: Response): Promise<vo
   const query = req.query as unknown as BookingOptionsQuery;
 
   if (query.sessionNumber === "SESSION_2") {
-    if (!query.session1Date || !query.session1StartTime) {
-      res.status(400).json({ error: { message: "session1Date and session1StartTime are required to preview Session 2 options" } });
+    if (!query.rescheduleSessionId && (!query.session1Date || !query.session1StartTime)) {
+      res.status(400).json({
+        error: { message: "session1Date and session1StartTime are required to preview Session 2 options (or pass rescheduleSessionId)" },
+      });
       return;
     }
-    const options = await sessionsService.getSession2BookingOptions(studentId, query.session1Date, query.session1StartTime);
+    const options = await sessionsService.getSession2BookingOptions(
+      studentId,
+      query.session1Date,
+      query.session1StartTime,
+      query.rescheduleSessionId
+    );
     res.status(200).json(options);
     return;
   }

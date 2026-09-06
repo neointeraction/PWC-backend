@@ -109,9 +109,11 @@ export const bookingOptionsQuerySchema = z.object({
   // pick the student is previewing Session 2 slots against.
   session1Date: dateSchema.optional(),
   session1StartTime: timeSchema.optional(),
-  // Optional, meaningful only when sessionNumber is SESSION_1 — an existing SESSION_1
-  // being rescheduled, so the preview locks to that session's already-assigned
-  // counsellor instead of returning the blind fresh-booking list.
+  // Optional — an existing session of the matching sessionNumber being rescheduled, so
+  // the preview locks to that session's already-assigned counsellor's other open slots
+  // instead of the blind fresh-booking list (SESSION_1) or requiring session1Date/
+  // session1StartTime (SESSION_2, which otherwise can't discover the counsellor once
+  // Session 1 is booked — its slot is no longer OPEN).
   rescheduleSessionId: z.string().cuid().optional(),
 });
 export type BookingOptionsQuery = z.infer<typeof bookingOptionsQuerySchema>;

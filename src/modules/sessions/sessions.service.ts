@@ -250,22 +250,57 @@ async function resolveCounsellorForSlot(
   return slot;
 }
 
-export async function getSession2BookingOptions(studentId: string, session1Date: string, session1StartTime: string) {
+export async function getSession2BookingOptions(
+  studentId: string,
+  session1Date?: string,
+  session1StartTime?: string,
+  rescheduleSessionId?: string
+) {
   const student = await getStudentOrThrow(studentId);
-  const slot1 = await resolveCounsellorForSlot(prisma, student.projectId, session1Date, session1StartTime);
+
+  let counsellorId: string;
+  let excludeSlotId: string | undefined;
+  let gapAnchorDate: string;
+
+  if (rescheduleSessionId) {
+    // Session 1 is already booked in this path, so its slot is BOOKED, not OPEN —
+    // resolveCounsellorForSlot (which only looks at OPEN slots) can't find it. Look the
+    // session up directly instead, same pattern as getSession1BookingOptions's
+    // rescheduleSessionId branch.
+    const session2 = await prisma.session.findUnique({ where: { id: rescheduleSessionId } });
+    if (!session2 || session2.studentId !== studentId || session2.sessionNumber !== "SESSION_2") {
+      throw new NotFoundError("No Session 2 found for this student with that id");
+    }
+    const session1 = await prisma.session.findFirst({
+      where: { studentId, sessionNumber: "SESSION_1", status: { not: "CANCELLED" } },
+    });
+    if (!session1) {
+      throw new BadRequestError("Session 1 must be booked before Session 2 can be rescheduled");
+    }
+    counsellorId = session2.counsellorId;
+    gapAnchorDate = session1.scheduledDate.toISOString().slice(0, 10);
+  } else {
+    if (!session1Date || !session1StartTime) {
+      throw new BadRequestError("session1Date and session1StartTime are required to preview Session 2 options");
+    }
+    const slot1 = await resolveCounsellorForSlot(prisma, student.projectId, session1Date, session1StartTime);
+    counsellorId = slot1.counsellorId;
+    excludeSlotId = slot1.id;
+    gapAnchorDate = session1Date;
+  }
 
   const slots = await prisma.counsellorSlot.findMany({
     where: {
       projectId: student.projectId,
-      counsellorId: slot1.counsellorId,
+      counsellorId,
       status: "OPEN",
-      id: { not: slot1.id },
+      id: excludeSlotId ? { not: excludeSlotId } : undefined,
     },
     orderBy: [{ slotDate: "asc" }, { startTime: "asc" }],
     select: { slotDate: true, startTime: true, endTime: true },
   });
 
-  return slots.filter((s) => diffCalendarDays(session1Date, s.slotDate.toISOString().slice(0, 10)) >= MIN_SESSION_GAP_DAYS);
+  return slots.filter((s) => diffCalendarDays(gapAnchorDate, s.slotDate.toISOString().slice(0, 10)) >= MIN_SESSION_GAP_DAYS);
 }
 
 // --- Booking (both sessions, one atomic flow) ---
@@ -723,15 +758,31 @@ async function claimSlotAndUpdateSession(
   });
 }
 
-// Enforces the ≥2-day gap against the student's other (non-cancelled) session.
+// Enforces the ≥2-day gap against the student's other (non-cancelled) session, in the
+// same direction as the initial booking check (bookSessions, above): Session 1 must
+// stay chronologically before Session 2, not just >= MIN_SESSION_GAP_DAYS apart. A
+// plain abs() gap check would let a reschedule invert them (e.g. move Session 2 to a
+// date earlier than Session 1) while still satisfying the gap — sessionNumber is a
+// fixed curriculum-stage label (see docs/session-scheduling-use-cases.md), not
+// recomputed from date, so downstream logic (completeSession's workflow-status
+// mapping, the "Session 2 locked until Session 1 complete" rule) depends on this order
+// holding.
 async function assertSessionGap(studentId: string, sessionNumber: SessionNumber, targetDate: string) {
   const other = await prisma.session.findFirst({
     where: { studentId, sessionNumber: sessionNumber === "SESSION_1" ? "SESSION_2" : "SESSION_1", status: { not: "CANCELLED" } },
   });
   if (other) {
     const otherDateStr = other.scheduledDate.toISOString().slice(0, 10);
-    if (Math.abs(diffCalendarDays(targetDate, otherDateStr)) < MIN_SESSION_GAP_DAYS) {
-      throw new BadRequestError(`Sessions must stay at least ${MIN_SESSION_GAP_DAYS} calendar days apart`);
+    const gapDays =
+      sessionNumber === "SESSION_1"
+        ? diffCalendarDays(targetDate, otherDateStr)
+        : diffCalendarDays(otherDateStr, targetDate);
+    if (gapDays < MIN_SESSION_GAP_DAYS) {
+      throw new BadRequestError(
+        sessionNumber === "SESSION_1"
+          ? `Session 1 must stay at least ${MIN_SESSION_GAP_DAYS} calendar days before Session 2`
+          : `Session 2 must stay at least ${MIN_SESSION_GAP_DAYS} calendar days after Session 1`
+      );
     }
   }
 }
@@ -769,11 +820,13 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
 
   await assertSessionGap(session.studentId, session.sessionNumber, input.date);
 
-  // Only a STUDENT-initiated move consumes the one-time allowance (ADMIN doesn't);
-  // reactivating a cancelled session is a fresh start regardless of initiator;
-  // otherwise leave the flag untouched (`undefined` = not included in the update).
+  // Reactivating a cancelled session is a fresh start regardless of initiator — checked
+  // first so a STUDENT-initiated rebook doesn't burn their one-time SCHEDULED-session
+  // reschedule allowance on what is really a brand-new booking. Otherwise, only a
+  // STUDENT-initiated move consumes the allowance (ADMIN doesn't); leave the flag
+  // untouched (`undefined` = not included in the update) when neither applies.
   const studentRescheduleUsed =
-    input.initiatedBy === "STUDENT" ? true : session.status === "CANCELLED" ? false : undefined;
+    session.status === "CANCELLED" ? false : input.initiatedBy === "STUDENT" ? true : undefined;
 
   const updated = await claimSlotAndUpdateSession(session, input.date, input.startTime, { studentRescheduleUsed });
 
