@@ -107,6 +107,25 @@ function isOtherTextMissing(value: unknown, otherOptionValue: string | undefined
   return typeof other !== "string" || other.trim().length === 0;
 }
 
+// Mirrors isMatrixIncomplete in PWC-frontend's QuestionRenderer.tsx — a MATRIX answer
+// only counts as complete once every row (or every field, for a rows-less matrix) has a
+// non-empty value for each field. Checking only `Object.keys(answer).length` (as
+// isAnswerEmpty does for plain objects) let a single filled row pass a 10+ row matrix.
+function isMatrixIncomplete(options: unknown, answer: unknown): boolean {
+  if (!options || typeof options !== "object") return false;
+  const { rows, fields } = options as { rows?: Array<{ key: string }>; fields?: MatrixFieldDef[] };
+  if (!fields || fields.length === 0) return false;
+  const data = (typeof answer === "object" && answer !== null ? answer : {}) as Record<string, unknown>;
+
+  if (!rows || rows.length === 0) {
+    return fields.some((f) => isAnswerEmpty(data[f.key]));
+  }
+  return rows.some((row) => {
+    const rowData = (data[row.key] ?? {}) as Record<string, unknown>;
+    return fields.some((f) => isAnswerEmpty(rowData[f.key]));
+  });
+}
+
 function isAnswerIncomplete(
   question: { allowOtherText: boolean; questionType: string; options: unknown },
   answer: unknown
@@ -118,6 +137,8 @@ function isAnswerIncomplete(
   }
 
   if (question.questionType === "MATRIX" && question.options && typeof question.options === "object") {
+    if (isMatrixIncomplete(question.options, answer)) return true;
+
     const { rows, fields } = question.options as { rows?: Array<{ key: string }>; fields?: MatrixFieldDef[] };
     const otherFields = (fields ?? []).filter((f) => f.allowOtherText);
     if (otherFields.length > 0 && typeof answer === "object") {

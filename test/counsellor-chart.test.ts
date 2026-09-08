@@ -73,10 +73,22 @@ describe("Counsellor Chart API", () => {
     });
     studentId = student.body.student.id;
 
-    // Save one pre-counselling student answer so the side-by-side assembly has data.
+    // Save pre-counselling student answers so the side-by-side assembly has data,
+    // including raw option codes for an MCQ_SINGLE and a MATRIX question so the chart's
+    // label resolution can be exercised below.
     await authRequest(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${studentId}`)
-      .send({ cohort: COHORT, answers: [{ fieldKey: "fav_subject_block", answer: { subject: "Science" } }] });
+      .send({
+        cohort: COHORT,
+        answers: [
+          { fieldKey: "fav_subject_block", answer: { subject: "Science" } },
+          { fieldKey: "interest_consistency", answer: "b" },
+          {
+            fieldKey: "strengths_table",
+            answer: { maths_logic: { rating: "not_really" } },
+          },
+        ],
+      });
 
     // Submit a full assessment so the chart's assessment section is populated.
     const attempt = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId, cohort: COHORT });
@@ -104,6 +116,13 @@ describe("Counsellor Chart API", () => {
     const favSubject = academics.parameters.find((p: { code: string }) => p.code === "A1.1");
     expect(favSubject.student).toEqual({ subject: "Science" }); // populated from the saved form
     expect(favSubject.parent).toBeNull(); // parent form not submitted
+
+    const strengthsSection = res.body.preCounselling.find((s: { key: string }) => s.key === "strengths");
+    const consistency = strengthsSection.parameters.find((p: { code: string }) => p.code === "B1.4");
+    expect(consistency.student).toBe("Mostly consistent — mostly interested but at times bored"); // resolved from raw code "b"
+
+    const topStrengths = strengthsSection.parameters.find((p: { code: string }) => p.code === "B1.1");
+    expect(topStrengths.student).toEqual({ maths_logic: { rating: "Not Really Me" } }); // resolved from raw code "not_really"
 
     expect(res.body.hasAssessment).toBe(true);
     expect(Object.keys(res.body.assessment.traitScores)).toHaveLength(18);

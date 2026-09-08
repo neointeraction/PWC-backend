@@ -7,7 +7,10 @@ import { authRequest, bearer } from "./helpers/http.js";
 const app = createApp();
 
 let testDomainId: string; // live taxonomy leaf the created entries point at
-let scopedDomainId: string; // second leaf, kept clean so domainId scoping is exactly assertable
+let scopedDomainId: string; // leaf under its own separate cluster/industry, so domainId
+// scoping is exactly assertable — courses/institutions are shared at the cluster/industry
+// level now (see career-library-normalization-spec.md), so a domain sharing testDomainId's
+// cluster/industry would see its courses/institutions too.
 
 function entryBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -31,8 +34,13 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
       data: { industryId: industry.id, name: "Test Norm Domain" },
     });
     testDomainId = domain.id;
+    // A separate cluster/industry so its course/institution lists stay exclusive of testDomainId's.
+    const scopedCluster = await prisma.careerCluster.create({ data: { name: "Test Norm Cluster Scoped" } });
+    const scopedIndustry = await prisma.careerIndustry.create({
+      data: { clusterId: scopedCluster.id, name: "Test Norm Industry Scoped" },
+    });
     const scopedDomain = await prisma.careerDomain.create({
-      data: { industryId: industry.id, name: "Test Norm Domain Scoped" },
+      data: { industryId: scopedIndustry.id, name: "Test Norm Domain Scoped" },
     });
     scopedDomainId = scopedDomain.id;
   });
@@ -41,8 +49,8 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test Norm Role" } } });
     await prisma.careerLibraryEntryProposal.deleteMany({ where: { jobRole: { startsWith: "Test Norm Role" } } });
     await prisma.careerDomain.deleteMany({ where: { name: { startsWith: "Test Norm Domain" } } });
-    await prisma.careerIndustry.deleteMany({ where: { name: "Test Norm Industry" } });
-    await prisma.careerCluster.deleteMany({ where: { name: "Test Norm Cluster" } });
+    await prisma.careerIndustry.deleteMany({ where: { name: { startsWith: "Test Norm Industry" } } });
+    await prisma.careerCluster.deleteMany({ where: { name: { startsWith: "Test Norm Cluster" } } });
     await prisma.entranceExam.deleteMany({ where: { name: { startsWith: "Test Norm " } } });
     await prisma.course.deleteMany({ where: { name: { startsWith: "Test Norm " } } });
     await prisma.institution.deleteMany({ where: { name: { startsWith: "Test Norm " } } });
@@ -105,9 +113,21 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
     expect(rows).toHaveLength(1); // deduped by unique name
   });
 
-  it("update REPLACES a provided link array and leaves omitted ones unchanged", async () => {
+  it("update REPLACES a provided link array (for the whole cluster/industry) and leaves omitted ones unchanged", async () => {
+    // Courses/institutions are shared at the cluster/industry level, so this needs its own
+    // isolated cluster/industry/domain — otherwise the exact-length assertions below would
+    // pick up institutions other tests in this file linked under testDomainId's industry.
+    const cluster = await prisma.careerCluster.create({ data: { name: "Test Norm Cluster Update" } });
+    const industry = await prisma.careerIndustry.create({
+      data: { clusterId: cluster.id, name: "Test Norm Industry Update" },
+    });
+    const domain = await prisma.careerDomain.create({
+      data: { industryId: industry.id, name: "Test Norm Domain Update" },
+    });
+
     const created = await authRequest(app).post("/api/v1/career-library").send(
       entryBody({
+        domainId: domain.id,
         jobRole: "Test Norm Role Update",
         institutions: [{ name: "Test Norm College One" }, { name: "Test Norm College Two" }],
         courses: [{ name: "Test Norm Course Keep" }],
@@ -127,6 +147,54 @@ describe("Career Library normalization (select-or-add + dropdowns)", () => {
     // Clearing with an empty array removes all links.
     const cleared = await authRequest(app).patch(`/api/v1/career-library/${id}`).send({ institutions: [] });
     expect(cleared.body.linkedInstitutions).toHaveLength(0);
+  });
+
+  it("shares courses across every job role in a cluster and institutions across every job role in an industry", async () => {
+    const cluster = await prisma.careerCluster.create({ data: { name: "Test Norm Cluster Shared" } });
+    const industry = await prisma.careerIndustry.create({
+      data: { clusterId: cluster.id, name: "Test Norm Industry Shared" },
+    });
+    const domainA = await prisma.careerDomain.create({
+      data: { industryId: industry.id, name: "Test Norm Domain Shared A" },
+    });
+    const domainB = await prisma.careerDomain.create({
+      data: { industryId: industry.id, name: "Test Norm Domain Shared B" },
+    });
+
+    // Role A (domain A) adds a course + institution.
+    const roleA = await authRequest(app).post("/api/v1/career-library").send(
+      entryBody({
+        domainId: domainA.id,
+        jobRole: "Test Norm Role Shared A",
+        courses: [{ name: "Test Norm Shared Course" }],
+        institutions: [{ name: "Test Norm Shared College Prop" }],
+      })
+    );
+    expect(roleA.status).toBe(201);
+
+    // Role B is a different job role under a different domain, but the same cluster/industry
+    // — it must already show what role A just added, with no explicit link of its own.
+    const roleB = await authRequest(app).post("/api/v1/career-library").send(
+      entryBody({ domainId: domainB.id, jobRole: "Test Norm Role Shared B" })
+    );
+    expect(roleB.status).toBe(201);
+    expect(roleB.body.linkedCourses.map((c: { name: string }) => c.name)).toContain("Test Norm Shared Course");
+    expect(roleB.body.linkedInstitutions.map((i: { name: string }) => i.name)).toContain("Test Norm Shared College Prop");
+
+    // Editing role A's course/institution list (add one, drop the original) is visible on role B too.
+    const editedA = await authRequest(app).patch(`/api/v1/career-library/${roleA.body.id}`).send({
+      courses: [{ name: "Test Norm Shared Course Two" }],
+      institutions: [{ name: "Test Norm Shared College Two" }],
+    });
+    expect(editedA.status).toBe(200);
+
+    const roleBAfter = await authRequest(app).get(`/api/v1/career-library/${roleB.body.id}`);
+    const bCourseNames = roleBAfter.body.linkedCourses.map((c: { name: string }) => c.name);
+    const bInstNames = roleBAfter.body.linkedInstitutions.map((i: { name: string }) => i.name);
+    expect(bCourseNames).toContain("Test Norm Shared Course Two");
+    expect(bCourseNames).not.toContain("Test Norm Shared Course");
+    expect(bInstNames).toContain("Test Norm Shared College Two");
+    expect(bInstNames).not.toContain("Test Norm Shared College Prop");
   });
 
   it("400s an invalid link id and a by-name exam missing its level", async () => {

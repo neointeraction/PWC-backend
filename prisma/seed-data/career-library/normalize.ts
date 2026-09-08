@@ -53,12 +53,14 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       entranceExamsPG: true,
       topCourses: true,
       // industry is now normalized — read it through the domain → industry relation.
-      domain: { select: { industry: { select: { name: true } } } },
+      domain: { select: { industryId: true, industry: { select: { name: true, clusterId: true } } } },
     },
   });
   const entries = entryRows.map((e) => ({
     id: e.id,
     industry: e.domain.industry.name,
+    industryId: e.domain.industryId,
+    clusterId: e.domain.industry.clusterId,
     entranceExams: e.entranceExams,
     entranceExamsPG: e.entranceExamsPG,
     topCourses: e.topCourses,
@@ -267,12 +269,15 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
     }
     for (const n of e.topCourses) {
       const id = courseId.get(`${clean(n)}||UG`);
-      if (id) courseJoins.push({ careerEntryId: e.id, courseId: id });
+      // Courses are shared at the cluster level now — this pushes into the cluster's list,
+      // not a per-entry one, and createMany below dedupes with skipDuplicates.
+      if (id) courseJoins.push({ clusterId: e.clusterId, courseId: id });
     }
     const names = industryInst.get(clean(e.industry));
     if (names) for (const nm of names) {
       const id = instId.get(nm);
-      if (id) instJoins.push({ careerEntryId: e.id, institutionId: id });
+      // Institutions are shared at the industry level — same as courses above.
+      if (id) instJoins.push({ industryId: e.industryId, institutionId: id });
     }
   }
 

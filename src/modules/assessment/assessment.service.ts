@@ -187,21 +187,20 @@ export async function submitAttempt(attemptId: string) {
   }
 
   const submittedAt = new Date();
-  await prisma.assessmentAttempt.update({
-    where: { id: attemptId },
-    data: { status: "SUBMITTED", submittedAt },
+
+  // Score before touching persistent state: if the scoring engine throws, nothing
+  // below has run yet, so the attempt is left untouched (still IN_PROGRESS, safe to
+  // retry) instead of being marked SUBMITTED with no AssessmentResult to show for it.
+  const report = await computeReport(questions, attempt.answers, attempt.startedAt, submittedAt);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.assessmentAttempt.update({
+      where: { id: attemptId },
+      data: { status: "SUBMITTED", submittedAt },
+    });
+    await advanceWorkflowStatus(tx, attempt.studentId, "ASSESSMENT_COMPLETED");
+    await persistResult(tx, attemptId, report);
   });
-
-  await advanceWorkflowStatus(prisma, attempt.studentId, "ASSESSMENT_COMPLETED");
-
-  // Score the completed attempt and persist the computed report. Guarded so a scoring
-  // bug can't strand a submitted-but-locked attempt with no result — the attempt is
-  // already SUBMITTED above; getAssessmentResult reports a missing result cleanly.
-  try {
-    await computeAndStoreResult(attemptId, questions, attempt.answers, attempt.startedAt, submittedAt);
-  } catch (err) {
-    console.error(`Assessment scoring failed for attempt ${attemptId}:`, err);
-  }
 
   return getAttempt(attemptId);
 }
@@ -259,13 +258,12 @@ async function buildReport(normalized: AnsweredQuestion[], startedAt: Date, subm
   return report;
 }
 
-async function computeAndStoreResult(
-  attemptId: string,
+async function computeReport(
   questions: AttemptQuestion[],
   answers: AttemptAnswer[],
   startedAt: Date,
   submittedAt: Date
-): Promise<void> {
+) {
   const answerByQuestionId = new Map(answers.map((a) => [a.questionId, a]));
 
   const normalized: AnsweredQuestion[] = questions.map((q) => {
@@ -287,9 +285,15 @@ async function computeAndStoreResult(
     };
   });
 
-  const report = await buildReport(normalized, startedAt, submittedAt);
+  return buildReport(normalized, startedAt, submittedAt);
+}
 
-  await prisma.assessmentResult.upsert({
+async function persistResult(
+  db: Prisma.TransactionClient | typeof prisma,
+  attemptId: string,
+  report: Awaited<ReturnType<typeof buildReport>>
+): Promise<void> {
+  await db.assessmentResult.upsert({
     where: { attemptId },
     update: {
       traitScores: report.traitScores,
@@ -322,13 +326,13 @@ async function recomputeAssessmentResult(attemptId: string) {
     throw new NotFoundError("Assessment attempt not found");
   }
   const questions = await prisma.assessmentQuestion.findMany({ where: { cohort: attempt.cohort } });
-  await computeAndStoreResult(
-    attemptId,
+  const report = await computeReport(
     questions,
     attempt.answers,
     attempt.startedAt,
     attempt.submittedAt ?? new Date()
   );
+  await persistResult(prisma, attemptId, report);
   return prisma.assessmentResult.findUnique({ where: { attemptId } });
 }
 

@@ -1217,6 +1217,23 @@ required when adding an **exam** or an **education entry** by name; courses defa
 An unknown `id` returns 400. On `PATCH`, a provided array **replaces** that entry's links;
 omitting it leaves them unchanged.
 
+> ⚠️ **`courses` and `institutions` are shared, not per-job-role.** Unlike `entranceExams`/
+> `educationEntries` (curated per job role), `courses` links into one shared course list for
+> the **whole career cluster** the job role's `domainId` belongs to, and `institutions` into
+> one shared institution list for the **whole industry**. Concretely:
+> - Every job role under the same cluster shows the same `linkedCourses`, and every job role
+>   under the same industry shows the same `linkedInstitutions` — there's no independent
+>   per-role list to diverge.
+> - On `POST` (create), the courses/institutions you send are **added** to that shared list —
+>   it never removes what a sibling job role already linked.
+> - On `PATCH`, a provided `courses`/`institutions` array **replaces the whole shared list**,
+>   so removing an item from one job role's edit screen removes it for every other job role
+>   under the same cluster/industry too. Design the edit UI around that — e.g. surface which
+>   other job roles share this list, since a delete here isn't scoped to just this role.
+> - Moving a job role to a different `domainId` doesn't carry its courses/institutions along;
+>   it just starts showing whatever its new cluster/industry already has.
+> See `docs/career-library-normalization-spec.md` §9 for the full rationale.
+
 **A `{ name, … }` item takes the full field set** — send everything your form collects:
 
 | List | Fields accepted alongside `name` |
@@ -1257,7 +1274,8 @@ in the same table as published ones, it's a wholly separate object.
      plus `submittedBy`. `GET /api/v1/career-library/proposals/{id}` fetches one the same way.
    - `POST /api/v1/career-library/proposals/{id}/approve` (**Admin**) — copies it into a
      **new** `career_library_entries` row (a fresh id, not the proposal's id) with
-     `status: "ACTIVE"`, and deletes the proposal. Returns the newly created entry.
+     `status: "ACTIVE"`, adds its picked courses/institutions to the shared cluster/industry
+     list (per §9.5's callout), and deletes the proposal. Returns the newly created entry.
    - `POST /api/v1/career-library/proposals/{id}/reject` (**Admin**, no body) — **deletes the
      proposal**. Returns `{ id, deleted: true }`. Nothing is retained, so build the UI as a
      confirm-then-delete, not an "undo later".
@@ -1323,10 +1341,14 @@ All four take the same shape — Education Path joined them when it stopped bein
 (§9.4).
 
 `domainId` scopes the result to rows **already linked to job roles in that domain** — the
-"existing entries pulled from this Domain" tick-list. Omit it for the global list. Entry
-status is ignored (a draft role's exams still count as the domain's data). 400 if the
-domain doesn't exist or is soft-deleted. Use it to pre-populate the picker, and let the
-user fall back to the global (un-scoped) search to add something the domain hasn't used
+"existing entries pulled from this Domain" tick-list, for entrance exams and education
+entries (curated per job role). For **courses** and **institutions**, since those are now
+shared (see the callout in §9.5), `domainId` resolves to "what does this domain's cluster
+(courses) / industry (institutions) already have" — the same list you'd see on any other job
+role under that cluster/industry, not something specific to this one domain. Omit it for the
+global list. Entry status is ignored (a draft role's exams still count as the domain's data).
+400 if the domain doesn't exist or is soft-deleted. Use it to pre-populate the picker, and
+let the user fall back to the global (un-scoped) search to add something the domain hasn't used
 yet.
 
 **Clearing a value on `PATCH`.** Omitting a field leaves it unchanged; sending `null`

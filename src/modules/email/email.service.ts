@@ -2,6 +2,7 @@ import { env } from "../../config/env.js";
 import { BadRequestError } from "../../common/errors/AppError.js";
 import { createConsoleProvider } from "./providers/console.provider.js";
 import { createMailgunProvider } from "./providers/mailgun.provider.js";
+import { createResendProvider } from "./providers/resend.provider.js";
 import type { EmailProvider, SendEmailResult } from "./providers/email-provider.js";
 import { emailTemplateRegistry, renderEmailTemplate, type EmailTemplateKey } from "./templates/index.js";
 
@@ -11,7 +12,12 @@ let cachedProvider: EmailProvider | undefined;
 
 function getProvider(): EmailProvider {
   if (!cachedProvider) {
-    cachedProvider = env.EMAIL_PROVIDER === "mailgun" ? createMailgunProvider() : createConsoleProvider();
+    cachedProvider =
+      env.EMAIL_PROVIDER === "mailgun"
+        ? createMailgunProvider()
+        : env.EMAIL_PROVIDER === "resend"
+          ? createResendProvider()
+          : createConsoleProvider();
   }
   return cachedProvider;
 }

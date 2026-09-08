@@ -40,5 +40,19 @@ export function heading(text: string): string {
 }
 
 export function button(label: string, href: string): string {
-  return `<p style="margin:0 0 16px;"><a href="${href}" style="display:inline-block;background-color:#4c1d95;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:bold;">${label}</a></p>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 16px;">
+    <tr>
+      <td style="background-color:#4c1d95;border-radius:6px;">
+        <!--[if mso]>
+        <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${href}" style="height:40px;v-text-anchor:middle;width:220px;" arcsize="15%" stroke="f" fillcolor="#4c1d95">
+        <w:anchorlock/>
+        <center style="color:#ffffff;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;">${label}</center>
+        </v:roundrect>
+        <![endif]-->
+        <!--[if !mso]><!-->
+        <a href="${href}" style="display:block;background-color:#4c1d95;color:#ffffff;text-decoration:none;padding:10px 20px;border-radius:6px;font-weight:bold;font-family:Arial,Helvetica,sans-serif;font-size:14px;">${label}</a>
+        <!--<![endif]-->
+      </td>
+    </tr>
+  </table>`;
 }

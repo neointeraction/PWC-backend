@@ -11,8 +11,17 @@ const app = createApp();
 function ymd(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
+// Session startTime/endTime ("HH:mm") are IST wall-clock (see combineDateTime in
+// sessions.service.ts), not UTC — format in IST so "N minutes from now" fixtures land
+// where the service expects them.
+const istTimeFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Kolkata",
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
 function hm(date: Date): string {
-  return date.toISOString().slice(11, 16);
+  return istTimeFormatter.format(date);
 }
 function addDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 86_400_000);

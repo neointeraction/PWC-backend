@@ -417,12 +417,23 @@ or add new** exams/courses/colleges per job role (full design:
 `docs/career-library-normalization-spec.md`). Deduped canonical lookups —
 `EntranceExam`/`Course` (`@@unique([name, level])`, `QualificationLevel` = UG/PG) and
 `Institution` (`name @unique`) — are seeded from the `Ug*`/`Pg*` directories + entries'
-arrays. Careers link to them many-to-many via `CareerEntranceExam` / `CareerCourse` /
-`CareerInstitution` (composite PK, cascade). Backfill (`prisma/seed-data/career-library/
-normalize.ts`, run after the import in `prisma/seed.ts`): exams/courses from each entry's
-`String[]` columns, colleges from the entry's industry match. The old `String[]` columns
-(`entranceExams`, `entranceExamsPG`, `topCourses`) are kept and **dual-written** during
-the transition, to be dropped in a later migration.
+arrays. Careers link to entrance exams many-to-many via `CareerEntranceExam`
+(`careerEntryId` + `entranceExamId`, composite PK, cascade) — curated **per job role**.
+
+Courses and institutions are **not** curated per job role: `CareerCourse` is keyed by
+`clusterId` + `courseId` (every job role under the same `CareerCluster` shares one course
+list) and `CareerInstitution` is keyed by `industryId` + `institutionId` (every job role
+under the same `CareerIndustry` shares one institution list) — both composite PK, cascade
+from the cluster/industry side. Adding or removing a course/institution from any one job
+role's screen is visible on every sibling job role in the same cluster/industry; a create
+adds to that shared list (never deletes what siblings already linked), a PATCH with a
+`courses`/`institutions` array replaces the whole cluster's/industry's list. Backfill
+(`prisma/seed-data/career-library/normalize.ts`, run after the import in `prisma/seed.ts`):
+exams from each entry's `String[]` columns, courses/colleges resolved to the entry's
+domain → cluster/industry. The old `String[]` columns (`entranceExams`, `entranceExamsPG`,
+`topCourses`) are kept and **dual-written** during the transition (per-entry, so
+`topCourses` on one entry does not reflect what a sibling role added to the shared list),
+to be dropped in a later migration.
 
 Each canonical lookup also carries the detail an admin's "add new" form collects, so a
 hand-added row is as complete as an imported one (columns mirror the raw `Ug*` tables):

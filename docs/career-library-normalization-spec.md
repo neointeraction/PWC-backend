@@ -200,4 +200,32 @@ dropdowns:
 `Institution` row. Blank-fill means a value entered wrong on first creation can only be
 corrected in the database. Admin CRUD for the three lookup tables is the natural next step —
 it also gives the "manage reference data" screen a home, separate from the job-role form.
+
+## 9. Courses shared per cluster, institutions shared per industry (2026-09-08)
+
+**Confirmed:** unlike D1/D3 above (which curated courses/institutions per job role),
+courses are actually meant to be **one shared list per `CareerCluster`** and institutions
+**one shared list per `CareerIndustry`** — every job role rolling up to the same
+cluster/industry shows and edits the same list, not an independent copy.
+
+- `CareerCourse` is now keyed by `clusterId` + `courseId` (was `careerEntryId` +
+  `courseId`); `CareerInstitution` by `industryId` + `institutionId` (was `careerEntryId` +
+  `institutionId`). See `docs/db-design.md` "Career Library normalization" for the model.
+- **Create** (`POST /career-library`, and approving a counsellor's proposal): the picked
+  courses/institutions are *added* to the cluster's/industry's shared list — never deletes
+  what a sibling job role already linked, since a brand-new role's payload can't be expected
+  to enumerate everything already there.
+- **Update** (`PATCH /career-library/:id`): a provided `courses`/`institutions` array
+  *replaces* the whole cluster's/industry's list (same "replace what's provided, leave
+  omitted arrays alone" rule as before, just at cluster/industry scope instead of per-entry)
+  — so removing one from any job role's screen removes it for every sibling role too.
+- Moving a job role to a different domain (re-parenting) doesn't migrate any links: the
+  entry just starts reading/writing its *new* domain's cluster/industry list, since there's
+  no longer any entry-owned state to move.
+- `?domainId=` scoping on the courses/institutions dropdowns now means "what does this
+  domain's cluster/industry already have" (unchanged for exams, which stay per-job-role).
+- Entrance exams and Education Path entries are **not** affected — they stay curated per
+  job role via `CareerEntranceExam`/`CareerEducationEntry` (keyed by `careerEntryId`), since
+  which exams/qualifications lead to a role is genuinely role-specific in a way a "top
+  courses" or "top colleges" list for an entire cluster/industry isn't.
 ```

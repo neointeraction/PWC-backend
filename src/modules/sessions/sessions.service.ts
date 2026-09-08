@@ -4,6 +4,7 @@ import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { advanceWorkflowStatus, WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
+import { formatDisplayDate } from "../../common/utils/dateFormat.js";
 import { sendTemplateEmail } from "../email/email.service.js";
 import type {
   AddSlotsBody,
@@ -27,6 +28,8 @@ const sessionInclude = {
     select: {
       id: true,
       studentCode: true,
+      mobile: true,
+      whatsappNumber: true,
       parentEmail: true,
       parentMobile: true,
       user: { select: { id: true, email: true, firstName: true, lastName: true } },
@@ -42,6 +45,16 @@ const sessionInclude = {
   },
 } as const;
 
+// The frontend shows a single "WhatsApp" contact — fall back to the student's primary
+// mobile when no separate WhatsApp number was captured, rather than surfacing null.
+function withWhatsappFallback<T extends { student: { whatsappNumber: string | null; mobile: string } }>(session: T): T {
+  return { ...session, student: { ...session.student, whatsappNumber: session.student.whatsappNumber ?? session.student.mobile } };
+}
+
+function withWhatsappFallbackMany<T extends { student: { whatsappNumber: string | null; mobile: string } }>(sessions: T[]): T[] {
+  return sessions.map(withWhatsappFallback);
+}
+
 function toDate(dateStr: string): Date {
   return new Date(`${dateStr}T00:00:00.000Z`);
 }
@@ -50,13 +63,18 @@ function diffCalendarDays(dateA: string, dateB: string): number {
   return Math.round((toDate(dateB).getTime() - toDate(dateA).getTime()) / 86_400_000);
 }
 
+// `time` ("HH:mm") is IST wall-clock, matching how slots are created/displayed (see
+// dateFormat.ts) — IST is UTC+5:30, so the offset (not "Z") gives the correct instant.
 function combineDateTime(date: Date, time: string): Date {
   const iso = date.toISOString().slice(0, 10);
-  return new Date(`${iso}T${time}:00.000Z`);
+  return new Date(`${iso}T${time}:00.000+05:30`);
 }
 
+// "07 Sep 2026 18:00" — matches the DD MMM YYYY convention used everywhere else in
+// user-facing output (see src/common/utils/dateFormat.ts). `date` is a plain
+// "YYYY-MM-DD" string (see toDate) so it's treated as UTC midnight before formatting.
 function formatDateTime(date: string, time: string): string {
-  return `${date} ${time}`;
+  return `${formatDisplayDate(new Date(`${date}T00:00:00.000Z`))} ${time}`;
 }
 
 // Fire-and-forget: email failures never fail the scheduling action that triggered them
@@ -405,7 +423,11 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
 
     await advanceWorkflowStatus(tx, studentId, "SESSION_SCHEDULED");
 
-    return { session1: createdSession1, session2: createdSession2, counsellor: createdSession1.counsellor };
+    return {
+      session1: withWhatsappFallback(createdSession1),
+      session2: withWhatsappFallback(createdSession2),
+      counsellor: createdSession1.counsellor,
+    };
   });
 
   const studentName = `${session1.student.user.firstName} ${session1.student.user.lastName}`;
@@ -483,7 +505,7 @@ export async function createSessionManually(input: CreateSessionBody) {
       await advanceWorkflowStatus(tx, input.studentId, "SESSION_SCHEDULED");
       return created;
     });
-    return session;
+    return withWhatsappFallback(session);
   } catch (err) {
     handlePrismaError(err);
   }
@@ -523,7 +545,7 @@ function reconcileNoShow<T extends {
 export async function getSessionById(id: string) {
   const session = await prisma.session.findUnique({ where: { id }, include: sessionInclude });
   if (!session) throw new NotFoundError("Session not found");
-  return reconcileNoShow(session);
+  return withWhatsappFallback(reconcileNoShow(session));
 }
 
 export async function getStudentSessions(studentId: string) {
@@ -533,7 +555,7 @@ export async function getStudentSessions(studentId: string) {
     include: sessionInclude,
     orderBy: { sessionNumber: "asc" },
   });
-  return sessions.map(reconcileNoShow);
+  return withWhatsappFallbackMany(sessions.map(reconcileNoShow));
 }
 
 export async function getCounsellorSessions(counsellorId: string, status?: SessionStatus) {
@@ -544,7 +566,7 @@ export async function getCounsellorSessions(counsellorId: string, status?: Sessi
     include: sessionInclude,
     orderBy: [{ scheduledDate: "asc" }, { startTime: "asc" }],
   });
-  return sessions.map(reconcileNoShow);
+  return withWhatsappFallbackMany(sessions.map(reconcileNoShow));
 }
 
 // STUDENT_PROFILE isn't submitted through the generic form engine (it's Student
@@ -638,7 +660,7 @@ export async function listSessions(query: ListSessionsQuery) {
     include: sessionInclude,
     orderBy: [{ scheduledDate: "asc" }, { startTime: "asc" }],
   });
-  return sessions.map(reconcileNoShow);
+  return withWhatsappFallbackMany(sessions.map(reconcileNoShow));
 }
 
 // --- Join / complete / notes ---
@@ -663,7 +685,7 @@ export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
 
   const isFirstStudentJoin = role === "STUDENT" && session.studentJoinedAt === null;
   const data = role === "STUDENT" ? { studentJoinedAt: session.studentJoinedAt ?? now } : { counsellorJoinedAt: session.counsellorJoinedAt ?? now };
-  const updated = await prisma.session.update({ where: { id }, data, include: sessionInclude });
+  const updated = withWhatsappFallback(await prisma.session.update({ where: { id }, data, include: sessionInclude }));
 
   // Only notify the parent on the student's first join — the write above is already
   // idempotent on studentJoinedAt, but without this guard a repeat /join call (refresh,
@@ -691,12 +713,13 @@ export async function completeSession(id: string) {
     await advanceWorkflowStatus(tx, session.studentId, target);
     return result;
   });
-  return updated;
+  return withWhatsappFallback(updated);
 }
 
 export async function setNotes(id: string, notes: string) {
   try {
-    return await prisma.session.update({ where: { id }, data: { notes }, include: sessionInclude });
+    const updated = await prisma.session.update({ where: { id }, data: { notes }, include: sessionInclude });
+    return withWhatsappFallback(updated);
   } catch (err) {
     handlePrismaError(err);
   }
@@ -754,7 +777,7 @@ async function claimSlotAndUpdateSession(
       include: sessionInclude,
     });
     await tx.counsellorSlot.update({ where: { id: newSlot.id }, data: { sessionId: result.id } });
-    return result;
+    return withWhatsappFallback(result);
   });
 }
 
@@ -890,15 +913,17 @@ export async function restartStudentSessions(studentId: string) {
         await tx.counsellorSlot.update({ where: { id: slot.id }, data: { status: "OPEN", sessionId: null } });
       }
       results.push(
-        await tx.session.update({
-          where: { id: s.id },
-          data: {
-            status: "CANCELLED",
-            cancellationReason: "OTHER",
-            cancellationNotes: "Student restarted booking from scratch (Option B)",
-          },
-          include: sessionInclude,
-        })
+        withWhatsappFallback(
+          await tx.session.update({
+            where: { id: s.id },
+            data: {
+              status: "CANCELLED",
+              cancellationReason: "OTHER",
+              cancellationNotes: "Student restarted booking from scratch (Option B)",
+            },
+            include: sessionInclude,
+          })
+        )
       );
     }
     return results;
@@ -932,7 +957,7 @@ export async function cancelSession(id: string, input: CancelSessionBody) {
     if (slot) {
       await tx.counsellorSlot.update({ where: { id: slot.id }, data: { status: "OPEN", sessionId: null } });
     }
-    return tx.session.update({
+    const result = await tx.session.update({
       where: { id },
       data: {
         status: "CANCELLED",
@@ -941,6 +966,7 @@ export async function cancelSession(id: string, input: CancelSessionBody) {
       },
       include: sessionInclude,
     });
+    return withWhatsappFallback(result);
   });
 
   const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
@@ -995,11 +1021,13 @@ export async function markSessionNoShow(id: string, party: "STUDENT" | "COUNSELL
     return session;
   }
 
-  const updated = await prisma.session.update({
-    where: { id },
-    data: party === "STUDENT" ? { studentNoShow: true } : { counsellorNoShow: true },
-    include: sessionInclude,
-  });
+  const updated = withWhatsappFallback(
+    await prisma.session.update({
+      where: { id },
+      data: party === "STUDENT" ? { studentNoShow: true } : { counsellorNoShow: true },
+      include: sessionInclude,
+    })
+  );
 
   const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
   const counsellorName = `${updated.counsellor.user.firstName} ${updated.counsellor.user.lastName}`;

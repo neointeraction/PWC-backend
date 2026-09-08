@@ -8,15 +8,27 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     questionCode: "Q1",
     fieldKey: "strong_subjects_block",
     sectionLabel: "Section 1 — How I See My Child's Academic Strengths",
-    questionText: "Which subjects do you consider your child genuinely strong in?",
+    questionText: "Pick the ONE subject your child is strongest in and tell us WHY you think so.",
     helpText:
       "Strong means they understand it well, perform consistently, or show real interest (not based on scores).",
     questionType: "MATRIX",
     options: {
       fields: [
-        { key: "strong_subject_1", label: "Strong Subject 1", type: "SHORT_TEXT" },
-        { key: "strong_subject_2", label: "Strong Subject 2", type: "SHORT_TEXT" },
-        { key: "strong_subject_3", label: "Strong Subject 3", type: "SHORT_TEXT" },
+        { key: "strong_subject_1", label: "Strong Subject", type: "SHORT_TEXT" },
+        {
+          key: "strong_subject_reason",
+          label: "I believe my child enjoys this subject because",
+          type: "MCQ_SINGLE",
+          allowOtherText: true,
+          otherTextFieldKey: "strong_subject_reason_other",
+          options: [
+            { value: "a", label: "My child love solving problems and puzzles in this subject" },
+            { value: "b", label: "It allows my child to be creative and come up with new ideas" },
+            { value: "c", label: "It connects to real life, my child can see how it is actually used" },
+            { value: "d", label: "It just feels easy and natural to my child who simply enjoys it" },
+            { value: "other", label: "Any Other Reason", isOtherOption: true },
+          ],
+        },
       ],
     },
   },
@@ -25,13 +37,27 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     questionCode: "Q2",
     fieldKey: "struggle_subjects_block",
     sectionLabel: "Section 1 — How I See My Child's Academic Strengths",
-    questionText: "Which subjects do you feel your child struggles with the most?",
+    questionText: "Pick the ONE subject your child struggles with the most and tell us WHY.",
+    helpText:
+      "Difficulty does not mean your child is bad at it (not based on scores), it just means your child enjoys it the least or does not enjoy it at all.",
     questionType: "MATRIX",
     options: {
       fields: [
-        { key: "struggle_subject_1", label: "Struggling Subject 1", type: "SHORT_TEXT" },
-        { key: "struggle_subject_2", label: "Struggling Subject 2", type: "SHORT_TEXT" },
-        { key: "struggle_subject_3", label: "Struggling Subject 3", type: "SHORT_TEXT" },
+        { key: "struggle_subject_1", label: "Struggling Subject", type: "SHORT_TEXT" },
+        {
+          key: "struggle_subject_reason",
+          label: "It is difficult because",
+          type: "MCQ_SINGLE",
+          allowOtherText: true,
+          otherTextFieldKey: "struggle_subject_reason_other",
+          options: [
+            { value: "a", label: "My child doesn't understand the concepts, it feels like just memorising" },
+            { value: "b", label: "My child gets anxious during exams or tests for this subject" },
+            { value: "c", label: "The way it is taught is too theoretical and boring" },
+            { value: "d", label: "My child is simply not interested in this topic" },
+            { value: "other", label: "Any Other Reason", isOtherOption: true },
+          ],
+        },
       ],
     },
   },

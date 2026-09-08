@@ -5,6 +5,7 @@
 import { prisma } from "../../config/prisma.js";
 import { NotFoundError } from "../../common/errors/AppError.js";
 import { ACADEMIC_RECORD_FIELDKEY, CHART_SECTIONS } from "./fieldmap.js";
+import { resolveAnswerLabels } from "./answerLabel.js";
 
 const COHORT = "CLASS_9_10";
 
@@ -21,11 +22,22 @@ async function loadFormAnswers(
 
   const submission = await prisma.formSubmission.findFirst({
     where: { studentId, formTemplateId: template.id },
-    include: { answers: { include: { question: { select: { fieldKey: true } } } } },
+    include: {
+      answers: {
+        include: {
+          question: { select: { fieldKey: true, questionType: true, options: true, allowOtherText: true } },
+        },
+      },
+    },
   });
   if (!submission) return new Map();
 
-  return new Map(submission.answers.map((a) => [a.question.fieldKey, a.answer]));
+  return new Map(
+    submission.answers.map((a) => [
+      a.question.fieldKey,
+      resolveAnswerLabels(a.question, a.answer),
+    ])
+  );
 }
 
 export async function assembleChart(studentId: string) {

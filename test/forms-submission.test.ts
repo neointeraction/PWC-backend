@@ -16,6 +16,28 @@ interface TemplateQuestion {
   options: unknown;
 }
 
+interface MatrixFieldDef {
+  key: string;
+  type: string;
+  options?: { value: string }[];
+}
+
+// A minimal, valid value for one matrix field, keyed by the field's own type — used to
+// fill every row (or the single field set, for a rows-less matrix) so the "submit
+// successfully" test satisfies the per-row/field completeness check in forms.service.ts.
+function buildFieldValue(field: MatrixFieldDef): unknown {
+  switch (field.type) {
+    case "MCQ_SINGLE":
+      return field.options?.[0]?.value ?? "a";
+    case "MCQ_MULTI":
+      return [field.options?.[0]?.value ?? "a"];
+    case "NUMBER":
+      return 5;
+    default:
+      return "Test value";
+  }
+}
+
 // Builds a generically valid, non-empty answer for any question shape so the
 // "submit successfully" test doesn't need to hardcode this form's real content.
 function buildAnswer(question: TemplateQuestion): unknown {
@@ -29,8 +51,18 @@ function buildAnswer(question: TemplateQuestion): unknown {
       return 5;
     case "SCALE":
       return options?.[0]?.value ?? "3";
-    case "MATRIX":
-      return { sample: "value" };
+    case "MATRIX": {
+      const { rows, fields } = question.options as { rows?: { key: string }[]; fields?: MatrixFieldDef[] };
+      const fieldValues = (fields ?? []).reduce<Record<string, unknown>>((acc, f) => {
+        acc[f.key] = buildFieldValue(f);
+        return acc;
+      }, {});
+      if (!rows || rows.length === 0) return fieldValues;
+      return rows.reduce<Record<string, unknown>>((acc, row) => {
+        acc[row.key] = fieldValues;
+        return acc;
+      }, {});
+    }
     default:
       return "Test answer";
   }
@@ -114,6 +146,88 @@ describe("Forms submission API", () => {
     expect(res.body.error.details.missingFieldKeys.length).toBeGreaterThan(0);
   });
 
+  it("rejects submit when a required MATRIX question has only some rows filled in", async () => {
+    // p_strengths_table (PRE_COUNSELLING_PARENT) has 18 rows, each requiring a "rating" —
+    // filling in just one row must not count as answered (regression: the old check only
+    // looked at Object.keys(answer).length, so a single row passed a 18-row matrix).
+    const student = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Radha",
+      lastName: "Krishnan",
+      email: "radha@test-form-submission.example",
+      mobile: "+919876550020",
+      studentCode: "FSUBMTX",
+      projectId,
+      className: "Grade 9",
+      divisionName: "A",
+      parentMobile: "+919876550021",
+      parentEmail: "parent-radha@test-form-submission.example",
+      fatherName: "Krishnan Sr",
+      fatherOccupation: "Engineer",
+      motherName: "Krishnan Jr",
+      motherOccupation: "Doctor",
+    });
+    const matrixStudentId = student.body.student.id;
+
+    // Parent forms are public (no login) — a plain, unauthenticated request must work.
+    const res = await request(app)
+      .post(`/api/v1/forms/PRE_COUNSELLING_PARENT/students/${matrixStudentId}/submit`)
+      .send({
+        cohort: COHORT,
+        answers: [{ fieldKey: "p_strengths_table", answer: { speaking: { rating: "clearly" } } }],
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.details.missingFieldKeys).toContain("p_strengths_table");
+  });
+
+  it("accepts the parent form's single-subject-plus-reason shape for strong/struggle subjects", async () => {
+    // Regression: PWC-frontend's ParentPreCounsellingFormPage only ever collects ONE
+    // subject (strong_subject_1 / struggle_subject_1) plus a reason radio pick — it never
+    // sends *_subject_2/_3. strong_subjects_block/struggle_subjects_block must declare
+    // exactly that shape (one subject field + a reason field) so this real payload isn't
+    // flagged as missing.
+    const student = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Subject",
+      lastName: "Reason",
+      email: "subjectreason@test-form-submission.example",
+      mobile: "+919876550022",
+      studentCode: "FSUBREASON",
+      projectId,
+      className: "Grade 9",
+      divisionName: "A",
+      parentMobile: "+919876550023",
+      parentEmail: "parent-subjectreason@test-form-submission.example",
+      fatherName: "Reason Sr",
+      fatherOccupation: "Engineer",
+      motherName: "Reason Jr",
+      motherOccupation: "Doctor",
+    });
+    const subjectReasonStudentId = student.body.student.id;
+
+    // Parent forms are public (no login) — plain, unauthenticated requests must work.
+    const template = await request(app)
+      .get("/api/v1/forms/PRE_COUNSELLING_PARENT")
+      .query({ cohort: COHORT });
+
+    const requiredQuestions = template.body.questions.filter((q: { isRequired: boolean }) => q.isRequired);
+    const answers = requiredQuestions.map((q: TemplateQuestion) => {
+      if (q.fieldKey === "strong_subjects_block") {
+        return { fieldKey: q.fieldKey, answer: { strong_subject_1: "Mathematics", strong_subject_reason: "a" } };
+      }
+      if (q.fieldKey === "struggle_subjects_block") {
+        return { fieldKey: q.fieldKey, answer: { struggle_subject_1: "History", struggle_subject_reason: "b" } };
+      }
+      return { fieldKey: q.fieldKey, answer: buildAnswer(q) };
+    });
+
+    const res = await request(app)
+      .post(`/api/v1/forms/PRE_COUNSELLING_PARENT/students/${subjectReasonStudentId}/submit`)
+      .send({ cohort: COHORT, answers });
+
+    expect(res.status).toBe(200);
+    expect(res.body.submittedAt).not.toBeNull();
+  });
+
   it("submits successfully once every required question is answered, and locks it", async () => {
     const template = await authRequest(app)
       .get("/api/v1/forms/PRE_COUNSELLING_STUDENT")
@@ -188,13 +302,14 @@ describe("Forms submission API", () => {
     });
     const expiredStudentId = expiredStudent.body.student.id;
 
-    const draftRes = await authRequest(app)
+    // Parent forms are public (no login) — plain, unauthenticated requests must work.
+    const draftRes = await request(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_PARENT/students/${expiredStudentId}`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "x" }] });
     expect(draftRes.status).toBe(403);
     expect(draftRes.body.error.details.reason).toBe("PROJECT_EXPIRED");
 
-    const submitRes = await authRequest(app)
+    const submitRes = await request(app)
       .post(`/api/v1/forms/PRE_COUNSELLING_PARENT/students/${expiredStudentId}/submit`)
       .send({ cohort: COHORT, answers: [{ fieldKey: "career_in_mind", answer: "x" }] });
     expect(submitRes.status).toBe(403);

@@ -212,14 +212,6 @@ const entryLinkInclude = {
     select: { entranceExam: { select: entranceExamDetailSelect } },
     orderBy: { entranceExam: { name: "asc" } },
   },
-  courseLinks: {
-    select: { course: { select: courseDetailSelect } },
-    orderBy: { course: { name: "asc" } },
-  },
-  institutionLinks: {
-    select: { institution: { select: institutionDetailSelect } },
-    orderBy: { institution: { name: "asc" } },
-  },
   educationLinks: {
     select: {
       educationEntry: { select: { id: true, level: true, programme: true, description: true, status: true } },
@@ -236,9 +228,25 @@ export async function getCareerLibraryEntryById(id: string) {
   if (!entry) {
     throw new NotFoundError("Career library entry not found");
   }
-  const { entranceExamLinks, courseLinks, institutionLinks, educationLinks, ...rest } = entry;
+  const { entranceExamLinks, educationLinks, ...rest } = entry;
+  const clusterId = entry.domain.industry.cluster.id;
+  const industryId = entry.domain.industry.id;
 
-  const [relatedInstitutions, relatedCourses, relatedEntranceExams] = await Promise.all([
+  const [courseLinks, institutionLinks, relatedInstitutions, relatedCourses, relatedEntranceExams] = await Promise.all([
+    // Courses are shared at the cluster level — every job role under this cluster sees the
+    // same list (see CareerCourse's schema comment).
+    prisma.careerCourse.findMany({
+      where: { clusterId },
+      select: { course: { select: courseDetailSelect } },
+      orderBy: { course: { name: "asc" } },
+    }),
+    // Institutions are shared at the industry level — every job role under this industry
+    // sees the same list.
+    prisma.careerInstitution.findMany({
+      where: { industryId },
+      select: { institution: { select: institutionDetailSelect } },
+      orderBy: { institution: { name: "asc" } },
+    }),
     prisma.ugInstitution.findMany({
       where: { industry: entry.domain.industry.name },
       orderBy: { name: "asc" },
@@ -424,6 +432,15 @@ async function resolveEducationEntries(
   return [...resolved.values()];
 }
 
+// A domain's cluster/industry ids, for scoping the shared course/institution join tables.
+async function getClusterAndIndustryId(domainId: string): Promise<{ clusterId: string; industryId: string }> {
+  const domain = await prisma.careerDomain.findUniqueOrThrow({
+    where: { id: domainId },
+    select: { industryId: true, industry: { select: { clusterId: true } } },
+  });
+  return { clusterId: domain.industry.clusterId, industryId: domain.industryId };
+}
+
 // An admin's submission goes straight into the real table (as before); a counsellor's is
 // staged in `CareerLibraryEntryProposal` instead of ever touching career_library_entries —
 // see docs/career-library-normalization-spec.md for why the tables are split.
@@ -453,20 +470,37 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
   }
 
   try {
-    const created = await prisma.careerLibraryEntry.create({
-      data: {
-        ...scalar,
-        createdBy: actor.userId,
-        // Dual-write the transitional String[] columns from the resolved names.
-        entranceExams: exams.filter((e) => e.level === "UG").map((e) => e.name),
-        entranceExamsPG: exams.filter((e) => e.level === "PG").map((e) => e.name),
-        topCourses: crs.map((c) => c.name),
-        entranceExamLinks: { create: exams.map((e) => ({ entranceExamId: e.id })) },
-        courseLinks: { create: crs.map((c) => ({ courseId: c.id })) },
-        institutionLinks: { create: insts.map((i) => ({ institutionId: i.id })) },
-        educationLinks: { create: edu.map((e) => ({ educationEntryId: e.id })) },
-      },
-      select: { id: true },
+    const { clusterId, industryId } = await getClusterAndIndustryId(scalar.domainId);
+    const created = await prisma.$transaction(async (tx) => {
+      const entry = await tx.careerLibraryEntry.create({
+        data: {
+          ...scalar,
+          createdBy: actor.userId,
+          // Dual-write the transitional String[] columns from the resolved names.
+          entranceExams: exams.filter((e) => e.level === "UG").map((e) => e.name),
+          entranceExamsPG: exams.filter((e) => e.level === "PG").map((e) => e.name),
+          topCourses: crs.map((c) => c.name),
+          entranceExamLinks: { create: exams.map((e) => ({ entranceExamId: e.id })) },
+          educationLinks: { create: edu.map((e) => ({ educationEntryId: e.id })) },
+        },
+        select: { id: true },
+      });
+      // Courses/institutions are shared at the cluster/industry level (see CareerCourse's
+      // schema comment) — a new job role's picks are added to that shared list, never
+      // removing what sibling roles under the same cluster/industry already linked.
+      if (crs.length) {
+        await tx.careerCourse.createMany({
+          data: crs.map((c) => ({ clusterId, courseId: c.id })),
+          skipDuplicates: true,
+        });
+      }
+      if (insts.length) {
+        await tx.careerInstitution.createMany({
+          data: insts.map((i) => ({ industryId, institutionId: i.id })),
+          skipDuplicates: true,
+        });
+      }
+      return entry;
     });
     return getCareerLibraryEntryById(created.id);
   } catch (err) {
@@ -488,6 +522,13 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
     educationEntries !== undefined
       ? await resolveEducationEntries(educationEntries, actor)
       : undefined;
+  // Courses/institutions are shared at the cluster/industry level — resolve against the
+  // domain this update leaves the entry in (the new one when it also re-parents), same rule
+  // as education entries above. A provided array here REPLACES the whole cluster's/industry's
+  // list, so an add or remove made from this job role's screen is visible on every sibling
+  // role under the same cluster/industry.
+  const { clusterId, industryId } =
+    crs || insts ? await getClusterAndIndustryId(scalar.domainId ?? current.domain.id) : {};
   try {
     await prisma.$transaction(async (tx) => {
       await tx.careerLibraryEntry.update({
@@ -501,6 +542,8 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
                 entranceExamsPG: exams.filter((e) => e.level === "PG").map((e) => e.name),
               }
             : {}),
+          // Transitional column, this entry's own value only — see the schema comment on
+          // CareerLibraryEntry.topCourses.
           ...(crs ? { topCourses: crs.map((c) => c.name) } : {}),
         },
       });
@@ -509,12 +552,12 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
         await tx.careerEntranceExam.createMany({ data: exams.map((e) => ({ careerEntryId: id, entranceExamId: e.id })), skipDuplicates: true });
       }
       if (crs) {
-        await tx.careerCourse.deleteMany({ where: { careerEntryId: id } });
-        await tx.careerCourse.createMany({ data: crs.map((c) => ({ careerEntryId: id, courseId: c.id })), skipDuplicates: true });
+        await tx.careerCourse.deleteMany({ where: { clusterId } });
+        await tx.careerCourse.createMany({ data: crs.map((c) => ({ clusterId: clusterId!, courseId: c.id })), skipDuplicates: true });
       }
       if (insts) {
-        await tx.careerInstitution.deleteMany({ where: { careerEntryId: id } });
-        await tx.careerInstitution.createMany({ data: insts.map((i) => ({ careerEntryId: id, institutionId: i.id })), skipDuplicates: true });
+        await tx.careerInstitution.deleteMany({ where: { industryId } });
+        await tx.careerInstitution.createMany({ data: insts.map((i) => ({ industryId: industryId!, institutionId: i.id })), skipDuplicates: true });
       }
       if (edu) {
         await tx.careerEducationEntry.deleteMany({ where: { careerEntryId: id } });
@@ -530,11 +573,14 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
 // --- Dropdown / typeahead lookups ---
 
 // Optional domain scoping: "what does this Domain already have?" — i.e. the lookup rows
-// already linked to job roles whose leaf domain is `domainId`, via the join tables. Entry
-// status is deliberately ignored (a draft role's exams are still the domain's data, and
-// every canonical row is listable globally anyway, so this exposes nothing new).
-// Omitting `domainId` keeps the global list.
-function domainScope(domainId?: string) {
+// already linked to job roles whose leaf domain is `domainId`. Entry status is deliberately
+// ignored (a draft role's exams are still the domain's data, and every canonical row is
+// listable globally anyway, so this exposes nothing new). Omitting `domainId` keeps the
+// global list. Entrance exams stay curated per job role, so they scope through the join
+// table's careerEntry; courses/institutions are shared at the cluster/industry level, so
+// "what this domain has" means "what its cluster/industry has" (see the schema comments on
+// CareerCourse/CareerInstitution).
+function examDomainScope(domainId?: string) {
   return domainId ? { careerLinks: { some: { careerEntry: { domainId } } } } : {};
 }
 
@@ -545,7 +591,7 @@ export async function listEntranceExams(query: ListEntranceExamsQuery) {
       level: query.level,
       status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...domainScope(query.domainId),
+      ...examDomainScope(query.domainId),
     },
     orderBy: { name: "asc" },
     take: query.limit,
@@ -555,11 +601,12 @@ export async function listEntranceExams(query: ListEntranceExamsQuery) {
 
 export async function listInstitutions(query: ListInstitutionsQuery) {
   if (query.domainId) await assertLiveDomain(query.domainId);
+  const { industryId } = query.domainId ? await getClusterAndIndustryId(query.domainId) : { industryId: undefined };
   return prisma.institution.findMany({
     where: {
       status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...domainScope(query.domainId),
+      ...(industryId ? { careerLinks: { some: { industryId } } } : {}),
     },
     orderBy: { name: "asc" },
     take: query.limit,
@@ -569,12 +616,13 @@ export async function listInstitutions(query: ListInstitutionsQuery) {
 
 export async function listCourses(query: ListCoursesQuery) {
   if (query.domainId) await assertLiveDomain(query.domainId);
+  const { clusterId } = query.domainId ? await getClusterAndIndustryId(query.domainId) : { clusterId: undefined };
   return prisma.course.findMany({
     where: {
       level: query.level,
       status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...domainScope(query.domainId),
+      ...(clusterId ? { careerLinks: { some: { clusterId } } } : {}),
     },
     orderBy: { name: "asc" },
     take: query.limit,
@@ -585,7 +633,8 @@ export async function listCourses(query: ListCoursesQuery) {
 // --- Education Path entries (global canonical lookup) ---------------------------
 // A global row like an exam/course/institution, attached to job roles through
 // CareerEducationEntry. Domain scoping survives only as a *usage* filter on the picker,
-// via domainScope() above. No review workflow and no soft delete: `status` is the same
+// via examDomainScope() above (education entries stay curated per job role, like exams). No
+// review workflow and no soft delete: `status` is the same
 // DRAFT/ACTIVE publish flag a CareerLibraryEntry carries, and delete is a real delete.
 
 // Ordered by level then programme so the picker groups naturally (10+2 -> Graduate -> PG ->
@@ -599,7 +648,7 @@ export async function listEducationEntries(query: ListEducationEntriesQuery) {
       level: query.level,
       status: query.status,
       programme: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...domainScope(query.domainId),
+      ...examDomainScope(query.domainId),
     },
     orderBy: [...educationOrder],
     take: query.limit,
@@ -913,6 +962,7 @@ export async function approveCareerEntryProposal(id: string, actor: Actor) {
       : Promise.resolve([]),
   ]);
 
+  const { clusterId, industryId } = await getClusterAndIndustryId(domainId);
   try {
     const created = await prisma.$transaction(async (tx) => {
       const entry = await tx.careerLibraryEntry.create({
@@ -925,12 +975,24 @@ export async function approveCareerEntryProposal(id: string, actor: Actor) {
           entranceExamsPG: exams.filter((e) => e.level === "PG").map((e) => e.name),
           topCourses: courses.map((c) => c.name),
           entranceExamLinks: { create: examIds.map((entranceExamId) => ({ entranceExamId })) },
-          courseLinks: { create: courseIds.map((courseId) => ({ courseId })) },
-          institutionLinks: { create: institutionIds.map((institutionId) => ({ institutionId })) },
           educationLinks: { create: educationEntryIds.map((educationEntryId) => ({ educationEntryId })) },
         },
         select: { id: true },
       });
+      // Courses/institutions are shared at the cluster/industry level — add this proposal's
+      // picks to that shared list rather than overwriting it.
+      if (courseIds.length) {
+        await tx.careerCourse.createMany({
+          data: courseIds.map((courseId) => ({ clusterId, courseId })),
+          skipDuplicates: true,
+        });
+      }
+      if (institutionIds.length) {
+        await tx.careerInstitution.createMany({
+          data: institutionIds.map((institutionId) => ({ industryId, institutionId })),
+          skipDuplicates: true,
+        });
+      }
       await tx.careerLibraryEntryProposal.delete({ where: { id } });
       return entry;
     });

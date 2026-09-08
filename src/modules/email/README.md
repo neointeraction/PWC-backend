@@ -11,16 +11,18 @@ Set via env vars (validated in `src/config/env.ts`, see `.env.example`):
 
 | Var | Values | Notes |
 |---|---|---|
-| `EMAIL_PROVIDER` | `console` \| `mailgun` | `console` (default) logs the email instead of sending — safe for local dev. `mailgun` sends for real. |
+| `EMAIL_PROVIDER` | `console` \| `mailgun` \| `resend` | `console` (default) logs the email instead of sending — safe for local dev. `mailgun`/`resend` send for real. |
 | `EMAIL_FROM_NAME` | string | Defaults to `Team kREATE`. |
-| `EMAIL_FROM_ADDRESS` | email | Defaults to `noreply@example.com` — **must** be an address on your Mailgun sending domain (see Gotchas below), not an arbitrary address. |
+| `EMAIL_FROM_ADDRESS` | email | Defaults to `noreply@example.com` — **must** be an address on your Mailgun/Resend sending domain (see Gotchas below), not an arbitrary address. |
 | `MAILGUN_API_KEY` | string | Required when `EMAIL_PROVIDER=mailgun`. |
 | `MAILGUN_DOMAIN` | string | Required when `EMAIL_PROVIDER=mailgun`. Your Mailgun sandbox or verified sending domain. |
 | `MAILGUN_REGION` | `us` \| `eu` | Defaults to `us` (`api.mailgun.net`). Use `eu` for `api.eu.mailgun.net`. |
+| `RESEND_API_KEY` | string | Required when `EMAIL_PROVIDER=resend`. From the Resend dashboard. |
 | `ADMIN_NOTIFICATION_EMAIL` | email | Defaults to `admin@kreate.local`. Fixed inbox for operational alerts not addressed to a specific student/parent/counsellor — currently only session no-show flags (`SESSION_STUDENT_NO_SHOW_ADMIN`/`SESSION_COUNSELLOR_NO_SHOW_ADMIN`). Not a lookup against `ADMIN`/`SUPER_ADMIN` users — just one configured address. |
 
-`EMAIL_PROVIDER=mailgun` without `MAILGUN_API_KEY`/`MAILGUN_DOMAIN` fails fast at
-startup (see `src/config/env.ts`).
+`EMAIL_PROVIDER=mailgun` without `MAILGUN_API_KEY`/`MAILGUN_DOMAIN`, or
+`EMAIL_PROVIDER=resend` without `RESEND_API_KEY`, fails fast at startup (see
+`src/config/env.ts`).
 
 ## Architecture
 
@@ -33,6 +35,7 @@ providers/
   email-provider.ts     the EmailProvider interface every provider implements
   console.provider.ts    logs instead of sending (default)
   mailgun.provider.ts    real Mailgun send, via mailgun.js
+  resend.provider.ts     real Resend send, via the resend SDK
 templates/
   layout.ts              shared HTML shell + paragraph/heading/button helpers
   reminders.ts            factory-built reminder/session-status templates (31)
