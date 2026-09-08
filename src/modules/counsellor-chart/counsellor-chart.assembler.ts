@@ -6,6 +6,7 @@ import { prisma } from "../../config/prisma.js";
 import { NotFoundError } from "../../common/errors/AppError.js";
 import { ACADEMIC_RECORD_FIELDKEY, CHART_SECTIONS } from "./fieldmap.js";
 import { resolveAnswerLabels } from "./answerLabel.js";
+import { computeEntranceExamsAndColleges } from "./entrance-exams-colleges.js";
 
 const COHORT = "CLASS_9_10";
 
@@ -100,6 +101,10 @@ export async function assembleChart(studentId: string) {
   const rvs = (report?.reliability as { rvs?: { pairs?: { severity: string }[] } } | undefined)?.rvs;
   const flaggedMirrorPairs = (rvs?.pairs ?? []).filter((pair) => pair.severity === "strong");
 
+  // Entrance Exams / Colleges After 11&12 — computed like Graduation Fit, not stored.
+  const careerFit = report?.careerFit as Parameters<typeof computeEntranceExamsAndColleges>[0];
+  const { entranceExamsTable, collegesTable } = await computeEntranceExamsAndColleges(careerFit);
+
   return {
     studentId,
     ourChampion,
@@ -108,5 +113,7 @@ export async function assembleChart(studentId: string) {
     assessment: report, // full computed report (18 traits, styles, fits, reliability)
     flaggedMirrorPairs,
     hasAssessment: report != null,
+    entranceExamsTable, // derived from assessment.careerFit.top3Industries — see entrance-exams-colleges.ts
+    collegesTable,
   };
 }

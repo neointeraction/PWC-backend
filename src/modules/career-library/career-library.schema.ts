@@ -19,6 +19,10 @@ export const listCareerLibraryQuerySchema = z.object({
   // Defaults to ACTIVE-only — callers who need drafts (e.g. an admin's own WIP entries)
   // pass it explicitly.
   status: z.enum(CAREER_LIBRARY_STATUSES).default("ACTIVE"),
+  // Job roles already published (approved) from a given student's Counsellor Chart — lets
+  // the chart re-list what it previously added, alongside GET /proposals?studentId= for
+  // what's still pending.
+  studentId: z.string().min(1).optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 });
@@ -28,6 +32,10 @@ export type ListCareerLibraryQuery = z.infer<typeof listCareerLibraryQuerySchema
 export const listCareerEntryProposalsQuerySchema = z.object({
   search: z.string().trim().min(1).optional(),
   domainId: z.string().min(1).optional(),
+  // Scope to job roles proposed from a given student's Counsellor Chart. A non-admin caller
+  // is always further scoped to their own submissions regardless of this filter (see the
+  // service) — a counsellor only ever sees what they themselves added.
+  studentId: z.string().min(1).optional(),
   page: z.coerce.number().int().positive().default(1),
   pageSize: z.coerce.number().int().positive().max(100).default(20),
 });
@@ -137,6 +145,10 @@ export const createCareerEntrySchema = z.object({
   // Leaf of the Cluster → Industry → Domain taxonomy; must reference a live CareerDomain
   // (validated in the service). cluster/industry are derived by walking up.
   domainId: z.string().min(1),
+  // Set when this job role is being added from a student's Counsellor Chart — the service
+  // validates the student exists and derives projectId from it (never client-supplied).
+  // Omit for the standalone Career Library admin screen.
+  studentId: z.string().min(1).optional(),
   jobRole: z.string().trim().min(1),
   aiResilienceGrade: z.enum(AI_RESILIENCE_GRADES),
   aiResilienceComment: z.string().trim().min(1),
@@ -182,6 +194,12 @@ export type CreateCareerEntryInput = z.infer<typeof createCareerEntrySchema>;
 // see `.nullish()` above). Empty strings stay rejected: clear with null, not an empty string.
 export const updateCareerEntrySchema = createCareerEntrySchema.partial();
 export type UpdateCareerEntryInput = z.infer<typeof updateCareerEntrySchema>;
+
+// A counsellor editing their own still-pending proposal (or an admin editing any of them)
+// before it's approved/rejected. Same partial shape, minus studentId — the chart a proposal
+// belongs to doesn't change after submission.
+export const updateCareerEntryProposalSchema = createCareerEntrySchema.omit({ studentId: true }).partial();
+export type UpdateCareerEntryProposalInput = z.infer<typeof updateCareerEntryProposalSchema>;
 
 // --- Dropdown / typeahead lookups (feed the "select existing" multiselects) ---
 

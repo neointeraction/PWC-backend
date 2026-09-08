@@ -19,6 +19,7 @@ import {
   submitCourseSchema,
   submitEntranceExamSchema,
   submitInstitutionSchema,
+  updateCareerEntryProposalSchema,
   updateCareerEntrySchema,
   updateCourseSchema,
   updateEntranceExamSchema,
@@ -123,6 +124,12 @@ careerLibraryRouter.get(
   ...requireStaff,
   validate({ params: careerLibraryIdParamsSchema }),
   asyncHandler(careerLibraryController.getCareerEntryProposal)
+);
+careerLibraryRouter.patch(
+  "/proposals/:id",
+  ...requireStaff,
+  validate({ params: careerLibraryIdParamsSchema, body: updateCareerEntryProposalSchema }),
+  asyncHandler(careerLibraryController.updateCareerEntryProposal)
 );
 careerLibraryRouter.post(
   "/proposals/:id/approve",

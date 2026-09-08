@@ -1283,6 +1283,34 @@ in the same table as published ones, it's a wholly separate object.
    Both 404 if the id isn't a live proposal — either already decided, or it was never a
    proposal (e.g. you passed an admin-created entry's id by mistake).
 
+### Adding a job role from a Counsellor Chart
+
+When the "add job role" form is opened from a student's Counsellor Chart (rather than the
+standalone Career Library admin screen), pass that student's id as `studentId` on the same
+`POST /api/v1/career-library` call above. The service validates the student exists (404 if
+not) and derives `projectId` from `Student.projectId` itself — never send `projectId`, it's
+ignored. Both ids are stamped onto whatever gets created (the proposal for a counsellor, the
+entry directly for an admin), and carried over unchanged if a proposal is later approved —
+so the job role stays associated with that chart whether it's still pending or already
+published.
+
+To re-list "job roles I already added" when the counsellor reopens the same chart, call both:
+
+- `GET /api/v1/career-library/proposals?studentId={studentId}` — still pending. **A
+  counsellor only ever sees their own submissions here**, even scoped to this `studentId` —
+  the query is always further filtered by `submittedBy` for a non-admin caller. An admin
+  sees everyone's.
+- `GET /api/v1/career-library?studentId={studentId}&status=ACTIVE` — already approved and
+  published (any staff can see these, same as any other published entry).
+
+To edit one still-pending: `PATCH /api/v1/career-library/proposals/{id}` — same body shape
+as the create call, minus `studentId` (fixed at submission) and `status` (meaningless for a
+proposal); a provided link array (`entranceExams`/`courses`/`institutions`/`educationEntries`)
+replaces that proposal's own picks, omitting one leaves it unchanged. Only the counsellor who
+submitted it may edit it (403 for any other counsellor); an admin may edit any of them. Once
+a proposal is approved it becomes a normal `career_library_entries` row and further edits go
+through the admin-only `PATCH /api/v1/career-library/{id}` instead.
+
 ### Proposing reference data as a counsellor
 
 A counsellor can also propose the individual reference rows on their own, without a job role —
@@ -1680,8 +1708,12 @@ before building UI that depends on any of them:
   **PDF rendering is client-side by decision** — the backend will not add a render
   endpoint, so own the print/PDF view on your side. The **parent / institution summary**
   variants aren't built (student report only). Counsellor Chart is built too — `GET`/`PUT
-  /api/v1/counsellor-chart/students/{id}` assemble the chart and save notes/SCRI/ratings,
-  and `POST`/`DELETE …/mirror-pair-amendments` let the counsellor amend a flagged answer,
+  /api/v1/counsellor-chart/students/{id}` assemble the chart and save notes/SCRI/ratings
+  (plus the roadmap grid, career DNA narrative, and why-this-stream text — free-text
+  pass-throughs, see `docs/api-list.md`). `entranceExamsTable`/`collegesTable` are on the
+  GET response too, but computed like `graduationPathways` (derived from
+  `assessment.careerFit.top3Industries`, not saved via the PUT), and
+  `POST`/`DELETE …/mirror-pair-amendments` let the counsellor amend a flagged answer,
   which re-runs the full scoring engine, plus `POST …/finalize` to close the chart.
   **All 12 `workflowStatus` stages now advance on their own** — see the trigger table in
   `docs/api-list.md`. The tail: a chart save with real content →

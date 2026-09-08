@@ -140,9 +140,11 @@ model Project {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
 
-  students        Student[]
-  counsellors     ProjectCounsellor[]
-  counsellorSlots CounsellorSlot[]
+  students               Student[]
+  counsellors            ProjectCounsellor[]
+  counsellorSlots        CounsellorSlot[]
+  careerLibraryEntries   CareerLibraryEntry[]
+  careerLibraryProposals CareerLibraryEntryProposal[]
 
   @@index([languageId])
   @@map("projects")
@@ -268,11 +270,13 @@ model Student {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
-  sessions           Session[]
-  formSubmissions    FormSubmission[]
-  assessmentAttempts AssessmentAttempt[]
-  counsellorChart    CounsellorChart?
-  reports            Report[]
+  sessions               Session[]
+  formSubmissions        FormSubmission[]
+  assessmentAttempts     AssessmentAttempt[]
+  counsellorChart        CounsellorChart?
+  reports                Report[]
+  careerLibraryEntries   CareerLibraryEntry[]
+  careerLibraryProposals CareerLibraryEntryProposal[]
 
   @@index([projectId])
   @@map("students")
@@ -427,6 +431,14 @@ model CareerLibraryEntry {
   status     CareerLibraryStatus @default(ACTIVE)
   createdBy  String // User id (admin/super admin), or a seed/import label
   updatedBy  String?
+  // Which student's Counsellor Chart this job role was added from, and that student's
+  // project at the time — null when added outside a chart (e.g. the standalone Career
+  // Library admin screen). Carried over from the proposal on approval (see
+  // CareerLibraryEntryProposal below) so the chart can keep listing it after publish.
+  studentId  String?
+  student    Student?            @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  projectId  String?
+  project    Project?            @relation(fields: [projectId], references: [id], onDelete: SetNull)
   createdAt  DateTime            @default(now())
   updatedAt  DateTime            @updatedAt
 
@@ -441,6 +453,7 @@ model CareerLibraryEntry {
   educationLinks    CareerEducationEntry[]
 
   @@index([domainId])
+  @@index([studentId])
   @@map("career_library_entries")
 }
 
@@ -492,10 +505,19 @@ model CareerLibraryEntryProposal {
   educationEntryIds String[]
 
   submittedBy String // User id (counsellor)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  // Which student's Counsellor Chart this job role was proposed from, and that student's
+  // project at submit time (denormalized so it's queryable without joining Student) — null
+  // when proposed outside a chart. Copied onto CareerLibraryEntry on approve, so the chart
+  // keeps listing it after publish (see the field comment there).
+  studentId String?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([domainId])
+  @@index([studentId])
   @@map("career_library_entry_proposals")
 }
 
@@ -1090,6 +1112,14 @@ model CounsellorChart {
   hobbies         String[]
   careerShortlist String[] // narrowed from 6 to 2 across sessions
   rawData         Json? // optional snapshot; the chart is assembled live on GET
+
+  // Session-local-only fields promoted to server storage — free-text content the
+  // frontend already edits, shaped exactly as it sends them (see counsellor-chart.schema.ts).
+  // entranceExamsTable/collegesTable are NOT stored here — they're computed server-side
+  // from the assessment (like graduationPathways), see entrance-exams-colleges.ts.
+  roadmapGrid        Json? // sectionE.roadmapGrid: 9 plain strings (nowSkills..afterAbroad)
+  careerDnaNarrative Json? // sectionB.careerDnaNarrative: 5 plain strings
+  whyThisStream      Json? // sectionC.whyThisStream1/2: pair of plain strings
 
   // SCRI — Student Career Readiness Index (counsellor-rated after Session 2). Each
   // indicator 1-4; total/band/label are derived on save and stored for convenience.

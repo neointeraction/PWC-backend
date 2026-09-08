@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { CareerLibraryStatus, EducationPathLevel, UserRole } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
-import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { assertLiveDomain } from "../career-taxonomy/career-taxonomy.service.js";
 import type {
@@ -22,6 +22,7 @@ import type {
   SubmitEntranceExamInput,
   SubmitInstitutionInput,
   UpdateCareerEntryInput,
+  UpdateCareerEntryProposalInput,
   UpdateCourseInput,
   UpdateEntranceExamInput,
   UpdateInstitutionInput,
@@ -86,6 +87,7 @@ export async function listCareerLibraryEntries(query: ListCareerLibraryQuery) {
     status: query.status,
     aiResilienceGrade: query.aiResilienceGrade,
     ...(query.domainId ? { domainId: query.domainId } : {}),
+    ...(query.studentId ? { studentId: query.studentId } : {}),
     ...(Object.keys(domainFilter).length ? { domain: domainFilter } : {}),
     ...(search
       ? {
@@ -444,14 +446,24 @@ async function getClusterAndIndustryId(domainId: string): Promise<{ clusterId: s
 // An admin's submission goes straight into the real table (as before); a counsellor's is
 // staged in `CareerLibraryEntryProposal` instead of ever touching career_library_entries —
 // see docs/career-library-normalization-spec.md for why the tables are split.
+// A job role added from a student's Counsellor Chart carries that student's current project
+// along with it — resolved server-side from the student row, never trusted from the client.
+async function resolveChartStudent(studentId: string | undefined) {
+  if (!studentId) return { studentId: undefined, projectId: undefined };
+  const student = await prisma.student.findUnique({ where: { id: studentId }, select: { id: true, projectId: true } });
+  if (!student) throw new NotFoundError("Student not found");
+  return { studentId: student.id, projectId: student.projectId };
+}
+
 export async function createCareerEntry(input: CreateCareerEntryInput, actor: Actor) {
-  const { entranceExams = [], courses = [], institutions = [], educationEntries = [], ...scalar } = input;
+  const { entranceExams = [], courses = [], institutions = [], educationEntries = [], studentId, ...scalar } = input;
   await assertLiveDomain(scalar.domainId); // 400 if domainId isn't a live taxonomy leaf
-  const [exams, crs, insts, edu] = await Promise.all([
+  const [exams, crs, insts, edu, chartStudent] = await Promise.all([
     resolveEntranceExams(entranceExams, actor),
     resolveCourses(courses, actor),
     resolveInstitutions(institutions, actor),
     resolveEducationEntries(educationEntries, actor),
+    resolveChartStudent(studentId),
   ]);
 
   if (!isAdmin(actor)) {
@@ -464,6 +476,8 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
         institutionIds: insts.map((i) => i.id),
         educationEntryIds: edu.map((e) => e.id),
         submittedBy: actor.userId,
+        studentId: chartStudent.studentId,
+        projectId: chartStudent.projectId,
       },
     });
     return getCareerEntryProposalById(proposal.id);
@@ -476,6 +490,8 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
         data: {
           ...scalar,
           createdBy: actor.userId,
+          studentId: chartStudent.studentId,
+          projectId: chartStudent.projectId,
           // Dual-write the transitional String[] columns from the resolved names.
           entranceExams: exams.filter((e) => e.level === "UG").map((e) => e.name),
           entranceExamsPG: exams.filter((e) => e.level === "PG").map((e) => e.name),
@@ -912,10 +928,14 @@ async function hydrateProposal<
   return { ...proposal, domain, linkedEntranceExams, linkedCourses, linkedInstitutions, linkedEducationEntries };
 }
 
-export async function listCareerEntryProposals(query: ListCareerEntryProposalsQuery) {
+// Admins see every proposal (the review queue); a counsellor only ever sees their own —
+// same rule whether or not `studentId` narrows it to one chart.
+export async function listCareerEntryProposals(query: ListCareerEntryProposalsQuery, actor: Actor) {
   const where: Prisma.CareerLibraryEntryProposalWhereInput = {
     ...(query.domainId ? { domainId: query.domainId } : {}),
+    ...(query.studentId ? { studentId: query.studentId } : {}),
     ...(query.search ? { jobRole: { contains: query.search, mode: "insensitive" } } : {}),
+    ...(isAdmin(actor) ? {} : { submittedBy: actor.userId }),
   };
   const [total, proposals] = await Promise.all([
     prisma.careerLibraryEntryProposal.count({ where }),
@@ -1000,6 +1020,36 @@ export async function approveCareerEntryProposal(id: string, actor: Actor) {
   } catch (err) {
     handlePrismaError(err);
   }
+}
+
+// The counsellor who submitted a still-pending proposal may edit it (fixing a typo, adding
+// detail before an admin reviews it); an admin may edit any of them. Same link-array
+// resolution as updateCareerEntry, but there's no domain re-parenting to worry about since
+// courses/institutions aren't materialized into the shared cluster/industry lists until
+// approval — this only ever touches the proposal's own flat id arrays.
+export async function updateCareerEntryProposal(id: string, input: UpdateCareerEntryProposalInput, actor: Actor) {
+  const current = await findCareerEntryProposal(id);
+  if (!isAdmin(actor) && current.submittedBy !== actor.userId) {
+    throw new ForbiddenError("You can only edit a job role proposal you submitted yourself");
+  }
+  const { entranceExams, courses, institutions, educationEntries, ...scalar } = input;
+  if (scalar.domainId !== undefined) await assertLiveDomain(scalar.domainId);
+  const exams = entranceExams !== undefined ? await resolveEntranceExams(entranceExams, actor) : undefined;
+  const crs = courses !== undefined ? await resolveCourses(courses, actor) : undefined;
+  const insts = institutions !== undefined ? await resolveInstitutions(institutions, actor) : undefined;
+  const edu = educationEntries !== undefined ? await resolveEducationEntries(educationEntries, actor) : undefined;
+
+  await prisma.careerLibraryEntryProposal.update({
+    where: { id },
+    data: {
+      ...scalar,
+      ...(exams ? { examIds: exams.map((e) => e.id) } : {}),
+      ...(crs ? { courseIds: crs.map((c) => c.id) } : {}),
+      ...(insts ? { institutionIds: insts.map((i) => i.id) } : {}),
+      ...(edu ? { educationEntryIds: edu.map((e) => e.id) } : {}),
+    },
+  });
+  return getCareerEntryProposalById(id);
 }
 
 export async function rejectCareerEntryProposal(id: string) {

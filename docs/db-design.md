@@ -338,6 +338,8 @@ cross-table mapping.
 | topCourses | String[] | tag-style multi-value |
 | status | `CareerLibraryStatus` enum | DRAFT / ACTIVE — the publish flag. A counsellor never writes this table directly (see `CareerLibraryEntryProposal` below), so every row here was either admin-authored or copied in on proposal approval — there's no separate review state to track |
 | createdBy, updatedBy | String | User id, or `"seed:career-library-import"` for bulk-imported rows. On a proposal-approved row, `createdBy` is the counsellor who submitted it, not the admin who approved it |
+| studentId | String? (FK → `Student`, `onDelete: SetNull`) | the student's Counsellor Chart this job role was added from; null when added outside a chart (e.g. the standalone Career Library admin screen). Carried over unchanged from `CareerLibraryEntryProposal.studentId` on approve, so the chart keeps listing the role after it's published |
+| projectId | String? (FK → `Project`, `onDelete: SetNull`) | that student's project, derived server-side from `Student.projectId` at submit time (never client-supplied) — denormalized so a chart's job roles are queryable without joining `Student` |
 
 ### `CareerLibraryEntryProposal`
 A counsellor's proposed job role, staged **entirely outside** `CareerLibraryEntry` — the
@@ -357,7 +359,13 @@ meant to be short-lived. See `POST/GET /career-library/proposals` and
 | (scalar fields) | — | same as `CareerLibraryEntry` minus `entranceExams`/`entranceExamsPG`/`topCourses`/`status`/`createdBy`/`updatedBy` — those three String[] columns and the join rows are derived from the id arrays below at approval time |
 | examIds, courseIds, institutionIds, educationEntryIds | String[] | ids of already-resolved `EntranceExam`/`Course`/`Institution`/`EducationEntry` rows (find-or-create against those real tables happens at submit time, same as the admin-only inline "add new") |
 | submittedBy | String | User id (counsellor) |
+| studentId | String? (FK → `Student`, `onDelete: SetNull`) | the Counsellor Chart this was proposed from; null outside a chart. Copied onto `CareerLibraryEntry.studentId` unchanged on approve |
+| projectId | String? (FK → `Project`, `onDelete: SetNull`) | denormalized from `Student.projectId` at submit time, same as on `CareerLibraryEntry` |
 | createdAt, updatedAt | DateTime | |
+
+A pending proposal can also be edited in place (`PATCH /api/v1/career-library/proposals/{id}`)
+by the counsellor who submitted it, or by an admin — see `docs/api-list.md`. `studentId` is
+fixed at submission and not editable.
 
 ### Career Library workbook import — UG/PG reference tables
 
@@ -643,6 +651,9 @@ sessions. 1:1 with `Student`.
 | strengths, hobbies | String[] | counsellor-edited during sessions |
 | careerShortlist | String[] | narrowed from 6 → 2 across Session 1 → Session 2 |
 | rawData | Json? | optional snapshot; the chart is assembled live on GET, not from here |
+| roadmapGrid | Json? | 9 plain strings (nowSkills..afterAbroad) |
+| careerDnaNarrative | Json? | 5 plain strings (dnaDefinition, careerStyleReveals, personalityStyleReveals, thinkingModeReveals, aptitudeProfileReveals) |
+| whyThisStream | Json? | { whyThisStream1, whyThisStream2 } plain strings |
 | scri* (6 indicators) + scriTotal/scriBand/scriBandLabel | Int?/String? | Student Career Readiness Index — each indicator 1–4; total/band/label derived on save |
 | academicTrend | `AcademicTrend`? | IMPROVING / STABLE / DECLINING / NOT_ASSESSED |
 | alignmentRating | `AlignmentRating`? | Academic × Career alignment |
@@ -652,7 +663,11 @@ sessions. 1:1 with `Student`.
 `CounsellorChartNote` (child, `@@unique([chartId, code])`) holds one synthesis note per
 section code (`A1`..`H4`). The chart is **assembled live** by `src/modules/counsellor-chart/`
 (profile + both pre-counselling forms side-by-side + assessment result + flagged mirror
-pairs); only the counsellor-authored fields above are persisted.
+pairs); only the counsellor-authored fields above are persisted. **Entrance Exams /
+Colleges After 11&12 are not stored on this model at all** — like Graduation Fit, they're
+computed on every GET from `assessment.careerFit.top3Industries` against the Career
+Library's `EntranceExam`/`Institution` tables (`entrance-exams-colleges.ts`), not
+counsellor-editable.
 
 **Mirror-pair amendments** write to `AssessmentAnswer.counsellorOverrideOption`
 (`+ overriddenByCounsellorId/overriddenAt`), preserving the student's original

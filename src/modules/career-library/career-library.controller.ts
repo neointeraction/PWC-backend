@@ -66,12 +66,18 @@ export async function deleteCareerLibraryEntry(req: Request, res: Response): Pro
 
 export async function listCareerEntryProposals(req: Request, res: Response): Promise<void> {
   const query = req.query as unknown as ListCareerEntryProposalsQuery;
-  res.status(200).json(await careerLibraryService.listCareerEntryProposals(query));
+  res.status(200).json(await careerLibraryService.listCareerEntryProposals(query, actorOf(req)));
 }
 
 export async function getCareerEntryProposal(req: Request, res: Response): Promise<void> {
   const { id } = req.params as unknown as CareerLibraryIdParams;
   res.status(200).json(await careerLibraryService.getCareerEntryProposalById(id));
+}
+
+export async function updateCareerEntryProposal(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as CareerLibraryIdParams;
+  const proposal = await careerLibraryService.updateCareerEntryProposal(id, req.body, actorOf(req));
+  res.status(200).json(proposal);
 }
 
 export async function approveCareerEntryProposal(req: Request, res: Response): Promise<void> {

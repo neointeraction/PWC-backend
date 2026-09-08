@@ -38,6 +38,7 @@ import {
   submitCourseSchema,
   submitEntranceExamSchema,
   submitInstitutionSchema,
+  updateCareerEntryProposalSchema,
   updateCareerEntrySchema,
   updateCourseSchema,
   updateEntranceExamSchema,
@@ -1128,7 +1129,10 @@ registry.registerPath({
     "Create a career library entry. Staff — an admin's is added to the library as submitted " +
     "(DRAFT by default; publish by setting ACTIVE), while a counsellor's is staged as a " +
     "CareerLibraryEntryProposal (see GET/approve/reject /career-library/proposals) and never " +
-    "touches this table until an admin approves it.",
+    "touches this table until an admin approves it. Pass studentId when adding a job role " +
+    "from a student's Counsellor Chart — the student's project is derived server-side and " +
+    "stamped on too, so the chart can re-list it later via studentId on this list and the " +
+    "proposals list.",
   request: { body: { content: { "application/json": { schema: createCareerEntrySchema } } } },
   responses: {
     201: { description: "Entry created", content: { "application/json": { schema: genericObjectSchema } } },
@@ -1165,7 +1169,11 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/career-library/proposals",
   tags: ["Career Library"],
-  summary: "List counsellor-submitted job role proposals awaiting review. Staff.",
+  summary:
+    "List counsellor-submitted job role proposals awaiting review. Staff. An admin sees " +
+    "everyone's (the review queue); a counsellor always sees only their own, regardless of " +
+    "the studentId filter. Pass studentId to scope to one Counsellor Chart, e.g. to re-list " +
+    "'job roles I already added here' when reopening a chart.",
   request: { query: listCareerEntryProposalsQuerySchema },
   responses: {
     200: { description: "Paginated proposals", content: { "application/json": { schema: genericObjectSchema } } },
@@ -1180,6 +1188,21 @@ registry.registerPath({
   request: { params: careerLibraryIdParamsSchema },
   responses: {
     200: { description: "Proposal", content: { "application/json": { schema: genericObjectSchema } } },
+    404: errorResponses[404],
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/career-library/proposals/{id}",
+  tags: ["Career Library"],
+  summary:
+    "Edit a still-pending job role proposal. The counsellor who submitted it may edit their " +
+    "own; an admin may edit any of them. 403 for any other counsellor.",
+  request: { params: careerLibraryIdParamsSchema, body: { content: { "application/json": { schema: updateCareerEntryProposalSchema } } } },
+  responses: {
+    200: { description: "Updated proposal", content: { "application/json": { schema: genericObjectSchema } } },
+    403: { description: "Not the proposal's submitter", content: { "application/json": { schema: errorResponseSchema } } },
     404: errorResponses[404],
   },
 });
