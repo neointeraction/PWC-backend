@@ -50,7 +50,9 @@ export async function computeEntranceExamsAndColleges(
     },
     select: {
       id: true,
+      name: true,
       clusterId: true,
+      cluster: { select: { name: true } },
       institutionLinks: {
         where: { institution: { status: "ACTIVE" } },
         select: { institution: true },
@@ -70,11 +72,22 @@ export async function computeEntranceExamsAndColleges(
   const clusterIds = [...new Set(industryRows.map((r) => r.clusterId))];
   const domainIds = industryRows.flatMap((r) => r.domains.map((d) => d.id));
 
+  // Priority = position in the (fitScore-sorted) top3Industries list — used only to break
+  // ties when picking the top 6 of each table, so results favor better-fit industries.
+  const industryPriority = new Map(topIndustries.map((t, i) => [`${t.cluster}||${t.industry}`, i]));
+  const priorityByIndustryId = new Map(
+    industryRows.map((r) => [r.id, industryPriority.get(`${r.cluster.name}||${r.name}`) ?? topIndustries.length])
+  );
+  const priorityByDomainId = new Map(
+    industryRows.flatMap((r) => r.domains.map((d) => [d.id, priorityByIndustryId.get(r.id) ?? topIndustries.length]))
+  );
+
   const [entryLinks, courseLinks] = await Promise.all([
     domainIds.length > 0
       ? prisma.careerLibraryEntry.findMany({
           where: { domainId: { in: domainIds }, status: "ACTIVE" },
           select: {
+            domainId: true,
             entranceExamLinks: {
               where: { entranceExam: { status: "ACTIVE" } },
               select: { entranceExam: true },
@@ -96,14 +109,25 @@ export async function computeEntranceExamsAndColleges(
   }
 
   const examsById = new Map<string, (typeof entryLinks)[number]["entranceExamLinks"][number]["entranceExam"]>();
+  const examPriority = new Map<string, number>();
   for (const entry of entryLinks) {
+    const priority = priorityByDomainId.get(entry.domainId) ?? topIndustries.length;
     for (const link of entry.entranceExamLinks) {
       examsById.set(link.entranceExam.id, link.entranceExam);
+      const existing = examPriority.get(link.entranceExam.id);
+      if (existing === undefined || priority < existing) examPriority.set(link.entranceExam.id, priority);
     }
   }
 
+  // Top 6 exams, favoring those tied to better-fit industries (same treatment as
+  // careerFit's top6Domains), alphabetical among ties.
   const entranceExamsTable: EntranceExamItem[] = [...examsById.values()]
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort(
+      (a, b) =>
+        (examPriority.get(a.id) ?? topIndustries.length) - (examPriority.get(b.id) ?? topIndustries.length) ||
+        a.name.localeCompare(b.name)
+    )
+    .slice(0, 6)
     .map((exam) => ({
       id: exam.id,
       fullName: exam.fullForm || exam.name,
@@ -115,11 +139,20 @@ export async function computeEntranceExamsAndColleges(
       urlLink: exam.officialWebsite ?? "",
     }));
 
+  // Iterate industries best-fit-first so a college shared across industries is recorded
+  // under its highest-priority one (only affects which `course` string it displays).
+  const orderedIndustryRows = [...industryRows].sort(
+    (a, b) => (priorityByIndustryId.get(a.id) ?? topIndustries.length) - (priorityByIndustryId.get(b.id) ?? topIndustries.length)
+  );
+
   const collegesById = new Map<string, CollegesAfterItem>();
-  for (const industryRow of industryRows) {
+  const collegePriority = new Map<string, number>();
+  for (const industryRow of orderedIndustryRows) {
+    const priority = priorityByIndustryId.get(industryRow.id) ?? topIndustries.length;
     const courseNames = (coursesByCluster.get(industryRow.clusterId) ?? []).slice(0, 3).join(", ");
     for (const { institution } of industryRow.institutionLinks) {
       if (collegesById.has(institution.id)) continue;
+      collegePriority.set(institution.id, priority);
       collegesById.set(institution.id, {
         id: institution.id,
         collegeName: institution.name,
@@ -132,7 +165,14 @@ export async function computeEntranceExamsAndColleges(
       });
     }
   }
-  const collegesTable = [...collegesById.values()].sort((a, b) => a.collegeName.localeCompare(b.collegeName));
+  // Top 6 colleges, same priority-then-name treatment as the exams table.
+  const collegesTable = [...collegesById.values()]
+    .sort(
+      (a, b) =>
+        (collegePriority.get(a.id) ?? topIndustries.length) - (collegePriority.get(b.id) ?? topIndustries.length) ||
+        a.collegeName.localeCompare(b.collegeName)
+    )
+    .slice(0, 6);
 
   return { entranceExamsTable, collegesTable };
 }

@@ -986,7 +986,7 @@ report backing the Career kREATE output:
     "streamFit": { "top3": [{ "subStream": "...", "fitScore": 72.5, "level": "Good Fit", "..." : "..." }], "ranked": ["... all sub-streams"] },
     "graduationPathways": { "top3": [{ "subStream": "B.Des", "fitScore": 76.75, "level": "Strong Fit", "keyExams": "...", "eligibility": "...", "..." : "..." }], "ranked": ["... all 72"] },
     "careerFit": {
-      "top3Industries": [{ "cluster": "...", "industry": "Design, Animation & Graphics", "domain": "Animation", "fitScore": 76.5, "level": "Strong Fit", "..." : "..." }],
+      "top3Industries": [{ "cluster": "...", "industry": "Design, Animation & Graphics", "domain": "Animation", "fitScore": 76.5, "level": "Strong Fit", "streamRequirement": "...", "..." : "..." }],
       "top6Domains": [{
         "industry": "Design, Animation & Graphics", "domain": "Animation", "fitScore": 76.5, "level": "Strong Fit",
         "representativeCareer": { "jobRole": "...", "cluster": "...", "domain": "...", "aiResilienceGrade": "HIGH", "aiResilienceComment": "...", "oneLineDescription": "...", "topCompanies": ["..."], "salaryIndiaRangeText": "...", "salaryGlobalRangeText": "..." }
@@ -1021,7 +1021,11 @@ algorithmically scored. Every other computed card is unaffected and keeps
 DPS, Stream Fit, **Graduation Pathways**, **Career Fit** (top-6 domains each with a
 `representativeCareer`, plus a top-3 industry rollup for the "Industry Choice" table),
 the RVS (EIM) / ACI / ORI / Difficulty-Consistency measures, and — when the attempt
-carried per-question timing — the composite **ARI**.
+carried per-question timing — the composite **ARI**. Each `top3Industries` entry also
+carries a `streamRequirement` string, resolved from the ACTIVE courses linked to that
+industry's cluster (`Course.stream12thRequirements` via `CareerCourse`, semicolon-joined
+and deduped) — the source for the "Career Compass (Indicative Clusters)" table's
+`streamRequirement` column; empty string if no linked course has that field set.
 
 The example above is an attempt saved **without** `timeTakenMs`, which is why `tc`/`ari`
 are `null`, `timingAvailable` is `false` and `meta.pending` lists `timeConsistency`/`ari`.
@@ -1042,6 +1046,31 @@ return 0–6. `recommendedStreams` mirrors `streamFit.top3` and can likewise be 
 the empty case (no qualifying recommendation → prompt for counsellor review). The full,
 unfiltered lists are still available under `streamFit.ranked`, `graduationPathways.ranked`,
 and `careerFit.rankedDomains` if you need to show every scored option with its grade.
+
+### 8.5 SCRI Band Guidance
+
+`GET /api/v1/scri-band-guidance` — static reference data (4 rows, one per SCRI band),
+not scoped to a student, so it's a standalone endpoint rather than embedded in every
+Counsellor Chart response. Any logged-in role.
+
+```json
+{
+  "data": [
+    { "band": 1, "score": { "min": 6, "max": 10 }, "label": "Pre-Exploration", "labelMeaning": "...", "forStudents": "...", "tipsForStudents": "...", "tipsForParent": "..." },
+    { "band": 2, "score": { "min": 11, "max": 15 }, "label": "Early Exploration", "...": "..." },
+    { "band": 3, "score": { "min": 16, "max": 20 }, "label": "Active Exploration", "...": "..." },
+    { "band": 4, "score": { "min": 21, "max": 24 }, "label": "Career Ready", "...": "..." }
+  ]
+}
+```
+
+You already independently compute a student's own `band`/`label` from their SCRI total
+(same thresholds as `score.min`/`score.max` above — 6 counsellor-rated indicators,
+1–4 each, so the total range is **6–24, not 0–24**); this endpoint only supplies the
+guidance text (`labelMeaning`, `forStudents`, `tipsForStudents`, `tipsForParent`) per
+band. It's static and tiny — fetch once and cache client-side rather than refetching
+per student. A student's actual SCRI rating (raw indicators + computed total/band) comes
+back on the Counsellor Chart read (`counsellor.scri`), not from this endpoint.
 
 ---
 
@@ -1759,7 +1788,9 @@ before building UI that depends on any of them:
   backend itself computes live — like `graduationPathways` — from
   `assessment.careerFit.top3Industries` until the counsellor's first edit, at which point
   the saved array wins; the response never sends `null` for these two, only a computed or
-  saved array. A row on any of the 6 may carry `isManualEntry: true` for a free-text row
+  saved array. Each is capped to its top 6 (ranked by the source industry's fit-order, then
+  alphabetically) — same top-N treatment as `careerFit.top6Domains` — so expect at most 6
+  rows in the computed state; a counsellor's saved edit isn't capped. A row on any of the 6 may carry `isManualEntry: true` for a free-text row
   (not picked from the Career Library) — `GET /api/v1/counsellor-chart/manual-entries`
   (Super Admin only) lists every such row across all students for review: `{ id,
   studentId, studentName, tableLabel, fields, addedBy, addedAt }`. See `docs/api-list.md`

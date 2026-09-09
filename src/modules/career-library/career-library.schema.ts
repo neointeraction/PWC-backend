@@ -211,7 +211,7 @@ export const listEntranceExamsQuerySchema = z.object({
   // Scope to exams/courses/institutions already linked to job roles in this domain
   // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
   domainId: z.string().min(1).optional(),
-  limit: z.coerce.number().int().positive().max(100).default(50),
+  limit: z.coerce.number().int().positive().max(1000).default(50),
 });
 export type ListEntranceExamsQuery = z.infer<typeof listEntranceExamsQuerySchema>;
 
@@ -222,7 +222,7 @@ export const listInstitutionsQuerySchema = z.object({
   // Scope to exams/courses/institutions already linked to job roles in this domain
   // (the "existing entries pulled from this Domain" tick-list). Omit for the global list.
   domainId: z.string().min(1).optional(),
-  limit: z.coerce.number().int().positive().max(100).default(50),
+  limit: z.coerce.number().int().positive().max(1000).default(50),
 });
 export type ListInstitutionsQuery = z.infer<typeof listInstitutionsQuerySchema>;
 

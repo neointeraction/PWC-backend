@@ -288,4 +288,51 @@ describe("Counsellor Chart API", () => {
     const res = await authRequest(app, "ADMIN").get("/api/v1/counsellor-chart/manual-entries");
     expect(res.status).toBe(403);
   });
+
+  it("403s a non-super-admin from deleting a manual entry", async () => {
+    const res = await authRequest(app, "ADMIN").delete("/api/v1/counsellor-chart/manual-entries/manual-1");
+    expect(res.status).toBe(403);
+  });
+
+  it("404s deleting a manual entry id that doesn't exist", async () => {
+    const res = await authRequest(app, "SUPER_ADMIN").delete("/api/v1/counsellor-chart/manual-entries/no-such-id");
+    expect(res.status).toBe(404);
+  });
+
+  it("deletes a manual entry row, leaving the rest of its table array intact", async () => {
+    await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentId}`)
+      .send({
+        streamFitTable: [
+          {
+            id: "manual-1",
+            mainStream: "Commerce",
+            subStream: "Accounting & Finance",
+            coreSubjects: "Accountancy, Economics",
+            electives: "Entrepreneurship",
+            isManualEntry: true,
+          },
+          {
+            id: "manual-2",
+            mainStream: "Science",
+            subStream: "PCM",
+            coreSubjects: "Physics, Chemistry, Maths",
+            electives: "Computer Science",
+            isManualEntry: true,
+          },
+        ],
+        lastEditedBy: "counsellor-1",
+      });
+
+    const del = await authRequest(app, "SUPER_ADMIN").delete("/api/v1/counsellor-chart/manual-entries/manual-1");
+    expect(del.status).toBe(204);
+
+    const get = await authRequest(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
+    expect(get.body.counsellor.streamFitTable).toHaveLength(1);
+    expect(get.body.counsellor.streamFitTable[0].id).toBe("manual-2");
+
+    // Already deleted — repeating the call 404s instead of silently succeeding.
+    const redo = await authRequest(app, "SUPER_ADMIN").delete("/api/v1/counsellor-chart/manual-entries/manual-1");
+    expect(redo.status).toBe(404);
+  });
 });

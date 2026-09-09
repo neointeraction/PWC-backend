@@ -90,6 +90,7 @@ import {
   amendmentBodySchema,
   amendmentParamsSchema,
   finalizeCounsellorChartBodySchema,
+  manualEntryIdParamsSchema,
   putCounsellorChartBodySchema,
   studentIdParamsSchema as chartStudentIdParamsSchema,
 } from "../modules/counsellor-chart/counsellor-chart.schema.js";
@@ -474,6 +475,28 @@ registry.registerPath({
   request: { query: listAssessmentQuestionsQuerySchema },
   responses: {
     200: { description: "List of assessment questions", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/assessment/stream-weights",
+  tags: ["Assessment"],
+  summary: "List Stream Fit lookup rows (Career Direction \"Add Row\" dropdown; weights omitted)",
+  responses: {
+    200: { description: "List of stream weight rows", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/assessment/graduate-stream-weights",
+  tags: ["Assessment"],
+  summary: "List Graduation Fit lookup rows (Career Direction \"Add Row\" dropdown; weights omitted)",
+  responses: {
+    200: { description: "List of graduate stream weight rows", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
     ...errorResponses,
   },
 });
@@ -1422,6 +1445,19 @@ registry.registerPath({
   },
 });
 
+// --- SCRI Band Guidance ---
+
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/scri-band-guidance",
+  tags: ["SCRI Band Guidance"],
+  summary:
+    "List the 4 SCRI band guidance rows (score range, label, meaning, student/parent tips). Static reference data, not scoped to a student — any logged-in role.",
+  responses: {
+    200: { description: "The 4 SCRI bands, in order", content: { "application/json": { schema: z.object({ data: z.array(genericObjectSchema) }) } } },
+  },
+});
+
 // --- Reports ---
 
 registry.registerPath({
@@ -1516,6 +1552,18 @@ registry.registerPath({
   summary: "Flat list of every free-text (Manual Entry) row a counsellor has added across the 6 Career Direction tables, across all students. Super Admin.",
   responses: {
     200: { description: "Manual entry rows", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/counsellor-chart/manual-entries/{id}",
+  tags: chartTag,
+  summary: "Remove one manual-entry row from whichever student's chart and table array holds it. Super Admin.",
+  request: { params: manualEntryIdParamsSchema },
+  responses: {
+    204: { description: "Deleted" },
     ...errorResponses,
   },
 });

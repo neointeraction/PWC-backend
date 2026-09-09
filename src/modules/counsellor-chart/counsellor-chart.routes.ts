@@ -8,6 +8,7 @@ import {
   amendmentBodySchema,
   amendmentParamsSchema,
   finalizeCounsellorChartBodySchema,
+  manualEntryIdParamsSchema,
   putCounsellorChartBodySchema,
   studentIdParamsSchema,
 } from "./counsellor-chart.schema.js";
@@ -20,6 +21,16 @@ counsellorChartRouter.get(
   "/manual-entries",
   ...requireSuperAdmin,
   asyncHandler(controller.listManualEntries)
+);
+
+// Super Admin "Close" action on a manual-entry review row: removes that one row from
+// whichever student's chart and table array holds it. 404 if the id isn't found in any
+// student's arrays (already deleted, or a bad id).
+counsellorChartRouter.delete(
+  "/manual-entries/:id",
+  ...requireSuperAdmin,
+  validate({ params: manualEntryIdParamsSchema }),
+  asyncHandler(controller.deleteManualEntry)
 );
 
 // Assemble the full chart for a student (profile + both pre-counselling questionnaires

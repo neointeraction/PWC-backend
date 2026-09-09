@@ -14,6 +14,16 @@ export async function listAssessmentQuestions(req: Request, res: Response): Prom
   res.status(200).json(questions);
 }
 
+export async function listStreamWeights(_req: Request, res: Response): Promise<void> {
+  const rows = await assessmentService.listStreamWeights();
+  res.status(200).json(rows);
+}
+
+export async function listGraduateStreamWeights(_req: Request, res: Response): Promise<void> {
+  const rows = await assessmentService.listGraduateStreamWeights();
+  res.status(200).json(rows);
+}
+
 export async function previewScore(req: Request, res: Response): Promise<void> {
   const report = await assessmentService.previewAssessmentScore(req.body as PreviewScoreBody);
   res.status(200).json(report);

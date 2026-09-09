@@ -66,6 +66,7 @@ export interface IndustryRollup {
   fitScore: number;
   level: string;
   meaning: string;
+  streamRequirement: string; // filled by the service from the cluster's linked courses' 12th-stream requirements
 }
 
 export interface CareerFitResult {
@@ -182,6 +183,7 @@ export function scoreCareerFit(profile: TraitScoreMap, domainUnits: DomainUnit[]
     fitScore: d.fitScore,
     level: d.level,
     meaning: d.meaning,
+    streamRequirement: "", // filled in by buildReport from the career library (needs a DB lookup)
   }));
 
   return { rankedDomains, top6Domains, top3Industries };

@@ -1,8 +1,8 @@
 import { prisma } from "../../config/prisma.js";
-import { BadRequestError } from "../../common/errors/AppError.js";
+import { BadRequestError, NotFoundError } from "../../common/errors/AppError.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import { assembleChart } from "./counsellor-chart.assembler.js";
-import { loadAlignmentGuidance, loadScriGuidance } from "./guidance.js";
+import { loadAlignmentGuidance, loadReliabilityMeasureDefinitions, loadScriGuidance } from "./guidance.js";
 import { computeScri } from "./scri.js";
 import type { PutCounsellorChartBody } from "./counsellor-chart.schema.js";
 
@@ -61,20 +61,28 @@ export async function getCounsellorChart(studentId: string) {
   // assembleChart throws NotFoundError if the student doesn't exist.
   const assembled = await assembleChart(studentId);
   const chart = await loadOrCreateChart(studentId);
-  const [scriGuidance, alignmentGuidance] = await Promise.all([
+  const [scriGuidance, alignmentGuidance, reliabilityMeasures] = await Promise.all([
     loadScriGuidance(chart.scriBand),
     loadAlignmentGuidance(chart.alignmentRating),
+    loadReliabilityMeasureDefinitions(),
   ]);
   const counsellor = shapeCounsellorInputs(chart);
   return {
     ...assembled,
-    // Once the counsellor edits entranceExamsTable/collegesTable, the persisted array
-    // wins over the live-computed default — same "last full array wins" model as the
-    // 4 tables under `counsellor` below (see counsellor-chart.schema.ts).
-    entranceExamsTable: (chart.entranceExamsTable as unknown[] | null) ?? assembled.entranceExamsTable,
-    collegesTable: (chart.collegesTable as unknown[] | null) ?? assembled.collegesTable,
+    // Static code/name/guiding-question text for the Reliability of the Assessment
+    // step's EIM/ACI/AAI/HRS cards — source: ReliabilityMeasureDefinition (SCRI sheet,
+    // "Traits & Weightages" workbook, see ./guidance.ts). Always 4 rows, independent of
+    // this student's chart state.
+    reliabilityMeasures,
     counsellor: {
       ...counsellor,
+      // Once the counsellor edits entranceExamsTable/collegesTable, the persisted array
+      // wins over the live-computed default — same "last full array wins" model as the
+      // other 4 tables above (see counsellor-chart.schema.ts). Nested under `counsellor`
+      // (not top-level) to match CounsellorChartResponse and how the frontend reads it
+      // (mapChartToFormData reads chart.counsellor.entranceExamsTable/collegesTable).
+      entranceExamsTable: (chart.entranceExamsTable as unknown[] | null) ?? assembled.entranceExamsTable,
+      collegesTable: (chart.collegesTable as unknown[] | null) ?? assembled.collegesTable,
       // Guidance text for the band/rating the counsellor has already recorded — null
       // until scri.band / alignmentRating are set. Source: SCRI sheet, "Traits &
       // Weightages" workbook (see ./guidance.ts).
@@ -303,4 +311,34 @@ export async function listManualEntries(): Promise<ManualEntryRow[]> {
     }
   }
   return rows;
+}
+
+// Deletes a single manual-entry row (Super Admin "Close" action on the review queue).
+// Scans the same 6 columns as listManualEntries for whichever student's chart holds a
+// row with this id, then rewrites just that column with the row removed — the rest of
+// the array, and every other column, is left untouched.
+export async function deleteManualEntry(id: string): Promise<void> {
+  const charts = await prisma.counsellorChart.findMany({
+    where: {
+      OR: MANUAL_ENTRY_TABLES.map(({ column }) => ({ [column]: { not: null } })),
+    },
+  });
+
+  for (const chart of charts) {
+    for (const { column } of MANUAL_ENTRY_TABLES) {
+      const items = chart[column] as Record<string, unknown>[] | null;
+      if (!items) continue;
+      const index = items.findIndex((item) => item.isManualEntry === true && String(item.id) === id);
+      if (index === -1) continue;
+
+      const updated = [...items.slice(0, index), ...items.slice(index + 1)];
+      await prisma.counsellorChart.update({
+        where: { studentId: chart.studentId },
+        data: { [column]: updated },
+      });
+      return;
+    }
+  }
+
+  throw new NotFoundError("Manual entry not found");
 }

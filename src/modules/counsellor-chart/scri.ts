@@ -17,12 +17,15 @@ export interface ScriResult {
   label: string | null; // "PreExploration" .. "Career Ready"
 }
 
-const BANDS: { min: number; max: number; band: number; label: string }[] = [
+// Exported so other lookups (e.g. GET /scri-band-guidance) can pair each band's real
+// numeric score range with its ScriBandGuidance text without re-hardcoding cutoffs.
+export const SCRI_BANDS: { min: number; max: number; band: number; label: string }[] = [
   { min: 6, max: 10, band: 1, label: "PreExploration" },
   { min: 11, max: 15, band: 2, label: "Early Exploration" },
   { min: 16, max: 20, band: 3, label: "Active Exploration" },
   { min: 21, max: 24, band: 4, label: "Career Ready" },
 ];
+const BANDS = SCRI_BANDS;
 
 function valid(n: number | null): n is number {
   return n != null && Number.isInteger(n) && n >= 1 && n <= 4;

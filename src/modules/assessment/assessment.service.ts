@@ -50,6 +50,38 @@ export async function listAssessmentQuestions(query: ListAssessmentQuestionsQuer
   });
 }
 
+// Read-only lookups backing the Counsellor Chart's Career Direction "Add Row" dropdowns
+// (Stream Fit / Graduation Fit). `weights` is internal scoring config and never exposed.
+export async function listStreamWeights() {
+  return prisma.streamWeight.findMany({
+    orderBy: [{ mainStream: "asc" }, { subStream: "asc" }],
+    select: {
+      id: true,
+      mainStream: true,
+      subStream: true,
+      coreSubjects: true,
+      electiveSubjects: true,
+      explanation: true,
+    },
+  });
+}
+
+export async function listGraduateStreamWeights() {
+  return prisma.graduateStreamWeight.findMany({
+    orderBy: [{ mainStream: "asc" }, { subStream: "asc" }],
+    select: {
+      id: true,
+      clusterHead: true,
+      mainStream: true,
+      subStream: true,
+      specialisations: true,
+      eligibility: true,
+      keyExams: true,
+      explanation: true,
+    },
+  });
+}
+
 // Dev/QA-only: score a set of ad-hoc answers with no student, attempt, or persistence —
 // purely to inspect what the scoring engine produces for a given answer pattern. Answers
 // are keyed by `fieldKey`; anything unanswered is scored as neutral/incorrect.
@@ -252,6 +284,13 @@ async function buildReport(normalized: AnsweredQuestion[], startedAt: Date, subm
             a.jobRole.localeCompare(b.jobRole)
         )[0];
       domainFit.representativeCareer = best ?? null;
+    }
+
+    const streamRequirementsByCluster = await loadStreamRequirementsByCluster(
+      report.careerFit.top3Industries.map((i) => i.cluster)
+    );
+    for (const industry of report.careerFit.top3Industries) {
+      industry.streamRequirement = streamRequirementsByCluster.get(industry.cluster) ?? "";
     }
   }
 
@@ -470,6 +509,38 @@ async function loadCareerLibraryForFit(): Promise<{
   }
 
   return { domainUnits: [...bestRankByDomain.values()], careersByKey };
+}
+
+// Career Fit's top3Industries only carries cluster/industry names (not ids), so
+// stream-requirement resolution re-looks-up clusters by name — same tradeoff as
+// entrance-exams-colleges.ts, which does the equivalent for industries. Joined via
+// CareerCourse (cluster-level, not industry/domain — see the model comment) rather than
+// CareerLibraryEntry, matching how "Colleges After Class 11&12" pulls its course names.
+async function loadStreamRequirementsByCluster(clusterNames: string[]): Promise<Map<string, string>> {
+  if (clusterNames.length === 0) return new Map();
+  const clusters = await prisma.careerCluster.findMany({
+    where: { name: { in: [...new Set(clusterNames)] }, deletedAt: null },
+    select: {
+      name: true,
+      courseLinks: {
+        where: { course: { status: "ACTIVE" } },
+        select: { course: { select: { stream12thRequirements: true } } },
+      },
+    },
+  });
+
+  const result = new Map<string, string>();
+  for (const cluster of clusters) {
+    const requirements = [
+      ...new Set(
+        cluster.courseLinks
+          .map((link) => link.course.stream12thRequirements)
+          .filter((r): r is string => !!r)
+      ),
+    ];
+    result.set(cluster.name, requirements.join("; "));
+  }
+  return result;
 }
 
 export async function getAssessmentResult(attemptId: string) {

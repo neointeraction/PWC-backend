@@ -6,6 +6,13 @@ export const studentIdParamsSchema = z.object({
 });
 export type StudentIdParams = z.infer<typeof studentIdParamsSchema>;
 
+// Manual-entry row id is client-generated (frontend adds rows to the Career Direction
+// table arrays), not a Prisma cuid, so this stays a plain non-empty string.
+export const manualEntryIdParamsSchema = z.object({
+  id: z.string().trim().min(1),
+});
+export type ManualEntryIdParams = z.infer<typeof manualEntryIdParamsSchema>;
+
 // Mirror-pair amendment: the counsellor changes a flagged answer (Likert 1-5), which
 // re-scores the whole attempt. `questionCode` must be a mirror-pair question (validated
 // in the service against the scoring config).

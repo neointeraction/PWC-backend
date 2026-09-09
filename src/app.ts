@@ -31,6 +31,7 @@ import { feedbackRouter } from "./modules/feedback/feedback.routes.js";
 import { sessionsRouter } from "./modules/sessions/sessions.routes.js";
 import { emailRouter } from "./modules/email/email.routes.js";
 import { docsRouter } from "./modules/docs/docs.routes.js";
+import { scriBandGuidanceRouter } from "./modules/scri-band-guidance/scri-band-guidance.routes.js";
 import { formatResponseDates } from "./common/middlewares/formatDates.js";
 
 export function createApp(): Express {
@@ -71,6 +72,7 @@ export function createApp(): Express {
   app.use("/api/v1/cohorts", cohortsRouter);
   app.use("/api/v1/languages", languagesRouter);
   app.use("/api/v1/sessions", sessionsRouter);
+  app.use("/api/v1/scri-band-guidance", scriBandGuidanceRouter);
   app.use("/api/v1/email", emailRouter);
   app.use("/docs", docsRouter);
 

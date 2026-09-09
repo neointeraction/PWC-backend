@@ -5,6 +5,7 @@ import type {
   AmendmentBody,
   AmendmentParams,
   FinalizeCounsellorChartBody,
+  ManualEntryIdParams,
   PutCounsellorChartBody,
   StudentIdParams,
 } from "./counsellor-chart.schema.js";
@@ -56,4 +57,10 @@ export async function revertMirrorPairAmendment(req: Request, res: Response): Pr
 export async function listManualEntries(_req: Request, res: Response): Promise<void> {
   const rows = await service.listManualEntries();
   res.status(200).json(rows);
+}
+
+export async function deleteManualEntry(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as ManualEntryIdParams;
+  await service.deleteManualEntry(id);
+  res.status(204).send();
 }

@@ -612,7 +612,21 @@ export async function listEntranceExams(query: ListEntranceExamsQuery) {
     },
     orderBy: { name: "asc" },
     take: query.limit,
-    select: { id: true, name: true, level: true, fullForm: true, conductingBody: true, status: true, submittedBy: true },
+    select: {
+      id: true,
+      name: true,
+      level: true,
+      fullForm: true,
+      conductingBody: true,
+      officialWebsite: true,
+      examMode: true,
+      frequency: true,
+      applicableFor: true,
+      subjectRequirements12th: true,
+      applicationWindow: true,
+      status: true,
+      submittedBy: true,
+    },
   });
 }
 
@@ -627,7 +641,19 @@ export async function listInstitutions(query: ListInstitutionsQuery) {
     },
     orderBy: { name: "asc" },
     take: query.limit,
-    select: { id: true, name: true, city: true, state: true, type: true, status: true, submittedBy: true },
+    select: {
+      id: true,
+      name: true,
+      city: true,
+      state: true,
+      type: true,
+      website: true,
+      entranceExamsRequired: true,
+      programmesOffered: true,
+      ranking: true,
+      status: true,
+      submittedBy: true,
+    },
   });
 }
 

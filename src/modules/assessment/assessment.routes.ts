@@ -22,6 +22,20 @@ assessmentRouter.get(
   asyncHandler(assessmentController.listAssessmentQuestions)
 );
 
+// Career Direction "Add Row" lookups (Counsellor Chart, Step 3 / Section C) — same
+// non-sensitive read access as the question bank.
+assessmentRouter.get(
+  "/stream-weights",
+  ...requireAuth,
+  asyncHandler(assessmentController.listStreamWeights)
+);
+
+assessmentRouter.get(
+  "/graduate-stream-weights",
+  ...requireAuth,
+  asyncHandler(assessmentController.listGraduateStreamWeights)
+);
+
 // Dev/QA score preview — staff-only. Runs the scoring engine over ad-hoc answers with no
 // student/attempt/persistence, so the assessment logic can be inspected in isolation.
 assessmentRouter.post(

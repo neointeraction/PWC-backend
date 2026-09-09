@@ -32,6 +32,8 @@ export interface EnrichedTraitScore extends TraitScore {
   layer: Layer;
   traitName: string; // e.g. "Systematic & Disciplined"
   description: string;
+  studentQuality: string;
+  studentFriendlyExplanation: string | null;
 }
 
 export interface LayerReport {
@@ -85,6 +87,8 @@ function enrich(layer: Layer, scores: TraitScore[]): EnrichedTraitScore[] {
       layer,
       traitName: def?.traitName ?? s.trait,
       description: def?.description ?? "",
+      studentQuality: def?.studentQuality ?? "",
+      studentFriendlyExplanation: def?.studentFriendlyExplanation ?? null,
     };
   });
 }
