@@ -1746,9 +1746,24 @@ before building UI that depends on any of them:
   `docs/api-list.md`); `GET` assembles the same chart and is now **student-or-staff,
   ownership-guarded** rather than staff-only, so a student's own Ikigai/report page can
   call it directly (e.g. for `counsellor.notes`) instead of getting a silent 403.
-  `entranceExamsTable`/`collegesTable` are on the
-  GET response too, but computed like `graduationPathways` (derived from
-  `assessment.careerFit.top3Industries`, not saved via the PUT), and
+  The 6 Career Direction step (Step 3 / Section C) tables — `entranceExamsTable`,
+  `collegesTable`, `streamFitTable`, `graduationTable`, `careerCompassClusterTable`,
+  `careerCompassTable` — now support counsellor add/delete: PUT the **entire resulting
+  array** for a table (system rows that survived a delete + any added rows, "last full
+  array wins", no per-row diffing; send `[]` for "all rows deleted", not omission) and it
+  becomes the permanent value from then on. `null`/absent means no counsellor edits
+  yet — `streamFitTable`/`graduationTable`/`careerCompassClusterTable`/`careerCompassTable`
+  (returned under `counsellor.*`) are recomputed by the frontend from the assessment
+  report in that case, same as before this existed. `entranceExamsTable`/`collegesTable`
+  (top-level on the GET response, not under `counsellor`) are the two exceptions the
+  backend itself computes live — like `graduationPathways` — from
+  `assessment.careerFit.top3Industries` until the counsellor's first edit, at which point
+  the saved array wins; the response never sends `null` for these two, only a computed or
+  saved array. A row on any of the 6 may carry `isManualEntry: true` for a free-text row
+  (not picked from the Career Library) — `GET /api/v1/counsellor-chart/manual-entries`
+  (Super Admin only) lists every such row across all students for review: `{ id,
+  studentId, studentName, tableLabel, fields, addedBy, addedAt }`. See `docs/api-list.md`
+  for the 6 tables' item shapes and table titles.
   `POST`/`DELETE …/mirror-pair-amendments` let the counsellor amend a flagged answer,
   which re-runs the full scoring engine, plus `POST …/finalize` to close the chart. There's
   now also `POST /api/v1/counsellor-chart/students/{id}/accept` — **student-or-staff**,

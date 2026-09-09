@@ -4,7 +4,7 @@
 // Recommendation Engine".)
 
 import { FIT_BANDS, FIT_QUALIFYING_MIN } from "./config.js";
-import { streamWeights } from "./data/stream-weights.js";
+import { scoringData } from "./data/store.js";
 import { gradeByFloor, round2 } from "./grading.js";
 import type { TraitKey } from "./types.js";
 
@@ -37,7 +37,7 @@ export interface StreamFitResult {
 }
 
 export function scoreStreamFit(profile: TraitScoreMap): StreamFitResult {
-  const ranked = streamWeights
+  const ranked = scoringData.streamWeights
     .map((s): StreamFit => {
       const score = fitScore(s.weights, profile);
       const { level, meaning } = gradeByFloor(score, FIT_BANDS);

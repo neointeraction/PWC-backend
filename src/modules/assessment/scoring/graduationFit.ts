@@ -6,7 +6,7 @@
 // not a Graduation-Pathways one explicitly; the Graduate_Streams sheet carries the same
 // weight structure, so we apply the identical method (confirmed with PWC).
 
-import { graduateStreams } from "./data/graduate-streams.js";
+import { scoringData } from "./data/store.js";
 import { FIT_BANDS, FIT_QUALIFYING_MIN } from "./config.js";
 import { weightedFit, type TraitScoreMap } from "./fit.js";
 import { gradeByFloor } from "./grading.js";
@@ -30,7 +30,7 @@ export interface GraduationFitResult {
 }
 
 export function scoreGraduationPathways(profile: TraitScoreMap): GraduationFitResult {
-  const ranked = graduateStreams
+  const ranked = scoringData.graduateStreams
     .map((g): GraduationFit => {
       const fitScore = weightedFit(g.weights, profile);
       const { level, meaning } = gradeByFloor(fitScore, FIT_BANDS);

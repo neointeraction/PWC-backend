@@ -2,10 +2,8 @@
 // 2-letter hyphenated code (rank1-rank2) looked up against the 20 permutations.
 
 import { BIG_FIVE_LETTER_BY_TRAIT } from "./config.js";
-import { bigFive20 } from "./data/bigfive-20.js";
+import { scoringData } from "./data/store.js";
 import type { TraitKey } from "./types.js";
-
-const BY_CODE = new Map(bigFive20.map((e) => [e.code, e]));
 
 export interface DominantPersonalityStyle {
   code: string;
@@ -22,7 +20,8 @@ export function resolveDominantPersonalityStyle(
     .slice(0, 2)
     .map((t) => BIG_FIVE_LETTER_BY_TRAIT[t] ?? "")
     .join("-");
-  const entry = BY_CODE.get(code);
+  const byCode = new Map(scoringData.bigFive20.map((e) => [e.code, e]));
+  const entry = byCode.get(code);
   if (!entry) {
     throw new Error(`No Big Five-20 entry for code "${code}"`);
   }

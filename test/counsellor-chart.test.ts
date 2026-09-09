@@ -232,4 +232,60 @@ describe("Counsellor Chart API", () => {
       .set("Authorization", otherToken);
     expect(res.status).toBe(403);
   });
+
+  it("returns null for the 4 uncomputed Career Direction tables until edited, computes entranceExamsTable/collegesTable live until then", async () => {
+    const res = await authRequest(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
+    expect(res.status).toBe(200);
+    expect(res.body.counsellor.streamFitTable).toBeNull();
+    expect(res.body.counsellor.graduationTable).toBeNull();
+    expect(res.body.counsellor.careerCompassClusterTable).toBeNull();
+    expect(res.body.counsellor.careerCompassTable).toBeNull();
+    expect(Array.isArray(res.body.entranceExamsTable)).toBe(true);
+    expect(Array.isArray(res.body.collegesTable)).toBe(true);
+  });
+
+  it("persists a counsellor-edited Career Direction table, including a manual entry, and surfaces it on the last full array from then on", async () => {
+    const put = await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentId}`)
+      .send({
+        streamFitTable: [
+          {
+            id: "manual-1",
+            mainStream: "Commerce",
+            subStream: "Accounting & Finance",
+            coreSubjects: "Accountancy, Economics",
+            electives: "Entrepreneurship",
+            isManualEntry: true,
+          },
+        ],
+        careerCompassClusterTable: [],
+        lastEditedBy: "counsellor-1",
+      });
+    expect(put.status).toBe(200);
+    expect(put.body.counsellor.streamFitTable).toHaveLength(1);
+    expect(put.body.counsellor.streamFitTable[0].isManualEntry).toBe(true);
+    // Deleting all rows persists as an empty array, not left uncomputed.
+    expect(put.body.counsellor.careerCompassClusterTable).toEqual([]);
+
+    const get = await authRequest(app).get(`/api/v1/counsellor-chart/students/${studentId}`);
+    expect(get.body.counsellor.streamFitTable).toHaveLength(1);
+    expect(get.body.counsellor.careerCompassClusterTable).toEqual([]);
+  });
+
+  it("lists the manual entry on the Super Admin review queue", async () => {
+    const res = await authRequest(app, "SUPER_ADMIN").get("/api/v1/counsellor-chart/manual-entries");
+    expect(res.status).toBe(200);
+    const row = res.body.find((r: { studentId: string }) => r.studentId === studentId);
+    expect(row).toBeDefined();
+    expect(row.tableLabel).toBe("Assessment Result View — Stream Fit & Pathways");
+    expect(row.studentName).toBe("Meera Nair");
+    expect(row.fields.mainStream).toBe("Commerce");
+    expect(row.fields.isManualEntry).toBeUndefined();
+    expect(row.fields.id).toBeUndefined();
+  });
+
+  it("403s a non-super-admin from the manual entries queue", async () => {
+    const res = await authRequest(app, "ADMIN").get("/api/v1/counsellor-chart/manual-entries");
+    expect(res.status).toBe(403);
+  });
 });

@@ -247,7 +247,7 @@ model Student {
   // Primary contact for parent communication (session links, pre-counselling/feedback
   // links) — captured on the Student Profile Form, Section A.
   parentMobile     String?           @unique
-  parentEmail      String?           @unique
+  parentEmail      String?
   // Student Profile Form, Section B/C — captured separately per parent.
   fatherName       String
   fatherOccupation String?
@@ -1035,6 +1035,129 @@ model AssessmentQuestion {
   @@map("assessment_questions")
 }
 
+// Reference/weightage data for the scoring engine (src/modules/assessment/scoring/),
+// sourced from the "Traits & Weightages" workbook via scripts/export-assessment-scoring.py
+// -> prisma/seed-data/assessment-scoring/ -> prisma/seed-scoring.ts. The DB is the source
+// of truth; the engine loads it into an in-memory cache at startup (see scoring/data/store.ts).
+model AssessmentTraitDefinition {
+  id                         String            @id @default(cuid())
+  layer                      AssessmentSection
+  key                        String            @unique // TraitKey, e.g. "REALISTIC"
+  trait                      String // workbook label, e.g. "Realistic"
+  traitName                  String // report-facing name, e.g. "Applied Thinker"
+  description                String
+  studentQuality             String // "Student Quality - Pre-Counselling"
+  studentFriendlyExplanation String? // only populated for the 3 Cognitive traits today
+
+  @@map("assessment_trait_definitions")
+}
+
+// Dominant Career Style lookup: 120 ordered permutations of the top-3 ranked RIASEC traits.
+model RiasecStyle {
+  id          String   @id @default(cuid())
+  code        String   @unique // 3-letter DCS code, e.g. "RIA"
+  traits      String[] // 3 TraitKeys, rank order
+  style       String
+  description String
+  explanation String
+
+  @@map("riasec_styles")
+}
+
+// Dominant Personality Style lookup: 20 ordered permutations of the top-2 ranked Big Five traits.
+model BigFiveStyle {
+  id          String   @id @default(cuid())
+  code        String   @unique // 2-letter hyphenated DPS code, e.g. "O-C"
+  style       String
+  description String
+  explanation String
+
+  @@map("bigfive_styles")
+}
+
+// Class 11 & 12 sub-stream weight table for Stream Fit scoring.
+model StreamWeight {
+  id               String  @id @default(cuid())
+  mainStream       String
+  subStream        String
+  coreSubjects     String?
+  electiveSubjects String?
+  explanation      String?
+  weights          Json // Partial<Record<TraitKey, number>>, sums to 100
+
+  @@unique([mainStream, subStream])
+  @@map("stream_weights")
+}
+
+// Career-library industry/domain weight table for Career Fit scoring.
+model DomainWeight {
+  id          String  @id @default(cuid())
+  cluster     String
+  industry    String
+  domain      String // "All Domains" or a specific domain name
+  weightSum   Float
+  explanation String?
+  weights     Json
+
+  @@unique([industry, domain])
+  @@index([cluster])
+  @@map("domain_weights")
+}
+
+// Graduation pathway weight table for Graduation Fit scoring.
+model GraduateStreamWeight {
+  id              String  @id @default(cuid())
+  clusterHead     String?
+  mainStream      String
+  subStream       String
+  specialisations String?
+  eligibility     String?
+  keyExams        String?
+  explanation     String?
+  weights         Json
+
+  @@unique([mainStream, subStream])
+  @@map("graduate_stream_weights")
+}
+
+// RVS/ARI/ACI/ORI reliability-index friendly names, shown to counsellors/students
+// alongside the computed reliability report.
+model ReliabilityMeasureDefinition {
+  id             String @id @default(cuid())
+  code           String @unique // "RVS" | "ARI" | "ACI" | "ORI"
+  measure        String // full label, e.g. "Response Validity (RVS)"
+  friendlyName   String // e.g. "Engagement Integrity Measure"
+  whatItMeasures String
+
+  @@map("reliability_measure_definitions")
+}
+
+// Guidance text per SCRI band (1-4), shown alongside CounsellorChart's computed SCRI
+// total/band (see src/modules/counsellor-chart/scri.ts).
+model ScriBandGuidance {
+  id              String @id @default(cuid())
+  band            Int    @unique // 1-4, matches scri.ts computeScri() bands
+  scoreRange      String // e.g. "6–10", display text
+  label           String // workbook label, e.g. "Pre-Exploration"
+  labelMeaning    String
+  forStudents     String
+  tipsForStudents String
+  tipsForParent   String
+
+  @@map("scri_band_guidance")
+}
+
+// Guidance text per Academic x Career AlignmentRating value, shown alongside
+// CounsellorChart.alignmentRating.
+model AlignmentRatingGuidance {
+  id          String          @id @default(cuid())
+  rating      AlignmentRating @unique
+  label       String // display label, e.g. "Strongly Aligned"
+  studentNote String
+
+  @@map("alignment_rating_guidance")
+}
+
 enum AssessmentAttemptStatus {
   IN_PROGRESS
   SUBMITTED
@@ -1115,11 +1238,25 @@ model CounsellorChart {
 
   // Session-local-only fields promoted to server storage — free-text content the
   // frontend already edits, shaped exactly as it sends them (see counsellor-chart.schema.ts).
-  // entranceExamsTable/collegesTable are NOT stored here — they're computed server-side
-  // from the assessment (like graduationPathways), see entrance-exams-colleges.ts.
   roadmapGrid        Json? // sectionE.roadmapGrid: 9 plain strings (nowSkills..afterAbroad)
   careerDnaNarrative Json? // sectionB.careerDnaNarrative: 5 plain strings
   whyThisStream      Json? // sectionC.whyThisStream1/2: pair of plain strings
+
+  // Career Direction step (Step 3 / Section C) tables: counsellors can add/delete rows
+  // (add-disabled for careerCompassClusterTable — delete only, by design). null/absent
+  // means "no counsellor edits yet — recompute fresh from the assessment on read"; once
+  // edited, the full resulting array (system rows that survived + added rows) is stored
+  // here and becomes the permanent value — "last full array wins", no per-row diffing.
+  // entranceExamsTable/collegesTable are also computed fresh from the assessment when
+  // null (see entrance-exams-colleges.ts); streamFitTable/graduationTable/
+  // careerCompassClusterTable/careerCompassTable are computed client-side from the
+  // assessment report when null.
+  entranceExamsTable      Json?
+  collegesTable           Json?
+  streamFitTable          Json?
+  graduationTable         Json?
+  careerCompassClusterTable Json?
+  careerCompassTable      Json?
 
   // SCRI — Student Career Readiness Index (counsellor-rated after Session 2). Each
   // indicator 1-4; total/band/label are derived on save and stored for convenience.

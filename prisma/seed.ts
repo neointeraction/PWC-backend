@@ -5,6 +5,7 @@ import { class9to10AssessmentQuestions } from "./seed-data/assessment/class9to10
 import { seedCareerLibraryData } from "./seed-data/career-library/index.js";
 import { seedCareerLibraryNormalization } from "./seed-data/career-library/normalize.js";
 import { seedEducationPath } from "./seed-education-path.js";
+import { seedScoringReferenceData } from "./seed-scoring.js";
 import { feedbackParentQuestions } from "./seed-data/forms/feedbackParent.js";
 import { feedbackStudentQuestions } from "./seed-data/forms/feedbackStudent.js";
 import { preCounsellingParentQuestions } from "./seed-data/forms/preCounsellingParent.js";
@@ -156,6 +157,7 @@ async function main(): Promise<void> {
   await seedFormTemplate("FEEDBACK_STUDENT", feedbackStudentQuestions);
   await seedFormTemplate("FEEDBACK_PARENT", feedbackParentQuestions);
   await seedAssessmentQuestions(class9to10AssessmentQuestions);
+  await seedScoringReferenceData();
   await seedCareerLibraryData(prisma);
   await seedCareerLibraryNormalization(prisma);
   // Derives EducationEntry + role links from the flat qualification*/certifications*

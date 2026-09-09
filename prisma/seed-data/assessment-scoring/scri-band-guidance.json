@@ -1,0 +1,38 @@
+[
+  {
+    "band": 1,
+    "scoreRange": "6–10",
+    "label": "Pre-Exploration",
+    "labelMeaning": "The student isn't yet engaging with career thinking, conversations feel abstract or externally driven, and most responses in-session leaned on parents/others rather than the student's own view. This is a normal starting point for many students, not a deficiency.",
+    "forStudents": "Right now, thinking about careers still feels new and a little far away and that's completely okay! At this stage, most of your ideas about the future come from what your parents, teachers, or friends have told you, rather than from things you've explored yourself. This is where almost everyone starts. There's no pressure to have it figured out yet. This is simply your starting point.",
+    "tipsForStudents": "• Talk to 2–3 adults you know (parents, relatives, teachers) about what they actually do, no need to decide anything. Understand their career.\n• Watch one video or read one article a month about a career that sounds interesting, purely out of curiosity.",
+    "tipsForParent": "• Avoid asking ‘what do you want to become’ repeatedly, it can feel like pressure at this stage.\n• Casually share what different careers actually look like during everyday conversations, without pushing a decision.\n• Let your child explore at their own pace right now; your job is to build trust, not urgency."
+  },
+  {
+    "band": 2,
+    "scoreRange": "11–15",
+    "label": "Early Exploration",
+    "labelMeaning": "The student is beginning to engage but is still tentative, occasional flashes of independent thinking or curiosity, but still largely reassurance-seeking and not yet driving the conversation.",
+    "forStudents": "You've started thinking about your own interests and ideas, that's a great sign! Every now and then, a genuine spark of curiosity comes through. But most of the time, you're still looking for someone else to confirm you're on the right track, rather than trusting your own judgement. That's a totally normal part of figuring things out.",
+    "tipsForStudents": "• Pick one subject you genuinely enjoy and find out two careers connected to it.\n• Join one new club, activity, or competition  purely because it seems interesting or to learn.\n• Ask one teacher or elder a question about how they chose their own career path.",
+    "tipsForParent": "• Encourage your child to explore subjects and activities on their own, rather than suggesting what they should like.\n• Resist stepping in too quickly with your own opinion when they share an idea, let them think it through first.\n• Notice and appreciate any spark of curiosity you see, even if it changes the next week, that's normal at this age."
+  },
+  {
+    "band": 3,
+    "scoreRange": "16–20",
+    "label": "Active Exploration",
+    "labelMeaning": "The student is engaging meaningfully — reasoning through options in their own words, showing curiosity beyond the session, and able to sit with some uncertainty without needing it resolved immediately.",
+    "forStudents": "You're genuinely engaging with your future now, thinking things through in your own words, asking good questions, and staying curious even outside our sessions. You're also comfortable not having every answer right away, which is a real strength. You're not just waiting to be told what to do, you're exploring on your own.",
+    "tipsForStudents": "• Research two career options in more depth, what the role actually involves, day-to-day.\n• Try to speak with someone (family friend, relative, senior) already working in a field you're curious about.\n• Start writing down how your favourite subjects connect to real career paths.",
+    "tipsForParent": "• Talk to your child about how their favourite subjects connect to real aptitude strengths, this reinforces what they're discovering.\n• Support their goal-setting by asking questions rather than giving answers, help them articulate their own thinking.\n• Encourage them to speak with people in fields they're curious about; real exposure builds confidence faster than advice."
+  },
+  {
+    "band": 4,
+    "scoreRange": "21–24",
+    "label": "Career Ready",
+    "labelMeaning": "The student is confidently driving their own career conversations — self-aware, curious, comfortable with ambiguity, and ready to commit to concrete next steps with real ownership.",
+    "forStudents": "You know yourself well, you're leading your own career conversations with confidence, and you're comfortable moving forward even without every detail sorted out. You're genuinely ready to start committing to real next steps and to own that decision as yours.",
+    "tipsForStudents": "• Look up the entrance exams or eligibility requirements for your shortlisted paths.\n• Talk to a senior student or professional in your chosen field for practical, first-hand advice.\n• Set one concrete goal this term that moves you closer  e.g. start a related short course, join a relevant competition, or shadow someone for a day.",
+    "tipsForParent": "• Start concrete conversations at home about subject choices, entrance exams, or colleges relevant to their direction.\n• Support them in planning next steps, timelines, resources, or a related course while letting them own the decision.\n• Check in on their plan periodically, but avoid taking over; your role now is to back their ownership, not redirect it."
+  }
+]

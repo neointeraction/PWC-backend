@@ -1,0 +1,26 @@
+[
+  {
+    "code": "RVS",
+    "measure": "Response Validity (RVS)",
+    "friendlyName": "Engagement Integrity Measure",
+    "whatItMeasures": "How consistent your responses were - sincere and internally consistent"
+  },
+  {
+    "code": "ARI",
+    "measure": "Aptitude Reliability (ARI)",
+    "friendlyName": "Aptitude Test Coherence Index",
+    "whatItMeasures": "How logically your aptitude answers progressed, hence are you fairly competent"
+  },
+  {
+    "code": "ACI",
+    "measure": "Aptitude Confidence (ACI)",
+    "friendlyName": "Aptitude Accuracy Indicator",
+    "whatItMeasures": "How confident you were in aptitude answers, did the respondent skip a lot"
+  },
+  {
+    "code": "ORI",
+    "measure": "Overall Assessment Reliability Index (ORI)",
+    "friendlyName": "Holistic Reliability Score",
+    "whatItMeasures": "Whether your pace was psychologically normal, whether you completed in the ideal time range"
+  }
+]

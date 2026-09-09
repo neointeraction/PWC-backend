@@ -16,7 +16,7 @@
 // resolved from the library by the service layer, keyed on `industry` + `domain`, using
 // highest AI-resilience as the tiebreak.
 
-import { domainWeights } from "./data/domain-weights.js";
+import { scoringData } from "./data/store.js";
 import { FIT_BANDS, FIT_QUALIFYING_MIN } from "./config.js";
 import { weightedFit, type TraitScoreMap } from "./fit.js";
 import { gradeByFloor } from "./grading.js";
@@ -86,7 +86,7 @@ function buildWeightLookup() {
   const allDomains = new Map<string, ResolvedWeights>(); // industry -> "All Domains"
   const perIndustryRows = new Map<string, ResolvedWeights[]>();
 
-  for (const row of domainWeights) {
+  for (const row of scoringData.domainWeights) {
     const rw: ResolvedWeights = { weights: row.weights, weightSum: row.weightSum };
     if (row.domain === ALL_DOMAINS) {
       allDomains.set(row.industry, rw);
@@ -116,13 +116,15 @@ function buildWeightLookup() {
   return { specific, allDomains, industryAverage };
 }
 
-const WEIGHTS = buildWeightLookup();
-
-function resolveWeights(industry: string, domain: string): ResolvedWeights | null {
+function resolveWeights(
+  weights: ReturnType<typeof buildWeightLookup>,
+  industry: string,
+  domain: string
+): ResolvedWeights | null {
   return (
-    WEIGHTS.specific.get(`${industry}||${domain}`) ??
-    WEIGHTS.allDomains.get(industry) ??
-    WEIGHTS.industryAverage.get(industry) ??
+    weights.specific.get(`${industry}||${domain}`) ??
+    weights.allDomains.get(industry) ??
+    weights.industryAverage.get(industry) ??
     null
   );
 }
@@ -130,9 +132,10 @@ function resolveWeights(industry: string, domain: string): ResolvedWeights | nul
 // --- scoring -----------------------------------------------------------------
 
 export function scoreCareerFit(profile: TraitScoreMap, domainUnits: DomainUnit[]): CareerFitResult {
+  const weights = buildWeightLookup();
   const rankedDomains: DomainFit[] = [];
   for (const unit of domainUnits) {
-    const rw = resolveWeights(unit.industry, unit.domain);
+    const rw = resolveWeights(weights, unit.industry, unit.domain);
     if (!rw) continue; // industry not in the weight table (shouldn't happen)
     const fitScore = weightedFit(rw.weights, profile, rw.weightSum);
     const { level, meaning } = gradeByFloor(fitScore, FIT_BANDS);

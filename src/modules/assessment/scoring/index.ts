@@ -19,15 +19,13 @@ import { scoreCareerFit, type CareerFitResult, type DomainUnit } from "./careerF
 import { scoreCognitive } from "./cognitive.js";
 import { resolveDominantCareerStyle, type DominantCareerStyle } from "./dcs.js";
 import { resolveDominantPersonalityStyle, type DominantPersonalityStyle } from "./dps.js";
-import { traitDefinitions } from "./data/trait-definitions.js";
+import { scoringData } from "./data/store.js";
 import { scoreGraduationPathways, type GraduationFitResult } from "./graduationFit.js";
 import { computeOri, type OriResult } from "./ori.js";
 import { computeRvs, type RvsResult } from "./rvs.js";
 import { scoreRiasec } from "./riasec.js";
 import { scoreStreamFit, type StreamFitResult, type TraitScoreMap } from "./streamFit.js";
 import type { AnsweredQuestion, Layer, TraitKey, TraitScore } from "./types.js";
-
-const TRAIT_DEF_BY_KEY = new Map(traitDefinitions.map((d) => [d.key, d]));
 
 // A trait score enriched with its report-facing name and description.
 export interface EnrichedTraitScore extends TraitScore {
@@ -79,8 +77,9 @@ export interface ScoreInput {
 }
 
 function enrich(layer: Layer, scores: TraitScore[]): EnrichedTraitScore[] {
+  const traitDefByKey = new Map(scoringData.traitDefinitions.map((d) => [d.key, d]));
   return scores.map((s) => {
-    const def = TRAIT_DEF_BY_KEY.get(s.trait);
+    const def = traitDefByKey.get(s.trait);
     return {
       ...s,
       layer,

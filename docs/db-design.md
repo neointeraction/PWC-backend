@@ -198,7 +198,7 @@ Extends `User` (role=STUDENT).
 | mobile | String | unique, E.164 |
 | whatsappNumber | String? | optional, only if different from mobile |
 | parentMobile | String? | optional, unique when set, E.164; primary contact for session links/notifications (Student Profile Form, Section A) — left empty rather than falling back to the student's own `mobile` |
-| parentEmail | String? | optional, unique when set; primary contact, same as above — `PRE_COUNSELLING_PARENT` and the various session-lifecycle parent emails are skipped (not sent) when this is unset |
+| parentEmail | String? | optional, not unique (siblings can share a parent's email); primary contact — `PRE_COUNSELLING_PARENT` and the various session-lifecycle parent emails are skipped (not sent) when this is unset |
 | fatherName | String | Student Profile Form, Section B |
 | fatherOccupation | String? | optional (bulk imports may omit) |
 | fatherEmployer | String? | optional ("if applicable") |
@@ -602,12 +602,29 @@ submit. Trait % scoring, grading bands, tie-breaks and profile flags per the Ass
 Tool Construct; Dominant Career Style (top-3 RIASEC → 1 of 120 codes) and Dominant
 Personality Style (top-2 Big Five → 1 of 20 codes); Stream Fit (weighted match against
 Class 11&12 sub-streams); and the reliability measures (Difficulty Consistency, ACI,
-ORI, RVS); Stream Fit; Graduation Pathways; and Career Fit. The lookup/weight tables and
-code-style descriptions are generated from the Traits & Weightages workbook by
-`scripts/export-assessment-scoring.py` into `scoring/data/*.ts` (bundled as TS so they
-compile into `dist` for runtime — they are scoring config, not queryable reference
-data). RVS uses the confirmed "sum" aggregation (`100 − Σ per-pair penalties`) so the
-grade bands are reachable.
+ORI, RVS); Stream Fit; Graduation Pathways; and Career Fit. RVS uses the confirmed "sum"
+aggregation (`100 − Σ per-pair penalties`) so the grade bands are reachable.
+
+**Reference/weightage data is DB-backed, not compiled into the app.** The trait
+definitions, DCS/DPS style lookups, and Stream/Domain/Graduate-Stream weight tables —
+originally the "Traits & Weightages" workbook — live in 6 tables:
+`AssessmentTraitDefinition` (18), `RiasecStyle` (120), `BigFiveStyle` (20),
+`StreamWeight` (~16), `DomainWeight` (~72), `GraduateStreamWeight` (~72). Plus 3 more
+sourced from the workbook's SCRI sheet, used by the counsellor chart rather than the
+scoring engine: `ReliabilityMeasureDefinition` (RVS/ARI/ACI/ORI → friendly name),
+`ScriBandGuidance` (per-band label meaning + student/parent tips, bands 1-4), and
+`AlignmentRatingGuidance` (per-`AlignmentRating` student note). All 9 are seeded by
+`prisma/seed-scoring.ts` (`pnpm db:seed:scoring`) from JSON fixtures under
+`prisma/seed-data/assessment-scoring/`, produced by
+`scripts/export-assessment-scoring.py` from the workbook — rerun that script manually if
+the workbook changes, then reseed. The scoring engine loads all 9 into an in-memory
+cache once at process startup (`loadScoringReferenceData()` in
+`scoring/data/store.ts`, called from `src/server.ts`) so it stays synchronous/pure and
+keeps its DB-free unit test suite (`test/assessment-scoring.test.ts`) — `test/setup.ts`
+loads the cache before each test file runs instead. `AssessmentTraitDefinition.key` /
+`RiasecStyle.traits` store `TraitKey` values as plain strings (matches
+`AssessmentQuestion.trait`) rather than a Prisma enum; weight maps are `Json`
+(`Partial<Record<TraitKey, number>>`).
 
 Career Fit ranks at the **domain** level: the workbook's "Domain Wtg" sheet is keyed by
 `(industry, domain)` — 40 industries carry a single "All Domains" row, while Defence /
@@ -654,20 +671,41 @@ sessions. 1:1 with `Student`.
 | roadmapGrid | Json? | 9 plain strings (nowSkills..afterAbroad) |
 | careerDnaNarrative | Json? | 5 plain strings (dnaDefinition, careerStyleReveals, personalityStyleReveals, thinkingModeReveals, aptitudeProfileReveals) |
 | whyThisStream | Json? | { whyThisStream1, whyThisStream2 } plain strings |
+| entranceExamsTable, collegesTable | Json? | Career Direction tables — see below |
+| streamFitTable, graduationTable, careerCompassClusterTable, careerCompassTable | Json? | Career Direction tables — see below |
 | scri* (6 indicators) + scriTotal/scriBand/scriBandLabel | Int?/String? | Student Career Readiness Index — each indicator 1–4; total/band/label derived on save |
 | academicTrend | `AcademicTrend`? | IMPROVING / STABLE / DECLINING / NOT_ASSESSED |
 | alignmentRating | `AlignmentRating`? | Academic × Career alignment |
+
+`GET`/`PUT` responses enrich `scri` with a `guidance` object (looked up from
+`ScriBandGuidance` by `scriBand`) and add `alignmentGuidance` (looked up from
+`AlignmentRatingGuidance` by `alignmentRating`) — both null until the corresponding
+value is set. See `src/modules/counsellor-chart/guidance.ts`; `reports.service.ts`
+attaches the same guidance to the student assessment report's `counsellorNarrative`.
 | finalizedAt | DateTime? | set on finalize (advances workflow to `COUNSELLOR_FEEDBACK`) |
 | lastEditedBy | String? | Counsellor id (audit stamp, not an FK) |
 
 `CounsellorChartNote` (child, `@@unique([chartId, code])`) holds one synthesis note per
 section code (`A1`..`H4`). The chart is **assembled live** by `src/modules/counsellor-chart/`
 (profile + both pre-counselling forms side-by-side + assessment result + flagged mirror
-pairs); only the counsellor-authored fields above are persisted. **Entrance Exams /
-Colleges After 11&12 are not stored on this model at all** — like Graduation Fit, they're
-computed on every GET from `assessment.careerFit.top3Industries` against the Career
-Library's `EntranceExam`/`Institution` tables (`entrance-exams-colleges.ts`), not
-counsellor-editable.
+pairs); most fields above are counsellor-authored and simply persisted as sent.
+
+**Career Direction tables** (Step 3 / Section C — 6 tables: Career Compass Indicative
+Clusters, Career Compass Target Roles & Compensation, Stream Fit & Pathways, Graduation
+Fit, Colleges After 11&12, Entrance Exams) are the exception: `null` means the counsellor
+hasn't edited that table yet. `streamFitTable`/`graduationTable`/`careerCompassClusterTable`/
+`careerCompassTable` are computed **client-side** from the assessment report when null — the
+backend has no server-side computation for them, only storage of the counsellor's override.
+`entranceExamsTable`/`collegesTable` are the two tables the backend *does* compute (like
+Graduation Fit used to be) — live, on every GET, from `assessment.careerFit.top3Industries`
+against the Career Library's `EntranceExam`/`Institution` tables
+(`entrance-exams-colleges.ts`) — until the counsellor's first edit, at which point the
+stored array wins. Once a counsellor edits any of the 6, the entire resulting array (system
+rows that survived a delete + any added rows) is stored and becomes the permanent value —
+"last full array wins", no per-row diffing; a row may carry `isManualEntry: true`
+(free-text, not picked from the Career Library), which `GET /counsellor-chart/manual-entries`
+scans for across all students for the Super Admin review queue. See
+`docs/api-list.md` for the full item shapes.
 
 **Mirror-pair amendments** write to `AssessmentAnswer.counsellorOverrideOption`
 (`+ overriddenByCounsellorId/overriddenAt`), preserving the student's original

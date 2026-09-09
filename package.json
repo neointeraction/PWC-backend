@@ -19,7 +19,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
-    "db:seed:education": "tsx prisma/seed-education-path.ts"
+    "db:seed:education": "tsx prisma/seed-education-path.ts",
+    "db:seed:scoring": "tsx prisma/seed-scoring.ts"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",

@@ -4,6 +4,7 @@ import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import type { AssessmentReport } from "../assessment/scoring/index.js";
 import type { CareerFitResult, DomainFit } from "../assessment/scoring/careerFit.js";
 import { aiResilienceRank } from "../assessment/scoring/careerFit.js";
+import { loadAlignmentGuidance, loadScriGuidance } from "../counsellor-chart/guidance.js";
 import { getStudentFeedbackScore } from "../feedback/feedback.service.js";
 
 // A counsellor-added job role reads exactly like a computed one on the report, plus a
@@ -148,9 +149,11 @@ export async function assembleStudentAssessmentReport(studentId: string) {
           total: chart.scriTotal,
           band: chart.scriBand,
           bandLabel: chart.scriBandLabel,
+          guidance: await loadScriGuidance(chart.scriBand),
         },
         academicTrend: chart.academicTrend,
         alignmentRating: chart.alignmentRating,
+        alignmentGuidance: await loadAlignmentGuidance(chart.alignmentRating),
         notes: chart.notes,
         finalizedAt: chart.finalizedAt,
       }

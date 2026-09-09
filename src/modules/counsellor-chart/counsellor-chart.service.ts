@@ -2,6 +2,7 @@ import { prisma } from "../../config/prisma.js";
 import { BadRequestError } from "../../common/errors/AppError.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import { assembleChart } from "./counsellor-chart.assembler.js";
+import { loadAlignmentGuidance, loadScriGuidance } from "./guidance.js";
 import { computeScri } from "./scri.js";
 import type { PutCounsellorChartBody } from "./counsellor-chart.schema.js";
 
@@ -42,6 +43,13 @@ function shapeCounsellorInputs(chart: ChartWithNotes) {
     roadmapGrid: chart.roadmapGrid,
     careerDnaNarrative: chart.careerDnaNarrative,
     whyThisStream: chart.whyThisStream,
+    // Career Direction tables the counsellor has edited (add/delete a row). null until
+    // the counsellor's first edit — the frontend recomputes these fresh from the
+    // assessment report until then (see the schema doc comment on PutCounsellorChartBody).
+    streamFitTable: chart.streamFitTable,
+    graduationTable: chart.graduationTable,
+    careerCompassClusterTable: chart.careerCompassClusterTable,
+    careerCompassTable: chart.careerCompassTable,
     lastEditedBy: chart.lastEditedBy,
     finalizedAt: chart.finalizedAt,
     acceptedAt: chart.acceptedAt,
@@ -53,7 +61,27 @@ export async function getCounsellorChart(studentId: string) {
   // assembleChart throws NotFoundError if the student doesn't exist.
   const assembled = await assembleChart(studentId);
   const chart = await loadOrCreateChart(studentId);
-  return { ...assembled, counsellor: shapeCounsellorInputs(chart) };
+  const [scriGuidance, alignmentGuidance] = await Promise.all([
+    loadScriGuidance(chart.scriBand),
+    loadAlignmentGuidance(chart.alignmentRating),
+  ]);
+  const counsellor = shapeCounsellorInputs(chart);
+  return {
+    ...assembled,
+    // Once the counsellor edits entranceExamsTable/collegesTable, the persisted array
+    // wins over the live-computed default — same "last full array wins" model as the
+    // 4 tables under `counsellor` below (see counsellor-chart.schema.ts).
+    entranceExamsTable: (chart.entranceExamsTable as unknown[] | null) ?? assembled.entranceExamsTable,
+    collegesTable: (chart.collegesTable as unknown[] | null) ?? assembled.collegesTable,
+    counsellor: {
+      ...counsellor,
+      // Guidance text for the band/rating the counsellor has already recorded — null
+      // until scri.band / alignmentRating are set. Source: SCRI sheet, "Traits &
+      // Weightages" workbook (see ./guidance.ts).
+      scri: { ...counsellor.scri, guidance: scriGuidance },
+      alignmentGuidance,
+    },
+  };
 }
 
 export async function updateCounsellorChart(studentId: string, body: PutCounsellorChartBody) {
@@ -81,6 +109,14 @@ export async function updateCounsellorChart(studentId: string, body: PutCounsell
       ...(body.roadmapGrid !== undefined && { roadmapGrid: body.roadmapGrid }),
       ...(body.careerDnaNarrative !== undefined && { careerDnaNarrative: body.careerDnaNarrative }),
       ...(body.whyThisStream !== undefined && { whyThisStream: body.whyThisStream }),
+      ...(body.entranceExamsTable !== undefined && { entranceExamsTable: body.entranceExamsTable }),
+      ...(body.collegesTable !== undefined && { collegesTable: body.collegesTable }),
+      ...(body.streamFitTable !== undefined && { streamFitTable: body.streamFitTable }),
+      ...(body.graduationTable !== undefined && { graduationTable: body.graduationTable }),
+      ...(body.careerCompassClusterTable !== undefined && {
+        careerCompassClusterTable: body.careerCompassClusterTable,
+      }),
+      ...(body.careerCompassTable !== undefined && { careerCompassTable: body.careerCompassTable }),
       ...(body.lastEditedBy !== undefined && { lastEditedBy: body.lastEditedBy }),
       scriConfidence: merged.confidence,
       scriReasonedThinking: merged.reasonedThinking,
@@ -202,4 +238,69 @@ export async function acceptCounsellorChart(studentId: string) {
   }
 
   return getCounsellorChart(studentId);
+}
+
+export interface ManualEntryRow {
+  id: string;
+  studentId: string;
+  studentName: string;
+  tableLabel: string;
+  fields: Record<string, string>;
+  addedBy: string | null;
+  addedAt: string;
+}
+
+// Table titles verbatim, per docs/compass-tables-manual-entry-backend-prompt.md.
+const MANUAL_ENTRY_TABLES: { column: keyof ManualEntryTableColumns; label: string }[] = [
+  { column: "careerCompassClusterTable", label: "Career Compass (Indicative Clusters)" },
+  { column: "careerCompassTable", label: "Career Compass (Target Roles & Compensation)" },
+  { column: "streamFitTable", label: "Assessment Result View — Stream Fit & Pathways" },
+  { column: "graduationTable", label: "Graduation Fit" },
+  { column: "collegesTable", label: "Colleges After Class 11&12" },
+  { column: "entranceExamsTable", label: "Entrance Exams" },
+];
+
+type ManualEntryTableColumns = {
+  careerCompassClusterTable: unknown;
+  careerCompassTable: unknown;
+  streamFitTable: unknown;
+  graduationTable: unknown;
+  collegesTable: unknown;
+  entranceExamsTable: unknown;
+};
+
+// Scans every student's counsellor chart across all 6 Career Direction tables for rows
+// with `isManualEntry: true`, for the Super Admin review queue.
+export async function listManualEntries(): Promise<ManualEntryRow[]> {
+  const charts = await prisma.counsellorChart.findMany({
+    where: {
+      OR: MANUAL_ENTRY_TABLES.map(({ column }) => ({ [column]: { not: null } })),
+    },
+    include: { student: { include: { user: { select: { firstName: true, lastName: true } } } } },
+  });
+
+  const rows: ManualEntryRow[] = [];
+  for (const chart of charts) {
+    const studentName = `${chart.student.user.firstName} ${chart.student.user.lastName}`.trim();
+    for (const { column, label } of MANUAL_ENTRY_TABLES) {
+      const items = chart[column] as Record<string, unknown>[] | null;
+      if (!items) continue;
+      for (const item of items) {
+        if (item.isManualEntry !== true) continue;
+        const { id, isManualEntry: _isManualEntry, ...rest } = item;
+        const fields: Record<string, string> = {};
+        for (const [key, value] of Object.entries(rest)) fields[key] = String(value);
+        rows.push({
+          id: String(id),
+          studentId: chart.studentId,
+          studentName,
+          tableLabel: label,
+          fields,
+          addedBy: chart.lastEditedBy,
+          addedAt: chart.updatedAt.toISOString(),
+        });
+      }
+    }
+  }
+  return rows;
 }

@@ -1509,6 +1509,17 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/counsellor-chart/manual-entries",
+  tags: chartTag,
+  summary: "Flat list of every free-text (Manual Entry) row a counsellor has added across the 6 Career Direction tables, across all students. Super Admin.",
+  responses: {
+    200: { description: "Manual entry rows", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
 // --- Feedback ---
 
 registry.registerPath({

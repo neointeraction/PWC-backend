@@ -1,5 +1,9 @@
-// Types for the generated scoring reference data (./*.ts, produced by
-// scripts/export-assessment-scoring.py from the Traits & Weightages workbook).
+// Shapes for the scoring engine's reference/weightage data. The DB (see ./store.ts) is
+// the source of truth — these are just the shapes `scoringData` maps DB rows into, kept
+// separate from the Prisma-generated types so the engine's consumer files
+// (dcs.ts/dps.ts/streamFit.ts/careerFit.ts/graduationFit.ts/index.ts) stay decoupled
+// from the schema. Originally produced by scripts/export-assessment-scoring.py from the
+// "Traits & Weightages" workbook into prisma/seed-data/assessment-scoring/.
 
 import type { TraitKey } from "../types.js";
 
@@ -9,6 +13,31 @@ export interface TraitDefinition {
   trait: string; // workbook trait label, e.g. "Numerical Reasoning"
   traitName: string; // report-facing name, e.g. "Computational Thinking"
   description: string;
+  studentQuality: string; // "Student Quality - Pre-Counselling"
+  studentFriendlyExplanation: string | null; // only populated for 3 Cognitive traits today
+}
+
+export interface ReliabilityMeasureDefinition {
+  code: string; // "RVS" | "ARI" | "ACI" | "ORI"
+  measure: string; // full label, e.g. "Response Validity (RVS)"
+  friendlyName: string;
+  whatItMeasures: string;
+}
+
+export interface ScriBandGuidance {
+  band: number; // 1-4
+  scoreRange: string;
+  label: string;
+  labelMeaning: string;
+  forStudents: string;
+  tipsForStudents: string;
+  tipsForParent: string;
+}
+
+export interface AlignmentRatingGuidance {
+  rating: string; // AlignmentRating enum value
+  label: string;
+  studentNote: string;
 }
 
 export interface Riasec120Entry {

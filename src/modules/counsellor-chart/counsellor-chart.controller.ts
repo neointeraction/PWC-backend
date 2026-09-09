@@ -52,3 +52,8 @@ export async function revertMirrorPairAmendment(req: Request, res: Response): Pr
   const result = await assessmentService.revertMirrorPairAmendment(studentId, questionCode);
   res.status(200).json(result);
 }
+
+export async function listManualEntries(_req: Request, res: Response): Promise<void> {
+  const rows = await service.listManualEntries();
+  res.status(200).json(rows);
+}

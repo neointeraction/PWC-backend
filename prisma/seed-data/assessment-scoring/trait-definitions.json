@@ -1,0 +1,164 @@
+[
+  {
+    "layer": "RIASEC",
+    "key": "REALISTIC",
+    "trait": "Realistic",
+    "traitName": "Applied Thinker",
+    "description": "Preference for practical, hands-on activities involving tools, machines, building, fixing, or physical problem solving.",
+    "studentQuality": "Fixing or building things with hands",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "RIASEC",
+    "key": "INVESTIGATIVE",
+    "trait": "Investigative",
+    "traitName": "Analytical Explorer",
+    "description": "Interest in analytical thinking, research, problem solving, scientific exploration, and understanding how things work.",
+    "studentQuality": "Analysing and understanding complex topics",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "RIASEC",
+    "key": "ARTISTIC",
+    "trait": "Artistic",
+    "traitName": "Creative Thinker",
+    "description": "Preference for creativity, imagination, self-expression, design, music, storytelling, or innovative thinking.",
+    "studentQuality": "Drawing, designing or making creative things",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "RIASEC",
+    "key": "SOCIAL",
+    "trait": "Social",
+    "traitName": "Interpersonal Mindset",
+    "description": "Interest in helping, teaching, guiding, supporting, and positively interacting with people.",
+    "studentQuality": "Making friends easily and working in teams",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "RIASEC",
+    "key": "ENTERPRISING",
+    "trait": "Enterprising",
+    "traitName": "Ambitious Initiator",
+    "description": "Preference for leadership, persuasion, initiative-taking, business activities, and influencing others.",
+    "studentQuality": "Persuading or motivating others to follow an idea",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "RIASEC",
+    "key": "CONVENTIONAL",
+    "trait": "Conventional",
+    "traitName": "Systematic & Disciplined",
+    "description": "Preference for structured work, planning, organization, accuracy, routines, and systematic processes.",
+    "studentQuality": "Organising work, notes and assignments neatly",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Big FIVE",
+    "key": "OPENNESS",
+    "trait": "Openness",
+    "traitName": "Intellectual Curiosity",
+    "description": "Willingness to explore new ideas, experiences, perspectives, creativity, and intellectual curiosity.",
+    "studentQuality": "Coming up with original or unusual ideas",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Big FIVE",
+    "key": "CONSCIENTIOUSNESS",
+    "trait": "Conscientiousness",
+    "traitName": "Organised Executor",
+    "description": "Ability to stay organized, disciplined, responsible, goal-oriented, and focused on completing tasks.",
+    "studentQuality": "Remembering facts and details accurately",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Big FIVE",
+    "key": "EXTRAVERSION",
+    "trait": "Extraversion",
+    "traitName": "Outwardly Engaged",
+    "description": "Preference for social interaction, teamwork, communication, energy from people, and active participation.",
+    "studentQuality": "Speaking or presenting in front of others",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Big FIVE",
+    "key": "AGREEABLENESS",
+    "trait": "Agreeableness",
+    "traitName": "Harmonious Orientation",
+    "description": "Tendency to be cooperative, empathetic, supportive, understanding, and considerate toward others.",
+    "studentQuality": "Understanding how others feel (empathy)",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Big FIVE",
+    "key": "EMOTIONAL_STABILITY",
+    "trait": "Emotional Stability",
+    "traitName": "Pressure Tolerance",
+    "description": "Ability to remain calm, resilient, emotionally balanced, and handle stress effectively.",
+    "studentQuality": "Playing sports or physical coordination",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Aptitude",
+    "key": "NUMERICAL",
+    "trait": "Numerical Reasoning",
+    "traitName": "Computational Thinking",
+    "description": "Ability to understand numbers, perform calculations, interpret quantitative information, and solve mathematical problems.",
+    "studentQuality": "Solving maths or logic problems quickly",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Aptitude",
+    "key": "VERBAL",
+    "trait": "Verbal Reasoning",
+    "traitName": "Textual Intelligence",
+    "description": "Ability to understand language, interpret written information, analyze meaning, and communicate effectively.",
+    "studentQuality": "Writing clearly (essays, stories, descriptions)",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Aptitude",
+    "key": "LOGICAL",
+    "trait": "Logical Reasoning",
+    "traitName": "Deductive Reasoning",
+    "description": "Ability to identify patterns, apply logic, analyze relationships, and solve reasoning-based problems.",
+    "studentQuality": "Finding patterns and solving puzzles",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Aptitude",
+    "key": "SPATIAL",
+    "trait": "Spatial Reasoning",
+    "traitName": "Visual Thinking",
+    "description": "Ability to visualize objects, understand shapes, directions, dimensions, and mentally manipulate spatial information.",
+    "studentQuality": "Visualising shapes, maps, or objects in different positions",
+    "studentFriendlyExplanation": null
+  },
+  {
+    "layer": "Cognitive & Decision",
+    "key": "LEARNING_VELOCITY",
+    "trait": "Learning Velocity",
+    "traitName": "Knowledge Agility",
+    "description": "Ability and willingness to learn new skills, adapt quickly, and absorb new concepts efficiently.",
+    "studentQuality": "Using computers, gadgets or digital tools",
+    "studentFriendlyExplanation": "You naturally pick up new skills and ideas quickly, and you're comfortable adapting when things change. This makes you well suited to fields that keep evolving, where staying curious and continuing to learn is just as important as what you already know."
+  },
+  {
+    "layer": "Cognitive & Decision",
+    "key": "UNCERTAINTY_TOLERANCE",
+    "trait": "Uncertainty Tolerance",
+    "traitName": "Risk Openness",
+    "description": "Comfort level in dealing with ambiguity, change, risk, and situations with uncertain outcomes.",
+    "studentQuality": "Being comfortable trying something new even when success is uncertain",
+    "studentFriendlyExplanation": "You're comfortable moving forward even when the outcome isn't fully certain, and you don't need every detail worked out before you act. This is a real strength in situations that involve change, new ventures, or decisions where there's no clear right answer yet."
+  },
+  {
+    "layer": "Cognitive & Decision",
+    "key": "AUTONOMY_PREFERENCE",
+    "trait": "Autonomy Preference",
+    "traitName": "Self-Direction Drive",
+    "description": "Preference for independent decision-making, self-direction, ownership, and working with minimal supervision.",
+    "studentQuality": "Taking initiative without being told what to do",
+    "studentFriendlyExplanation": "You prefer figuring things out and taking ownership yourself, rather than needing constant guidance or supervision. This suits roles where you're trusted to make your own calls and drive things forward independently."
+  }
+]

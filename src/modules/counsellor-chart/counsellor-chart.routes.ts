@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
-import { requireStaff, requireStudentOrStaff } from "../../common/middlewares/auth.js";
+import { requireStaff, requireStudentOrStaff, requireSuperAdmin } from "../../common/middlewares/auth.js";
 import { ownStudentParam } from "../../common/middlewares/ownership.js";
 import * as controller from "./counsellor-chart.controller.js";
 import {
@@ -13,6 +13,14 @@ import {
 } from "./counsellor-chart.schema.js";
 
 export const counsellorChartRouter = Router();
+
+// Super Admin review queue: every free-text ("Manual Entry") row a counsellor has added
+// across all 6 Career Direction tables, across all students. Flat list, no pagination.
+counsellorChartRouter.get(
+  "/manual-entries",
+  ...requireSuperAdmin,
+  asyncHandler(controller.listManualEntries)
+);
 
 // Assemble the full chart for a student (profile + both pre-counselling questionnaires
 // side-by-side + assessment result + flagged mirror pairs + saved counsellor content).
