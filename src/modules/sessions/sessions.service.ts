@@ -6,6 +6,7 @@ import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { advanceWorkflowStatus, WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
 import { formatDisplayDate } from "../../common/utils/dateFormat.js";
 import { sendTemplateEmail } from "../email/email.service.js";
+import { buildFormLink } from "../../common/utils/links.js";
 import type {
   AddSlotsBody,
   BookSessionsBody,
@@ -713,6 +714,18 @@ export async function completeSession(id: string) {
     await advanceWorkflowStatus(tx, session.studentId, target);
     return result;
   });
+
+  // Sessions are now done — kick off the parent's feedback form. The student's own
+  // feedback prompt is a frontend-side nudge once logged in; the parent has no login, so
+  // this email is their only way to the form (mirrors buildFormLink's use elsewhere).
+  if (target === "SESSION_2_COMPLETED" && updated.student.parentEmail) {
+    sendEmailBestEffort(updated.student.parentEmail, "FEEDBACK_REQUEST_PARENT", {
+      parentName: "Parent",
+      studentName: `${updated.student.user.firstName} ${updated.student.user.lastName}`,
+      feedbackFormLink: buildFormLink("FEEDBACK_PARENT", updated.student.id),
+    });
+  }
+
   return withWhatsappFallback(updated);
 }
 

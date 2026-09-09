@@ -4,6 +4,7 @@ import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { assertLiveDomain } from "../career-taxonomy/career-taxonomy.service.js";
+import { WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
 import type {
   CourseLinkItem,
   CreateCareerEntryInput,
@@ -905,37 +906,69 @@ async function hydrateProposal<
     courseIds: string[];
     institutionIds: string[];
     educationEntryIds: string[];
+    studentId: string | null;
+    projectId: string | null;
+    submittedBy: string;
   },
 >(proposal: T) {
-  const [domain, linkedEntranceExams, linkedCourses, linkedInstitutions, linkedEducationEntries] = await Promise.all([
-    prisma.careerDomain.findUnique({ where: { id: proposal.domainId }, select: domainChainSelect }),
-    proposal.examIds.length
-      ? prisma.entranceExam.findMany({ where: { id: { in: proposal.examIds } }, select: entranceExamDetailSelect })
-      : Promise.resolve([]),
-    proposal.courseIds.length
-      ? prisma.course.findMany({ where: { id: { in: proposal.courseIds } }, select: courseDetailSelect })
-      : Promise.resolve([]),
-    proposal.institutionIds.length
-      ? prisma.institution.findMany({ where: { id: { in: proposal.institutionIds } }, select: institutionDetailSelect })
-      : Promise.resolve([]),
-    proposal.educationEntryIds.length
-      ? prisma.educationEntry.findMany({
-          where: { id: { in: proposal.educationEntryIds } },
-          select: { id: true, level: true, programme: true, description: true, status: true },
-        })
-      : Promise.resolve([]),
-  ]);
-  return { ...proposal, domain, linkedEntranceExams, linkedCourses, linkedInstitutions, linkedEducationEntries };
+  const [domain, linkedEntranceExams, linkedCourses, linkedInstitutions, linkedEducationEntries, project, student, submitter] =
+    await Promise.all([
+      prisma.careerDomain.findUnique({ where: { id: proposal.domainId }, select: domainChainSelect }),
+      proposal.examIds.length
+        ? prisma.entranceExam.findMany({ where: { id: { in: proposal.examIds } }, select: entranceExamDetailSelect })
+        : Promise.resolve([]),
+      proposal.courseIds.length
+        ? prisma.course.findMany({ where: { id: { in: proposal.courseIds } }, select: courseDetailSelect })
+        : Promise.resolve([]),
+      proposal.institutionIds.length
+        ? prisma.institution.findMany({ where: { id: { in: proposal.institutionIds } }, select: institutionDetailSelect })
+        : Promise.resolve([]),
+      proposal.educationEntryIds.length
+        ? prisma.educationEntry.findMany({
+            where: { id: { in: proposal.educationEntryIds } },
+            select: { id: true, level: true, programme: true, description: true, status: true },
+          })
+        : Promise.resolve([]),
+      proposal.projectId
+        ? prisma.project.findUnique({ where: { id: proposal.projectId }, select: { name: true } })
+        : Promise.resolve(null),
+      proposal.studentId
+        ? prisma.student.findUnique({ where: { id: proposal.studentId }, select: { workflowStatus: true } })
+        : Promise.resolve(null),
+      prisma.user.findUnique({ where: { id: proposal.submittedBy }, select: { firstName: true, lastName: true } }),
+    ]);
+  return {
+    ...proposal,
+    domain,
+    linkedEntranceExams,
+    linkedCourses,
+    linkedInstitutions,
+    linkedEducationEntries,
+    projectName: project?.name ?? null,
+    submittedByName: submitter ? `${submitter.firstName} ${submitter.lastName}` : null,
+    // Null when there's no associated student (proposal created outside the counsellor-chart
+    // flow) — nothing to gate on, see the isAdmin filter in listCareerEntryProposals.
+    session2Completed: proposal.studentId
+      ? WORKFLOW_STATUS_ORDER.indexOf(student!.workflowStatus) >= WORKFLOW_STATUS_ORDER.indexOf("SESSION_2_COMPLETED")
+      : null,
+  };
 }
 
-// Admins see every proposal (the review queue); a counsellor only ever sees their own —
-// same rule whether or not `studentId` narrows it to one chart.
+// Admins see every proposal (the review queue) — but only once the student has finished
+// Session 2 (or the proposal has no associated student at all, e.g. submitted outside the
+// counsellor-chart flow); a proposal for a student still short of that stage never reaches
+// the admin API surface. A counsellor always sees their own submissions regardless of the
+// student's stage, unfiltered — that's how the chart re-lists "job roles I already added
+// here" on a later visit, before Session 2 has happened.
 export async function listCareerEntryProposals(query: ListCareerEntryProposalsQuery, actor: Actor) {
+  const postSession2Statuses = WORKFLOW_STATUS_ORDER.slice(WORKFLOW_STATUS_ORDER.indexOf("SESSION_2_COMPLETED"));
   const where: Prisma.CareerLibraryEntryProposalWhereInput = {
     ...(query.domainId ? { domainId: query.domainId } : {}),
     ...(query.studentId ? { studentId: query.studentId } : {}),
     ...(query.search ? { jobRole: { contains: query.search, mode: "insensitive" } } : {}),
-    ...(isAdmin(actor) ? {} : { submittedBy: actor.userId }),
+    ...(isAdmin(actor)
+      ? { OR: [{ studentId: null }, { student: { workflowStatus: { in: postSession2Statuses } } }] }
+      : { submittedBy: actor.userId }),
   };
   const [total, proposals] = await Promise.all([
     prisma.careerLibraryEntryProposal.count({ where }),
@@ -1054,6 +1087,19 @@ export async function updateCareerEntryProposal(id: string, input: UpdateCareerE
 
 export async function rejectCareerEntryProposal(id: string) {
   await findCareerEntryProposal(id);
+  await prisma.careerLibraryEntryProposal.delete({ where: { id } });
+  return { id, deleted: true };
+}
+
+// The counsellor who submitted a still-pending proposal may withdraw it themselves (e.g.
+// they added it to the wrong student's chart, or changed their mind before admin review);
+// an admin may delete any of them. Same ownership rule as updateCareerEntryProposal —
+// once approved the row is a real CareerLibraryEntry and this endpoint no longer applies.
+export async function deleteCareerEntryProposal(id: string, actor: Actor) {
+  const current = await findCareerEntryProposal(id);
+  if (!isAdmin(actor) && current.submittedBy !== actor.userId) {
+    throw new ForbiddenError("You can only delete a job role proposal you submitted yourself");
+  }
   await prisma.careerLibraryEntryProposal.delete({ where: { id } });
   return { id, deleted: true };
 }

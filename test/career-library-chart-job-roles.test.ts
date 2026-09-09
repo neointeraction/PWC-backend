@@ -103,6 +103,34 @@ describe("Career Library — job roles added from a Counsellor Chart", () => {
     expect(res.status).toBe(404);
   });
 
+  it("hides a proposal from the admin queue until the student finishes Session 2, then reveals it", async () => {
+    const created = await request(app)
+      .post("/api/v1/career-library")
+      .set("Authorization", counsellorAToken)
+      .send(entryBody({ jobRole: "Test CLChart Role Gated" }));
+
+    // Session 2 not completed yet — an admin's review queue doesn't see it, even though the
+    // submitting counsellor still does (their own submissions are never gated).
+    const beforeAdmin = await authRequest(app).get("/api/v1/career-library/proposals").query({ studentId });
+    expect(beforeAdmin.body.data.some((e: { jobRole: string }) => e.jobRole === "Test CLChart Role Gated")).toBe(
+      false
+    );
+    const beforeMine = await request(app)
+      .get("/api/v1/career-library/proposals")
+      .set("Authorization", counsellorAToken)
+      .query({ studentId });
+    expect(beforeMine.body.data.some((e: { jobRole: string }) => e.jobRole === "Test CLChart Role Gated")).toBe(
+      true
+    );
+
+    await prisma.student.update({ where: { id: studentId }, data: { workflowStatus: "SESSION_2_COMPLETED" } });
+
+    const afterAdmin = await authRequest(app).get("/api/v1/career-library/proposals").query({ studentId });
+    expect(afterAdmin.body.data.some((e: { jobRole: string }) => e.jobRole === "Test CLChart Role Gated")).toBe(
+      true
+    );
+  });
+
   it("lets the chart re-list job roles a counsellor already added there, scoped to their own", async () => {
     await request(app)
       .post("/api/v1/career-library")
@@ -164,7 +192,9 @@ describe("Career Library — job roles added from a Counsellor Chart", () => {
       .set("Authorization", counsellorAToken)
       .send(entryBody({ jobRole: "Test CLChart Role Approve" }));
 
-    const approved = await authRequest(app).post(`/api/v1/career-library/proposals/${created.body.id}/approve`);
+    const approved = await authRequest(app, "SUPER_ADMIN").post(
+      `/api/v1/career-library/proposals/${created.body.id}/approve`
+    );
     expect(approved.status).toBe(200);
     expect(approved.body.studentId).toBe(studentId);
     expect(approved.body.projectId).toBe(projectId);

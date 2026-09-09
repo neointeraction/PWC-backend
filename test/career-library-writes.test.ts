@@ -109,7 +109,7 @@ describe("Career Library writes", () => {
       .send(entryBody({ jobRole: "Test CL Role Approve" }));
     const id = created.body.id;
 
-    const approved = await authRequest(app).post(`/api/v1/career-library/proposals/${id}/approve`);
+    const approved = await authRequest(app, "SUPER_ADMIN").post(`/api/v1/career-library/proposals/${id}/approve`);
     expect(approved.status).toBe(200);
     // Approve creates a brand-new career_library_entries row — different id, status ACTIVE.
     expect(approved.body.id).not.toBe(id);
@@ -121,18 +121,18 @@ describe("Career Library writes", () => {
     expect(list.body.data.some((e: { id: string }) => e.id === approved.body.id)).toBe(true);
 
     // The proposal is gone, so re-approving is a 404, not a stale-queue 409.
-    const again = await authRequest(app).post(`/api/v1/career-library/proposals/${id}/approve`);
+    const again = await authRequest(app, "SUPER_ADMIN").post(`/api/v1/career-library/proposals/${id}/approve`);
     expect(again.status).toBe(404);
   });
 
-  it("deletes a counsellor's job role proposal when an admin rejects it", async () => {
+  it("deletes a counsellor's job role proposal when a super admin rejects it", async () => {
     const created = await request(app)
       .post("/api/v1/career-library")
       .set("Authorization", counsellorToken)
       .send(entryBody({ jobRole: "Test CL Role Reject" }));
     const id = created.body.id;
 
-    const rejected = await authRequest(app).post(`/api/v1/career-library/proposals/${id}/reject`);
+    const rejected = await authRequest(app, "SUPER_ADMIN").post(`/api/v1/career-library/proposals/${id}/reject`);
     expect(rejected.status).toBe(200);
     expect(rejected.body).toEqual({ id, deleted: true });
 
@@ -164,8 +164,57 @@ describe("Career Library writes", () => {
       .post("/api/v1/career-library")
       .send(entryBody({ jobRole: "Test CL Role NotPending" }));
     // The admin's own submission went straight to the real table, so it was never a proposal.
-    const res = await authRequest(app).post(`/api/v1/career-library/proposals/${created.body.id}/approve`);
+    const res = await authRequest(app, "SUPER_ADMIN").post(
+      `/api/v1/career-library/proposals/${created.body.id}/approve`
+    );
     expect(res.status).toBe(404);
+  });
+
+  it("403s a plain admin trying to approve or reject a job role proposal", async () => {
+    const created = await request(app)
+      .post("/api/v1/career-library")
+      .set("Authorization", counsellorToken)
+      .send(entryBody({ jobRole: "Test CL Role AdminApprove" }));
+    const id = created.body.id;
+
+    const approve = await authRequest(app).post(`/api/v1/career-library/proposals/${id}/approve`);
+    expect(approve.status).toBe(403);
+
+    const reject = await authRequest(app).post(`/api/v1/career-library/proposals/${id}/reject`);
+    expect(reject.status).toBe(403);
+  });
+
+  it("204s a counsellor deleting their own pending proposal", async () => {
+    const created = await request(app)
+      .post("/api/v1/career-library")
+      .set("Authorization", counsellorToken)
+      .send(entryBody({ jobRole: "Test CL Role DeleteMine" }));
+    const id = created.body.id;
+
+    const res = await request(app).delete(`/api/v1/career-library/proposals/${id}`).set("Authorization", counsellorToken);
+    expect(res.status).toBe(204);
+    expect(await prisma.careerLibraryEntryProposal.findUnique({ where: { id } })).toBeNull();
+  });
+
+  it("403s a counsellor deleting someone else's pending proposal", async () => {
+    const created = await request(app)
+      .post("/api/v1/career-library")
+      .set("Authorization", counsellorToken)
+      .send(entryBody({ jobRole: "Test CL Role DeleteNotMine" }));
+    const id = created.body.id;
+
+    const otherCounsellor = await authRequest(app).post("/api/v1/counsellors").send({
+      firstName: "Otto",
+      lastName: "Libra",
+      email: "otto@test-careerlib.example",
+      mobile: "+919876574003",
+      counsellorCode: "CLCN2",
+    });
+    const otherToken = bearer("COUNSELLOR", { userId: otherCounsellor.body.counsellor.user.id });
+
+    const res = await request(app).delete(`/api/v1/career-library/proposals/${id}`).set("Authorization", otherToken);
+    expect(res.status).toBe(403);
+    expect(await prisma.careerLibraryEntryProposal.findUnique({ where: { id } })).not.toBeNull();
   });
 
   it("treats qualification10th12th as optional, and lets PATCH clear it", async () => {

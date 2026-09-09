@@ -1,15 +1,15 @@
 // Assessment scoring engine — orchestrator.
 //
 // Pure over a normalized attempt (AnsweredQuestion[] + timing). Produces the full
-// computed report backing the Career kREATE output. What's intentionally NOT here yet
-// (pending client sign-off — see the assessment work notes):
+// computed report backing the Career kREATE output. Everything is fully specified and
+// computed here, with one exception:
 //   - Time Consistency / composite ARI: needs per-question timing. Computed whenever
 //     every aptitude answer carries a timeTakenMs; null (and listed in meta.pending)
 //     otherwise.
-//   - RVS (Response Validity Score): penalty formula ambiguity to confirm
-//   - Career Fit (top-6 careers): industry-vs-domain granularity + a few weight rows
-//     that don't sum to 100
-// Everything else in the report is fully specified and computed here.
+// RVS (Response Validity Score) is implemented in ./rvs.ts — note it deliberately sums
+// mirror-pair penalties rather than averaging them as the construct doc's formula reads
+// literally, since averaging can't reach the doc's own grade bands (confirmed with PWC).
+// Career Fit (top-6 domains + representative careers) is implemented in ./careerFit.ts.
 
 import { scoreAptitude } from "./aptitude.js";
 import { computeAci, type AciResult } from "./aci.js";

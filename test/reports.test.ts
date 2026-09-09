@@ -64,6 +64,13 @@ describe("Reports — student assessment report", () => {
   afterAll(async () => {
     await prisma.user.deleteMany({ where: { email: { contains: "@test-reports.example" } } });
     await prisma.project.deleteMany({ where: { name: "Test Project Reports" } });
+    await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: "Counsellor-Picked Role" } });
+    const industry = await prisma.careerIndustry.findFirst({ where: { name: "Test Reports Industry" } });
+    if (industry) {
+      await prisma.careerDomain.deleteMany({ where: { industryId: industry.id } });
+      await prisma.careerIndustry.deleteMany({ where: { id: industry.id } });
+    }
+    await prisma.careerCluster.deleteMany({ where: { name: "Test Reports Cluster" } });
     await prisma.$disconnect();
   });
 
@@ -85,6 +92,36 @@ describe("Reports — student assessment report", () => {
     expect(b.feedback).toBeTruthy(); // { complete:false, ... } since forms aren't in
     expect(b.meta.cohort).toBe(COHORT);
     expect(b.meta.finalized).toBe(false);
+  });
+
+  it("gives a counsellor-added job role a priority seat in the career compass", async () => {
+    const cluster = await prisma.careerCluster.create({ data: { name: "Test Reports Cluster" } });
+    const industry = await prisma.careerIndustry.create({
+      data: { clusterId: cluster.id, name: "Test Reports Industry" },
+    });
+    const domain = await prisma.careerDomain.create({
+      data: { industryId: industry.id, name: "Test Reports Domain" },
+    });
+    await prisma.careerLibraryEntry.create({
+      data: {
+        domainId: domain.id,
+        jobRole: "Counsellor-Picked Role",
+        aiResilienceGrade: "HIGH",
+        aiResilienceComment: "Resilient because reasons",
+        oneLineDescription: "Does a counsellor-chosen thing",
+        status: "ACTIVE",
+        createdBy: "test-seed",
+        studentId: studentAId,
+      },
+    });
+
+    const res = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
+    expect(res.status).toBe(200);
+    const top6 = res.body.careerCompass.top6Domains as { addedByCounsellor: boolean; representativeCareer: { jobRole: string } }[];
+    expect(top6.length).toBeLessThanOrEqual(6);
+    expect(top6[0].addedByCounsellor).toBe(true);
+    expect(top6[0].representativeCareer.jobRole).toBe("Counsellor-Picked Role");
+    expect(top6.filter((c) => c.addedByCounsellor).length).toBe(1);
   });
 
   it("404s when the student has no assessment result yet", async () => {

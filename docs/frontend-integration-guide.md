@@ -1004,6 +1004,19 @@ report backing the Career kREATE output:
 }
 ```
 
+**Career Compass and counsellor-added job roles.** The report's `careerCompass` field
+(`GET /reports/students/:id/assessment`) is not simply `report.careerFit` — the service
+layer overlays any job role a counsellor has added to this student's Counsellor Chart
+(a `CareerLibraryEntry` with `studentId` set, `status:ACTIVE`, added via the career-library
+counsellor-chart integration). Those roles always take a seat in `top6Domains`, ahead of
+the assessment's computed fits, each flagged `addedByCounsellor:true`; a computed fit is
+bumped to make room (lowest-priority first) and dropped entirely if it shares the
+counsellor role's industry, so the card count stays at 6 (or fewer, same as the unmodified
+computed list). A counsellor-added card carries `fitScore:null` and
+`level:"Counsellor Recommended"` instead of a computed Fit Score/level, since it wasn't
+algorithmically scored. Every other computed card is unaffected and keeps
+`addedByCounsellor:false`.
+
 **What's live.** Everything the report needs is computed: trait scores + grades, DCS,
 DPS, Stream Fit, **Graduation Pathways**, **Career Fit** (top-6 domains each with a
 `representativeCareer`, plus a top-3 industry rollup for the "Industry Choice" table),
@@ -1271,17 +1284,33 @@ in the same table as published ones, it's a wholly separate object.
      `search?, domainId?, page?, pageSize?`. Each row is hydrated with `domain` and
      `linkedEntranceExams`/`linkedCourses`/`linkedInstitutions`/`linkedEducationEntries`
      resolved from the ids the counsellor picked (see the normalized-links section above),
-     plus `submittedBy`. `GET /api/v1/career-library/proposals/{id}` fetches one the same way.
-   - `POST /api/v1/career-library/proposals/{id}/approve` (**Admin**) — copies it into a
-     **new** `career_library_entries` row (a fresh id, not the proposal's id) with
+     plus `submittedBy` (the counsellor's user id — a raw id, not a display name),
+     `submittedByName` (resolved `"First Last"` string, server-side, so the review queue can
+     show the counsellor's name without a separate lookup), `projectName` (resolved from
+     `Student.projectId`, `null` if there's no `studentId`), and `session2Completed`
+     (`null` if there's no `studentId`). `studentId`/`projectId` are plain columns already
+     on the row, no lookup needed.
+     **For an admin/super-admin caller, this list is gated by Session 2 completion**: a
+     proposal tied to a student whose `workflowStatus` hasn't reached `SESSION_2_COMPLETED`
+     yet is excluded entirely — it never shows up in the Super Admin's queue until Session 2
+     is done. A proposal with no `studentId` is never gated. A counsellor's own view
+     (self-scoped by `submittedBy`) is never gated, so their chart keeps re-listing pending
+     submissions regardless. `GET /api/v1/career-library/proposals/{id}` fetches one the
+     same way, ungated (fetching by id is a direct lookup, not the review-queue list).
+   - `DELETE /api/v1/career-library/proposals/{id}` (**Staff**) — withdraw a still-pending
+     proposal. The counsellor who submitted it may delete their own; an admin may delete any
+     of them. 403 for any other counsellor. Returns 204.
+   - `POST /api/v1/career-library/proposals/{id}/approve` (**Super Admin** — one level up from
+     a regular Admin, who may still add entries straight to the library themselves) — copies
+     it into a **new** `career_library_entries` row (a fresh id, not the proposal's id) with
      `status: "ACTIVE"`, adds its picked courses/institutions to the shared cluster/industry
      list (per §9.5's callout), and deletes the proposal. Returns the newly created entry.
-   - `POST /api/v1/career-library/proposals/{id}/reject` (**Admin**, no body) — **deletes the
-     proposal**. Returns `{ id, deleted: true }`. Nothing is retained, so build the UI as a
-     confirm-then-delete, not an "undo later".
+   - `POST /api/v1/career-library/proposals/{id}/reject` (**Super Admin**, no body) —
+     **deletes the proposal**. Returns `{ id, deleted: true }`. Nothing is retained, so build
+     the UI as a confirm-then-delete, not an "undo later".
 
-   Both 404 if the id isn't a live proposal — either already decided, or it was never a
-   proposal (e.g. you passed an admin-created entry's id by mistake).
+   Both approve/reject 404 if the id isn't a live proposal — either already decided, or it was
+   never a proposal (e.g. you passed an admin-created entry's id by mistake).
 
 ### Adding a job role from a Counsellor Chart
 
@@ -1543,7 +1572,11 @@ after the session.
 
 `POST /sessions/{id}/complete` — the "Session Completed?" confirmation button
 mentioned in the flow. No body. Sets `status: COMPLETED` and advances the student's
-`workflowStatus` (`SESSION_1_COMPLETED` / `SESSION_2_COMPLETED` — see §6.1).
+`workflowStatus` (`SESSION_1_COMPLETED` / `SESSION_2_COMPLETED` — see §6.1). Completing
+**Session 2** also best-effort emails `parentEmail` (`FEEDBACK_REQUEST_PARENT`) with a
+link straight into their `FEEDBACK_PARENT` form (§7's `buildFormLink` pattern) — parents
+have no login, so this is their only route in. There's no equivalent auto-email to the
+student; they see the pending feedback form once logged in.
 
 ### 10.10 Reschedule / cancel
 
@@ -1707,14 +1740,25 @@ before building UI that depends on any of them:
   reliability, counsellorNarrative, feedback, meta) for the frontend to render/print.
   **PDF rendering is client-side by decision** — the backend will not add a render
   endpoint, so own the print/PDF view on your side. The **parent / institution summary**
-  variants aren't built (student report only). Counsellor Chart is built too — `GET`/`PUT
-  /api/v1/counsellor-chart/students/{id}` assemble the chart and save notes/SCRI/ratings
-  (plus the roadmap grid, career DNA narrative, and why-this-stream text — free-text
-  pass-throughs, see `docs/api-list.md`). `entranceExamsTable`/`collegesTable` are on the
+  variants aren't built (student report only). Counsellor Chart is built too — `PUT
+  /api/v1/counsellor-chart/students/{id}` saves notes/SCRI/ratings (plus the roadmap grid,
+  career DNA narrative, and why-this-stream text — free-text pass-throughs, see
+  `docs/api-list.md`); `GET` assembles the same chart and is now **student-or-staff,
+  ownership-guarded** rather than staff-only, so a student's own Ikigai/report page can
+  call it directly (e.g. for `counsellor.notes`) instead of getting a silent 403.
+  `entranceExamsTable`/`collegesTable` are on the
   GET response too, but computed like `graduationPathways` (derived from
   `assessment.careerFit.top3Industries`, not saved via the PUT), and
   `POST`/`DELETE …/mirror-pair-amendments` let the counsellor amend a flagged answer,
-  which re-runs the full scoring engine, plus `POST …/finalize` to close the chart.
+  which re-runs the full scoring engine, plus `POST …/finalize` to close the chart. There's
+  now also `POST /api/v1/counsellor-chart/students/{id}/accept` — **student-or-staff**,
+  ownership-guarded, stamps `acceptedAt` on the chart (returned as `counsellor.acceptedAt`
+  alongside `counsellor.finalizedAt`). It's separate from `finalizedAt` (the counsellor's
+  own "I'm done" stamp) — `accept` is the student's acknowledgement. 400 if the chart hasn't
+  been finalized yet; idempotent otherwise. It does **not** move `workflowStatus` — that's
+  driven only by the triggers below, and it no longer gates anything on the career-library
+  side (that gate moved to Session 2 completion — see `session2Completed` / the gating note
+  on `GET /career-library/proposals` above).
   **All 12 `workflowStatus` stages now advance on their own** — see the trigger table in
   `docs/api-list.md`. The tail: a chart save with real content →
   `COUNSELLOR_FEEDBACK_REPORT`, chart finalize → `COUNSELLOR_FEEDBACK`, both feedback

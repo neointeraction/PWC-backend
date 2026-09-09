@@ -44,6 +44,7 @@ function shapeCounsellorInputs(chart: ChartWithNotes) {
     whyThisStream: chart.whyThisStream,
     lastEditedBy: chart.lastEditedBy,
     finalizedAt: chart.finalizedAt,
+    acceptedAt: chart.acceptedAt,
     updatedAt: chart.updatedAt,
   };
 }
@@ -177,6 +178,28 @@ export async function finalizeCounsellorChart(studentId: string, finalizedBy?: s
   }
 
   await advanceWorkflowStatus(prisma, studentId, "COUNSELLOR_FEEDBACK");
+
+  return getCounsellorChart(studentId);
+}
+
+// Accept: the student acknowledges the finalized chart. Stamps `acceptedAt`, which is what
+// gates this chart's career-library job-role proposals into the Super Admin's pending queue
+// (see listCareerEntryProposals). Idempotent — re-accepting keeps the original timestamp.
+// Deliberately doesn't touch the workflow status; that's driven by the feedback forms, not
+// chart acceptance.
+export async function acceptCounsellorChart(studentId: string) {
+  const chart = await loadOrCreateChart(studentId);
+
+  if (!chart.finalizedAt) {
+    throw new BadRequestError("Cannot accept a chart the counsellor hasn't finalized yet");
+  }
+
+  if (!chart.acceptedAt) {
+    await prisma.counsellorChart.update({
+      where: { studentId },
+      data: { acceptedAt: new Date() },
+    });
+  }
 
   return getCounsellorChart(studentId);
 }

@@ -91,6 +91,12 @@ export async function rejectCareerEntryProposal(req: Request, res: Response): Pr
   res.status(200).json(await careerLibraryService.rejectCareerEntryProposal(id));
 }
 
+export async function deleteCareerEntryProposal(req: Request, res: Response): Promise<void> {
+  const { id } = req.params as unknown as CareerLibraryIdParams;
+  await careerLibraryService.deleteCareerEntryProposal(id, actorOf(req));
+  res.status(204).send();
+}
+
 // --- Dropdown / typeahead lookups ---
 
 export async function listEntranceExams(req: Request, res: Response): Promise<void> {

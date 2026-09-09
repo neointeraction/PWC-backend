@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
-import { requireAuth, requireStaff, requireAdmin } from "../../common/middlewares/auth.js";
+import { requireAuth, requireStaff, requireAdmin, requireSuperAdmin } from "../../common/middlewares/auth.js";
 import * as careerLibraryController from "./career-library.controller.js";
 import {
   careerLibraryIdParamsSchema,
@@ -131,15 +131,27 @@ careerLibraryRouter.patch(
   validate({ params: careerLibraryIdParamsSchema, body: updateCareerEntryProposalSchema }),
   asyncHandler(careerLibraryController.updateCareerEntryProposal)
 );
+// The counsellor who submitted a still-pending proposal may withdraw it themselves before
+// review; requireStaff lets the request through and the service enforces ownership (or
+// Super Admin) — same pattern as the PATCH above.
+careerLibraryRouter.delete(
+  "/proposals/:id",
+  ...requireStaff,
+  validate({ params: careerLibraryIdParamsSchema }),
+  asyncHandler(careerLibraryController.deleteCareerEntryProposal)
+);
+// Review is Super Admin only, not just any Admin — a regular Admin can add job roles
+// straight to the library themselves, but deciding on a counsellor's proposed role is
+// reserved one level up.
 careerLibraryRouter.post(
   "/proposals/:id/approve",
-  ...requireAdmin,
+  ...requireSuperAdmin,
   validate({ params: careerLibraryIdParamsSchema }),
   asyncHandler(careerLibraryController.approveCareerEntryProposal)
 );
 careerLibraryRouter.post(
   "/proposals/:id/reject",
-  ...requireAdmin,
+  ...requireSuperAdmin,
   validate({ params: careerLibraryIdParamsSchema }),
   asyncHandler(careerLibraryController.rejectCareerEntryProposal)
 );

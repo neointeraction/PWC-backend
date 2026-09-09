@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
-import { requireStaff } from "../../common/middlewares/auth.js";
+import { requireStaff, requireStudentOrStaff } from "../../common/middlewares/auth.js";
+import { ownStudentParam } from "../../common/middlewares/ownership.js";
 import * as controller from "./counsellor-chart.controller.js";
 import {
   amendmentBodySchema,
@@ -15,10 +16,15 @@ export const counsellorChartRouter = Router();
 
 // Assemble the full chart for a student (profile + both pre-counselling questionnaires
 // side-by-side + assessment result + flagged mirror pairs + saved counsellor content).
-// Lazily creates an empty chart row if none exists.
+// Lazily creates an empty chart row if none exists. Staff can read any student's chart;
+// a student can only read their own (ownStudentParam) — it's all their own data (their
+// profile, their assessment, their own flagged answer pairs, their counsellor's notes),
+// already returned to them in full by POST /accept, so this just makes the same read
+// available before acceptance too.
 counsellorChartRouter.get(
   "/students/:studentId",
-  ...requireStaff,
+  ...requireStudentOrStaff,
+  ownStudentParam,
   validate({ params: studentIdParamsSchema }),
   asyncHandler(controller.getCounsellorChart)
 );
@@ -39,6 +45,18 @@ counsellorChartRouter.post(
   ...requireStaff,
   validate({ params: studentIdParamsSchema, body: finalizeCounsellorChartBodySchema }),
   asyncHandler(controller.finalizeCounsellorChart)
+);
+
+// Student accept: the logged-in student acknowledges their own finalized chart. Stamps
+// `acceptedAt`, which gates this chart's career-library job-role proposals into the Super
+// Admin's pending queue. Staff may also call it (ownership check bypasses for staff roles,
+// same as every other student self-service endpoint). 400 if the chart isn't finalized yet.
+counsellorChartRouter.post(
+  "/students/:studentId/accept",
+  ...requireStudentOrStaff,
+  ownStudentParam,
+  validate({ params: studentIdParamsSchema }),
+  asyncHandler(controller.acceptCounsellorChart)
 );
 
 // Amend a flagged mirror-pair answer — overrides the student's response (original kept)

@@ -1,5 +1,5 @@
 import request from "supertest";
-import { authRequest } from "./helpers/http.js";
+import { authRequest, bearer } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
@@ -211,5 +211,25 @@ describe("Counsellor Chart API", () => {
       .post(`/api/v1/counsellor-chart/students/${studentId}/mirror-pair-amendments`)
       .send({ questionCode: "Q1", amendedOption: 2 });
     expect(res.status).toBe(400);
+  });
+
+  it("lets the student read their own chart (incl. saved counsellor notes)", async () => {
+    const row = await prisma.student.findUnique({ where: { id: studentId }, select: { userId: true } });
+    const studentToken = bearer("STUDENT", { userId: row!.userId });
+
+    const res = await request(app)
+      .get(`/api/v1/counsellor-chart/students/${studentId}`)
+      .set("Authorization", studentToken);
+    expect(res.status).toBe(200);
+    expect(res.body.ourChampion.name).toBe("Meera Nair");
+    expect(res.body.counsellor.notes).toHaveProperty("A1"); // saved by an earlier PUT above
+  });
+
+  it("403s a student trying to read another student's chart", async () => {
+    const otherToken = bearer("STUDENT", { userId: "some-other-user-id" });
+    const res = await request(app)
+      .get(`/api/v1/counsellor-chart/students/${studentId}`)
+      .set("Authorization", otherToken);
+    expect(res.status).toBe(403);
   });
 });

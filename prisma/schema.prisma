@@ -1141,6 +1141,12 @@ model CounsellorChart {
   // student's workflow to COUNSELLOR_FEEDBACK. Idempotent — re-finalizing keeps this
   // original timestamp.
   finalizedAt  DateTime?
+  // Set by POST /counsellor-chart/students/:id/accept, called by the student once they've
+  // seen the finalized chart. Distinct from `finalizedAt` (the counsellor's "I'm done" stamp)
+  // — this is the student's own acknowledgement, and it's what gates a chart's job-role
+  // proposals into the Super Admin's pending queue (see CareerLibraryEntryProposal /
+  // listCareerEntryProposals). Idempotent — re-accepting keeps the original timestamp.
+  acceptedAt   DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

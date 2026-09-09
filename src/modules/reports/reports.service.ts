@@ -2,7 +2,93 @@ import { prisma } from "../../config/prisma.js";
 import { NotFoundError } from "../../common/errors/AppError.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import type { AssessmentReport } from "../assessment/scoring/index.js";
+import type { CareerFitResult, DomainFit } from "../assessment/scoring/careerFit.js";
+import { aiResilienceRank } from "../assessment/scoring/careerFit.js";
 import { getStudentFeedbackScore } from "../feedback/feedback.service.js";
+
+// A counsellor-added job role reads exactly like a computed one on the report, plus a
+// flag the frontend uses to badge/explain it — see mergeCounsellorJobRoles below.
+type CareerCompassCard = DomainFit & { addedByCounsellor: boolean };
+
+// Job roles a counsellor attached to this specific student's chart (Career Library entries
+// scoped by `studentId`) always win a seat on the Career Compass, ahead of the assessment's
+// computed fits — they're the counsellor's professional judgement about this individual
+// student, not a generic algorithmic match. We keep the card count at 6: each counsellor
+// role bumps the lowest-priority computed fit rather than stacking on top of it, and (to
+// avoid two cards for the same industry) a computed fit is dropped if a counsellor role
+// already covers that industry.
+async function loadCounsellorJobRoleCards(studentId: string): Promise<CareerCompassCard[]> {
+  const entries = await prisma.careerLibraryEntry.findMany({
+    where: { studentId, status: "ACTIVE" },
+    orderBy: { createdAt: "asc" },
+    select: {
+      jobRole: true,
+      aiResilienceGrade: true,
+      aiResilienceComment: true,
+      oneLineDescription: true,
+      topCompanies: true,
+      salaryIndiaRangeText: true,
+      salaryGlobalRangeText: true,
+      domain: {
+        select: { name: true, industry: { select: { name: true, cluster: { select: { name: true } } } } },
+      },
+    },
+  });
+
+  return entries.map((entry) => {
+    const cluster = entry.domain.industry.cluster.name;
+    const industry = entry.domain.industry.name;
+    const domain = entry.domain.name;
+    return {
+      cluster,
+      industry,
+      domain,
+      fitScore: null as unknown as number, // not algorithmically scored — counsellor-selected
+      level: "Counsellor Recommended",
+      meaning: "Added to this student's Counsellor Chart by their counsellor.",
+      bestAiResilienceRank: aiResilienceRank(entry.aiResilienceGrade),
+      addedByCounsellor: true,
+      representativeCareer: {
+        jobRole: entry.jobRole,
+        cluster,
+        industry,
+        domain,
+        aiResilienceGrade: entry.aiResilienceGrade,
+        aiResilienceComment: entry.aiResilienceComment,
+        oneLineDescription: entry.oneLineDescription,
+        topCompanies: entry.topCompanies,
+        salaryIndiaRangeText: entry.salaryIndiaRangeText,
+        salaryGlobalRangeText: entry.salaryGlobalRangeText,
+      },
+    };
+  });
+}
+
+// Merges counsellor-added job roles into the computed Career Fit's top-6, giving them
+// priority: they lead the list, and computed fits fill the remaining seats (best fit
+// first), capped at 6 total.
+function mergeCounsellorJobRoles(
+  careerFit: CareerFitResult | null,
+  counsellorCards: CareerCompassCard[]
+): (CareerFitResult & { top6Domains: CareerCompassCard[] }) | null {
+  const counsellorIndustries = new Set(counsellorCards.map((c) => c.industry));
+  const computed: CareerCompassCard[] = (careerFit?.top6Domains ?? [])
+    .filter((d) => !counsellorIndustries.has(d.industry))
+    .map((d) => ({ ...d, addedByCounsellor: false }));
+
+  if (counsellorCards.length === 0) {
+    return careerFit ? { ...careerFit, top6Domains: computed } : null;
+  }
+
+  const remainingSeats = Math.max(0, 6 - counsellorCards.length);
+  const top6Domains: CareerCompassCard[] = [...counsellorCards, ...computed.slice(0, remainingSeats)].slice(0, 6);
+
+  return {
+    rankedDomains: careerFit?.rankedDomains ?? [],
+    top6Domains,
+    top3Industries: careerFit?.top3Industries ?? [],
+  };
+}
 
 // Assembles the full student assessment report as one structured payload — the frontend
 // renders the print/PDF view from this. Pulls together: the computed AssessmentReport
@@ -43,6 +129,9 @@ export async function assembleStudentAssessmentReport(studentId: string) {
 
   // Feedback is a bonus section — never let it break report assembly.
   const feedback = await getStudentFeedbackScore(studentId).catch(() => null);
+
+  const counsellorJobRoleCards = await loadCounsellorJobRoleCards(studentId);
+  const careerCompass = mergeCounsellorJobRoles(report.careerFit, counsellorJobRoleCards);
 
   const counsellorNarrative = chart
     ? {
@@ -93,7 +182,7 @@ export async function assembleStudentAssessmentReport(studentId: string) {
       aptitude: report.aptitude,
       cognitive: report.cognitive,
     },
-    careerCompass: report.careerFit, // top6Domains (+ representative careers) + top3Industries, or null
+    careerCompass, // top6Domains (+ representative careers) + top3Industries, or null — counsellor-added job roles take priority seats
     streamFit: report.streamFit, // { top3, ranked }
     graduationPathways: report.graduationPathways, // { top3, ranked }
     reliability: report.reliability, // { ari, aci, ori, rvs }

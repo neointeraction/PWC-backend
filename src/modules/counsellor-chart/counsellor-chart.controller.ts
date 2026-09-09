@@ -29,6 +29,12 @@ export async function finalizeCounsellorChart(req: Request, res: Response): Prom
   res.status(200).json(chart);
 }
 
+export async function acceptCounsellorChart(req: Request, res: Response): Promise<void> {
+  const { studentId } = req.params as unknown as StudentIdParams;
+  const chart = await service.acceptCounsellorChart(studentId);
+  res.status(200).json(chart);
+}
+
 export async function applyMirrorPairAmendment(req: Request, res: Response): Promise<void> {
   const { studentId } = req.params as unknown as StudentIdParams;
   const { questionCode, amendedOption, counsellorId } = req.body as AmendmentBody;

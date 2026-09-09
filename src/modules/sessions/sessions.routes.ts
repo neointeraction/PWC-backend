@@ -72,10 +72,16 @@ sessionsRouter.get(
   asyncHandler(sessionsController.getCounsellorMyStudents)
 );
 
-// Manual creation = admin; oversight lists/detail = staff
+// Manual creation = admin; oversight list = staff; detail = staff, or the session's own student
 sessionsRouter.post("/", ...requireAdmin, validate({ body: createSessionBodySchema }), asyncHandler(sessionsController.createSession));
 sessionsRouter.get("/", ...requireStaff, validate({ query: listSessionsQuerySchema }), asyncHandler(sessionsController.listSessions));
-sessionsRouter.get("/:id", ...requireStaff, validate({ params: sessionIdParamsSchema }), asyncHandler(sessionsController.getSession));
+sessionsRouter.get(
+  "/:id",
+  ...requireStudentOrStaff,
+  validate({ params: sessionIdParamsSchema }),
+  ownSessionParam,
+  asyncHandler(sessionsController.getSession)
+);
 
 // Join / complete / notes. Join is student- or staff-initiated; the rest are
 // counsellor/admin actions. No per-session meeting-link route — a session's link is
