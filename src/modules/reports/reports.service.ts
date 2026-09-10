@@ -1,5 +1,5 @@
 import { prisma } from "../../config/prisma.js";
-import { NotFoundError } from "../../common/errors/AppError.js";
+import { BadRequestError, NotFoundError } from "../../common/errors/AppError.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import type { AssessmentReport } from "../assessment/scoring/index.js";
 import type { CareerFitResult, DomainFit } from "../assessment/scoring/careerFit.js";
@@ -200,6 +200,12 @@ export async function assembleStudentAssessmentReport(studentId: string) {
     reliability: report.reliability, // { ari, aci, ori, rvs }
     counsellorNarrative,
     feedback,
+    // Student/parent's acknowledgement of the finalized report. Backed by the same
+    // CounsellorChart.acceptedAt stamp as POST /counsellor-chart/students/:id/accept —
+    // "accepting the report" and "accepting the chart" are the same student action, so
+    // this reuses that field rather than tracking a second acceptance record.
+    accepted: Boolean(chart?.acceptedAt),
+    acceptedAt: chart?.acceptedAt?.toISOString() ?? null,
     meta: {
       generatedAt: new Date().toISOString(),
       cohort: result.attempt.cohort,
@@ -210,6 +216,49 @@ export async function assembleStudentAssessmentReport(studentId: string) {
       pending: report.meta?.pending ?? [],
     },
   };
+}
+
+// The student/parent accepts the finalized report — the counsellor's signal that the
+// student has actually seen and confirmed it. Reuses CounsellorChart.acceptedAt (the same
+// field POST /counsellor-chart/students/:id/accept stamps) rather than a separate
+// acceptance record: from the student's side these are the same moment, and finalizedAt/
+// acceptedAt are already forward-only, so a later chart edit doesn't invalidate an earlier
+// acceptance (same idempotent pattern as the rest of the workflow). Idempotent — accepting
+// twice returns the original timestamp.
+export async function acceptStudentReport(studentId: string): Promise<{ acceptedAt: string }> {
+  const student = await prisma.student.findUnique({ where: { id: studentId }, select: { id: true } });
+  if (!student) {
+    throw new NotFoundError("Student not found");
+  }
+
+  const result = await prisma.assessmentResult.findFirst({
+    where: { attempt: { studentId } },
+    select: { id: true },
+  });
+  if (!result) {
+    throw new NotFoundError(
+      "No assessment result available — the student hasn't completed the assessment yet"
+    );
+  }
+
+  const chart = await prisma.counsellorChart.findUnique({
+    where: { studentId },
+    select: { finalizedAt: true, acceptedAt: true },
+  });
+  if (!chart?.finalizedAt) {
+    throw new BadRequestError("Cannot accept a report the counsellor hasn't finalized yet");
+  }
+
+  if (chart.acceptedAt) {
+    return { acceptedAt: chart.acceptedAt.toISOString() };
+  }
+
+  const updated = await prisma.counsellorChart.update({
+    where: { studentId },
+    data: { acceptedAt: new Date() },
+    select: { acceptedAt: true },
+  });
+  return { acceptedAt: updated.acceptedAt!.toISOString() };
 }
 
 // The student receiving their own report is the last step of the case, so it closes it.

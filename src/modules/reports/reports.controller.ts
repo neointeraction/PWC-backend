@@ -12,3 +12,9 @@ export async function getStudentAssessmentReport(req: Request, res: Response): P
   }
   res.status(200).json(report);
 }
+
+export async function acceptStudentReport(req: Request, res: Response): Promise<void> {
+  const { studentId } = req.params as unknown as ReportStudentParams;
+  const result = await reportsService.acceptStudentReport(studentId);
+  res.status(200).json(result);
+}

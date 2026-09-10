@@ -1,16 +1,14 @@
-## Pending items
 
-The tracked list now lives in `docs/pending-items.md` — it has the evidence (file:line),
-what "done" looks like for each item, and what's already landed. Short version of what's
-still open:
+DATABASE_URL="postgresql://neondb_owner:npg_XOwP91dpARVe@ep-late-haze-ayzzdovb-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require" npx prisma migrate deploy
 
-- Server-side PDF rendering, parent/institution report variants, and the unused `Report`
-  model. Blocked on a rendering/storage decision.
-- Deliberate deferrals: no canonical-lookup-row edit endpoint in Career Library; no
-  `Project`↔`Cohort` link and no `Student.cohort` (the real multi-cohort work); cohort
-  columns stay plain strings with no FKs; the OpenAPI spec stays hand-maintained.
 
-Done since this file was first written: the reminder scheduler (`src/scheduler/`, node-cron
-behind `SCHEDULER_ENABLED`), per-question `timeTakenMs` → composite ARI, and automatic
-advancement for the last four workflow stages (chart save, chart `/finalize`, feedback
-pair, report delivery → `CLOSED`).
+DATABASE_URL="postgresql://neondb_owner:npg_XOwP91dpARVe@ep-late-haze-ayzzdovb-pooler.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require" pnpm db:seed
+
+/opt/homebrew/opt/postgresql@18/bin/pg_dump "postgresql://neondb_owner:npg_XOwP91dpARVe@ep-late-haze-ayzzdovb.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require" -F c -f live_backup_before_wipe.dump
+
+/opt/homebrew/opt/postgresql@18/bin/pg_dump
+
+
+psql "postgresql://neondb_owner:npg_XOwP91dpARVe@ep-late-haze-ayzzdovb.c-5.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require" -c 'DELETE FROM "projects";'
+
+psql "" -c 'DELETE FROM "users" WHERE role = '\''STUDENT'\'';'

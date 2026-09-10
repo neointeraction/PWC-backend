@@ -41,6 +41,11 @@ const sessionInclude = {
       id: true,
       counsellorCode: true,
       meetingLink: true,
+      // Included directly so callers (e.g. the sessions-page student-view modal) don't
+      // need to cross-reference GET /counsellors?projectId, which only lists counsellors
+      // formally assigned to a project — a counsellor with a manually-booked session but
+      // no formal assignment would otherwise be missing from that directory.
+      mobile: true,
       user: { select: { id: true, email: true, firstName: true, lastName: true } },
     },
   },
@@ -207,7 +212,7 @@ export async function listSlots(query: ListSlotsQuery) {
   return prisma.counsellorSlot.findMany({
     where: { projectId: query.projectId, counsellorId: query.counsellorId, status: query.status },
     orderBy: [{ slotDate: "asc" }, { startTime: "asc" }],
-    include: { counsellor: { select: { id: true, counsellorCode: true, user: { select: { firstName: true, lastName: true } } } } },
+    include: { counsellor: { select: { id: true, counsellorCode: true, mobile: true, user: { select: { firstName: true, lastName: true } } } } },
   });
 }
 

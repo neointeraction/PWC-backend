@@ -17,3 +17,15 @@ reportsRouter.get(
   ownStudentParam,
   asyncHandler(reportsController.getStudentAssessmentReport)
 );
+
+// Student/parent accepts the finalized report — signals the counsellor that it's been
+// seen and confirmed. 404 if no assessment result yet, 400 if the chart isn't finalized
+// yet. Idempotent. Backed by the same CounsellorChart.acceptedAt as the counsellor-chart
+// module's own /accept endpoint (see reports.service.ts).
+reportsRouter.post(
+  "/students/:studentId/accept",
+  ...requireStudentOrStaff,
+  validate({ params: reportStudentParamsSchema }),
+  ownStudentParam,
+  asyncHandler(reportsController.acceptStudentReport)
+);

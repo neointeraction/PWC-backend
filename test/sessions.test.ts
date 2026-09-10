@@ -201,6 +201,9 @@ describe("Sessions API", () => {
     expect(res.body.session1.counsellor.id).toBe(res.body.session2.counsellor.id);
     expect(res.body.session1.sessionNumber).toBe("SESSION_1");
     expect(res.body.session2.sessionNumber).toBe("SESSION_2");
+    // Counsellor mobile is nested directly on every session response — no separate
+    // GET /counsellors?projectId cross-reference needed to show contact info.
+    expect(res.body.session1.counsellor.mobile).toBe("+919876570002");
 
     const student = await prisma.student.findUnique({ where: { id: studentId } });
     expect(student?.workflowStatus).toBe("SESSION_SCHEDULED");

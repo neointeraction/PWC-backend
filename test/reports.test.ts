@@ -129,6 +129,39 @@ describe("Reports — student assessment report", () => {
     expect(res.status).toBe(404);
   });
 
+  it("accept: 400 until the chart is finalized, then accepts idempotently and is reflected on the GET", async () => {
+    const before = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
+    expect(before.body.accepted).toBe(false);
+    expect(before.body.acceptedAt).toBeNull();
+
+    const tooEarly = await authRequest(app).post(`/api/v1/reports/students/${studentAId}/accept`);
+    expect(tooEarly.status).toBe(400);
+
+    // Chart needs real content before it can be finalized.
+    await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentAId}`)
+      .send({ strengths: ["Curiosity"] });
+    await authRequest(app).post(`/api/v1/counsellor-chart/students/${studentAId}/finalize`).send({});
+
+    const accept = await authRequest(app).post(`/api/v1/reports/students/${studentAId}/accept`);
+    expect(accept.status).toBe(200);
+    expect(accept.body.acceptedAt).toBeTruthy();
+
+    // Idempotent — re-accepting returns the same timestamp.
+    const again = await authRequest(app).post(`/api/v1/reports/students/${studentAId}/accept`);
+    expect(again.status).toBe(200);
+    expect(again.body.acceptedAt).toBe(accept.body.acceptedAt);
+
+    const after = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
+    expect(after.body.accepted).toBe(true);
+    expect(after.body.acceptedAt).toBe(accept.body.acceptedAt);
+  });
+
+  it("accept: 404 when the student has no assessment result yet", async () => {
+    const res = await authRequest(app).post(`/api/v1/reports/students/${studentBId}/accept`);
+    expect(res.status).toBe(404);
+  });
+
   it("lets a student read their own report, but not another's", async () => {
     const own = await request(app).get(`/api/v1/reports/students/${studentAId}/assessment`).set("Authorization", studentAToken);
     expect(own.status).toBe(200);

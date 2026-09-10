@@ -1472,6 +1472,18 @@ registry.registerPath({
   },
 });
 
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/reports/students/{studentId}/accept",
+  tags: ["Reports"],
+  summary: "Student/parent accepts the finalized report. Idempotent; 400 until the counsellor's chart is finalized. Backed by the same acceptance stamp as POST /counsellor-chart/students/{studentId}/accept.",
+  request: { params: reportStudentParamsSchema },
+  responses: {
+    200: { description: "{ acceptedAt }", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
 // --- Counsellor Chart ---
 
 const chartTag = ["Counsellor Chart"];

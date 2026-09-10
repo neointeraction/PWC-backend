@@ -1768,7 +1768,14 @@ before building UI that depends on any of them:
 - **Reports** — the **student assessment report is built**: `GET
   /api/v1/reports/students/{id}/assessment` returns the whole report as structured JSON
   (student, championProfile, traitMap, careerCompass, streamFit, graduationPathways,
-  reliability, counsellorNarrative, feedback, meta) for the frontend to render/print.
+  reliability, counsellorNarrative, feedback, `accepted`/`acceptedAt`, meta) for the
+  frontend to render/print. `POST /api/v1/reports/students/{id}/accept` — student-or-staff,
+  ownership-guarded — lets the student/parent accept the finalized report; returns
+  `{ acceptedAt }`, 404 if there's no computed result yet, 400 if the chart isn't finalized,
+  idempotent otherwise. It stamps the same `CounsellorChart.acceptedAt` field as `POST
+  /api/v1/counsellor-chart/students/{id}/accept` below — accepting the report and accepting
+  the chart are the same student action from two entry points, so `accepted`/`acceptedAt` on
+  this GET and `counsellor.acceptedAt` on the chart GET always agree.
   **PDF rendering is client-side by decision** — the backend will not add a render
   endpoint, so own the print/PDF view on your side. The **parent / institution summary**
   variants aren't built (student report only). Counsellor Chart is built too — `PUT
