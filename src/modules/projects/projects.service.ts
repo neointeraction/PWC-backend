@@ -322,6 +322,12 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
         defaultPassword: s.tempPassword,
         loginLink: env.APP_WEB_URL,
       });
+      if (s.parentEmail) {
+        sendEmailBestEffort(s.parentEmail, "WELCOME_PARENT", {
+          parentName: s.fatherName || s.motherName || "Parent",
+          studentName: `${s.firstName} ${s.lastName}`,
+        });
+      }
       // No PRE_COUNSELLING_PARENT send here — same as the standalone student-create
       // endpoint, that email only goes out once the student confirms their profile
       // (students.service.ts confirmProfile), not at creation.

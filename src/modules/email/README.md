@@ -74,7 +74,7 @@ with `{ providerMessageId, subject, provider }`.
 
 ## Template reference
 
-### Lifecycle templates (9)
+### Lifecycle templates (8)
 
 Source: `docs/11.Class 910_Communication EMail Templates.pdf` — the kREATE programme's
 own email copy, implemented close to verbatim.
@@ -84,12 +84,11 @@ own email copy, implemented close to verbatim.
 | `WELCOME_STUDENT` | `studentName` | Step 1 — Welcome: Student |
 | `WELCOME_PARENT` | `parentName`, `studentName` | Step 1 — Welcome: Parent |
 | `LOGIN_CREDENTIALS_STUDENT` | `studentName`, `loginId`, `defaultPassword`, `loginLink` | Step 2 — Login Credentials: Student |
-| `LOGIN_CREDENTIALS_PARENT` | `parentName`, `studentName`, `loginId`, `defaultPassword`, `loginLink` | Step 2 — Login Credentials: Parent |
 | `PRE_COUNSELLING_PARENT` | `parentName`, `formLink` | Step 5 — Pre-counselling Form: Parent |
 | `SESSION_DETAILS_PARENT` | `parentName`, `studentName`, `session1Date`, `session1Time`, `session1Link`, `session2Date`, `session2Time`, `session2Link` | Step 9 — Session Details: Parent |
 | `FEEDBACK_REQUEST_PARENT` | `parentName`, `studentName`, `feedbackFormLink` | Step 16 — Feedback Report: Parent |
 | `REPORT_READY_STUDENT` | `studentName`, `reportLink` | Step 17 — kREATE Report: Student |
-| `REPORT_READY_PARENT` | `parentName`, `studentName`, `reportLink` | Step 17 — kREATE Report: Parent |
+| `REPORT_READY_PARENT` | `parentName`, `studentName` | Step 17 — kREATE Report: Parent |
 
 Fields typed as a link (`loginLink`, `formLink`, `session1Link`, `reportLink`, etc.)
 must be a valid URL. All other fields are non-empty strings.

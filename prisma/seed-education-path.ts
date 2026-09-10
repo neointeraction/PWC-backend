@@ -16,28 +16,27 @@
 //                            a recognized board"), but a small controlled vocabulary that
 //                            dedupes to ~26 rows across the whole library, so each one is
 //                            a real, reusable entry rather than free text.
-//   GRADUATE              <- qualificationGraduationDefined, everything before
-//                            ", Recommended focus:", split on "/" and ",". That prefix is
-//                            a genuine degree list ("BTech / BSc / BCA / Statistics").
-//   POST_GRADUATE         <- qualificationPG, only the part after a literal "PG:" marker,
-//                            split on ",". Rows without that marker contribute nothing.
+//   GRADUATE              <- qualificationGraduation, split on "/" and ",". A genuine
+//                            degree list ("BTech / BSc / BCA / Statistics").
+//   POST_GRADUATE         <- qualificationPG, split on ",". Same shape as GRADUATE, one
+//                            level up.
 //   CERTIFICATION_STUDENT <- certificationsStudent[] (already a list)
 //   CERTIFICATION_UG      <- certificationsUG[] (already a list)
 //
+// The workbook's source columns (scripts/export-career-library.py's split_qualification())
+// already separate each combined "<degree list>, Focus Electives: <electives>" cell into
+// the plain qualificationGraduation/qualificationPG (degree list) and the paired
+// qualificationGraduationDefined/qualificationPGDefined (electives) columns — so no marker
+// splitting is needed here, unlike the older 1808-workbook import.
+//
 // DESCRIPTIONS come from the matching explanation column for the level:
 //   CLASS_10_PLUS_2 <- qualification10th12thExplanation
-//   GRADUATE        <- qualificationGraduationDefined
-//   POST_GRADUATE   <- qualificationPGDefined
-// The certification levels have no explanation column, so those entries carry none. Note
-// this is why qualificationPGDefined is read at all: its boilerplate is unusable as a
-// programme NAME but is fine as descriptive prose. A programme is shared by many roles
-// whose explanation text differs, so the first non-empty one wins and the rest are
-// reported as conflicts by --dry-run.
-//
-// Deliberately NOT used: qualificationPGDefined and qualificationGraduation are generated
-// boilerplate sentences ("a relevant Master's / PG programme building on X, or an
-// equivalent specialization aligned with Y"). Splitting those yields fragments, not
-// programmes, so they are skipped rather than mined.
+//   GRADUATE        <- qualificationGraduationDefined (the electives half, e.g. "Focus
+//                       Electives: CS/IT/Maths/Statistics")
+//   POST_GRADUATE   <- qualificationPGDefined (same, PG level)
+// The certification levels have no explanation column, so those entries carry none. A
+// programme is shared by many roles whose explanation text differs, so the first
+// non-empty one wins and the rest are reported as conflicts by --dry-run.
 //
 // The workbook also carries a little junk - a few rows have month names where a
 // qualification should be - which JUNK filters out.
@@ -91,18 +90,17 @@ function splitTopLevel(value: string, separators: RegExp): string[] {
 
 export function graduationProgrammes(value: string | null): string[] {
   // clean() would strip the hedge before the split, so work off the raw text here and
-  // clean each part afterwards.
+  // clean each part afterwards. The source column is already just the degree list (the
+  // "Focus Electives:" half was split off at export time), so no marker-stripping needed.
   const raw = (value ?? "").trim().replace(/\s+/g, " ");
-  const head = raw.split(/,\s*Recommended focus:/i)[0];
-  if (!head || JUNK.test(head)) return [];
-  return splitTopLevel(head, /[/,]/).map(clean).filter(usable);
+  if (!raw || JUNK.test(raw)) return [];
+  return splitTopLevel(raw, /[/,]/).map(clean).filter(usable);
 }
 
 export function postGraduateProgrammes(value: string | null): string[] {
   const raw = (value ?? "").trim().replace(/\s+/g, " ");
-  const marker = raw.match(/\bPG:\s*(.+)$/i);
-  if (!marker?.[1]) return [];
-  return splitTopLevel(marker[1], /,/).map(clean).filter(usable);
+  if (!raw || JUNK.test(raw)) return [];
+  return splitTopLevel(raw, /[/,]/).map(clean).filter(usable);
 }
 
 interface Derived {
@@ -114,6 +112,7 @@ interface Derived {
 export function deriveForEntry(entry: {
   qualification10th12th: string | null;
   qualification10th12thExplanation?: string | null;
+  qualificationGraduation: string | null;
   qualificationGraduationDefined: string | null;
   qualificationPG: string | null;
   qualificationPGDefined?: string | null;
@@ -137,7 +136,7 @@ export function deriveForEntry(entry: {
   const postGraduateDescription = describe(entry.qualificationPGDefined);
 
   push("CLASS_10_PLUS_2", entry.qualification10th12th, class1012Description);
-  for (const p of graduationProgrammes(entry.qualificationGraduationDefined)) {
+  for (const p of graduationProgrammes(entry.qualificationGraduation)) {
     push("GRADUATE", p, graduateDescription);
   }
   for (const p of postGraduateProgrammes(entry.qualificationPG)) {
@@ -164,6 +163,7 @@ export async function seedEducationPath({ dryRun = false } = {}) {
       jobRole: true,
       qualification10th12th: true,
       qualification10th12thExplanation: true,
+      qualificationGraduation: true,
       qualificationGraduationDefined: true,
       qualificationPG: true,
       qualificationPGDefined: true,

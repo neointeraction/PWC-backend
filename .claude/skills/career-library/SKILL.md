@@ -76,16 +76,22 @@ exists **and** the weight row exists for its industry/domain. See the
 ## Re-import from the source workbook
 
 ```bash
-python3 scripts/export-career-library.py   # all tabs of "docs/Career Library_Updated_1808.xlsx" → *.json
+python3 scripts/export-career-library.py   # CL tab (from the 2609 sheet) + reference tabs (from 1808) → *.json
 pnpm db:seed                                # loads the JSON via prisma/seed.ts
 ```
 
-All tabs are exported from `docs/Career Library_Updated_1808.xlsx`. The CL tab carries
-the yellow columns (`roleOverview`, `keySkills`, `qualification10th12thExplanation`, and
-the `*Defined` qualification variants). Note 1808's `UG Institutions_IND` tab dropped two
+The reference tabs (UG/PG institutions, courses, entrance exams) are exported from
+`docs/Career Library_Updated_1808.xlsx`; note its `UG Institutions_IND` tab dropped two
 columns vs. the older 0508 workbook, so `UgInstitution.programmesOfferedAfterClass12` /
-`keyProgrammesOffered` are exported as null. Each exporter's column indices match 1808;
-re-check them if the workbook layout changes again.
+`keyProgrammesOffered` are exported as null. The `CL` tab is exported separately from
+`docs/Career Library_CL_2609.xlsx` (2026-09-10), a CL-only sheet with a narrower 20-column
+layout — no plain (non-"DEFINED") Graduation/PG qualification columns, no UG entrance-exam
+description column, no "Top Courses" column. Each combined
+`"<degree list>, Focus Electives: <electives>"` cell is split at export time
+(`split_qualification()` in the script) into the plain qualification field and its paired
+"Defined" field — see the script's module docstring and `docs/db-design.md`'s
+`CareerLibraryEntry` section for the exact mapping. Each exporter's column indices match
+its current source sheet; re-check them if a workbook layout changes again.
 
 Unlike the assessment reference data (`.ts`), the library is seeded **into the
 database** as JSON, so a re-import needs a re-seed, not just a rebuild.

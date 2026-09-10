@@ -111,6 +111,13 @@ export async function createStudent(input: CreateStudentInput) {
       loginLink: env.APP_WEB_URL,
     });
 
+    if (student.parentEmail) {
+      sendEmailBestEffort(student.parentEmail, "WELCOME_PARENT", {
+        parentName: student.fatherName || student.motherName || "Parent",
+        studentName: `${student.user.firstName} ${student.user.lastName}`,
+      });
+    }
+
     return { student, tempPassword };
   } catch (err) {
     handlePrismaError(err);

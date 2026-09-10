@@ -1,17 +1,25 @@
 #!/usr/bin/env python3
 """
-One-off export: reads the "Career Library" workbook and writes clean JSON per tab into
+One-off export: reads the "Career Library" workbook(s) and writes clean JSON per tab into
 prisma/seed-data/career-library/, for prisma/seed.ts to load.
 
-All tabs are sourced from the latest workbook ("docs/Career Library_Updated_1808.xlsx").
-Versus the earlier 0508 workbook, 1808 added the CL yellow columns (10+2 explanation, the
-"DEFINED" graduation/PG qualifications, role overview, key skills) — shifting CL's column
-order — and dropped two columns from "UG Institutions_IND" ("Programmes Offered After
-Class 12" and "Key Programmes Offered", now unpopulated). The other reference tabs kept
-their layout. The column indices in each exporter below match the 1808 workbook.
+The reference tabs (UG/PG institutions, courses, entrance exams) are sourced from
+"docs/Career Library_Updated_1808.xlsx" and unchanged since that workbook. The "CL" tab
+(CareerLibraryEntry rows) is now sourced separately from "docs/Career Library_CL_2609.xlsx"
+(2026-09-10), a CL-only sheet with a narrower 20-column layout than 1808's 24 — it merged
+the separate plain/"DEFINED" Graduation and PG qualification columns into one combined
+column each ("<degree list>, Focus Electives: <electives>", consistent across all rows),
+dropped the UG entrance-exam description column, and dropped "Top Courses" entirely. Per
+product decision on that re-import: each combined column is split on the "Focus Electives:"
+marker (split_qualification()) — the degree-list half feeds the plain
+qualificationGraduation/qualificationPG columns, the electives half feeds the paired
+"Defined" columns (which prisma/seed-education-path.ts reads only as descriptive prose, not
+mined for programme names — see its updated header comment). entranceExamsUGDescription is
+exported as null and topCourses as [] for every row, since this sheet has no such columns.
+If a future sheet restores those columns, add them back here.
 
 Ignores the "Post-12_Entrance_Exams__India__" tab per instruction (out of scope).
-Not part of the app's runtime — rerun manually if the source workbook changes.
+Not part of the app's runtime — rerun manually if a source workbook changes.
 """
 import json
 import re
@@ -21,6 +29,7 @@ import openpyxl
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "docs" / "Career Library_Updated_1808.xlsx"
+SRC_CL = ROOT / "docs" / "Career Library_CL_2609.xlsx"
 OUT_DIR = ROOT / "prisma" / "seed-data" / "career-library"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -39,6 +48,27 @@ def s(v):
 # vocabulary; the other tabs' values are normalized to match it.
 INDUSTRY_ALIASES = {"Defense": "Defence"}  # UG Institutions_IND -> CL spelling
 EXAM_ALIASES = {"CUET": "CUET UG"}  # CL's extracted list -> UG Entrance_IND's exam name
+
+FOCUS_ELECTIVES_RE = re.compile(r",?\s*Focus Electives:\s*", re.I)
+
+
+def split_qualification(value):
+    """'BTech / BSc, Focus Electives: CS/IT.' -> ('BTech / BSc', 'CS/IT.').
+
+    Every row's combined Grad/PG column follows "<degree list>, Focus Electives:
+    <electives>" (verified across all 1317 rows of the 2609 CL sheet). The degree-list half
+    becomes the plain qualification field; the electives half becomes the paired "Defined"
+    field, which downstream (prisma/seed-education-path.ts) is read as descriptive prose,
+    not mined for programme names.
+    """
+    v = s(value)
+    if not v:
+        return None, None
+    parts = FOCUS_ELECTIVES_RE.split(v, maxsplit=1)
+    if len(parts) != 2:
+        return v, None
+    qualification, electives = s(parts[0]), s(parts[1])
+    return qualification, electives
 
 
 def split_list(v, sep=","):
@@ -91,10 +121,10 @@ AI_GRADE_MAP = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH", "very high": "
 
 
 def export_career_library(wb):
-    # Column layout of the 1808 workbook's "CL" tab (0-based). The yellow columns added
-    # since 0508 — 10+2 explanation (L), the "DEFINED" graduation (N) and PG (R)
-    # qualifications, role overview (W), and key skills (X) — shifted the later columns,
-    # so these indices differ from the previous export.
+    # Column layout of the 2609 CL-only sheet (0-based, 20 columns). Narrower than the old
+    # 1808 workbook's CL tab: no plain Graduation/PG qualification columns (only the
+    # "DEFINED" combined ones), no UG entrance-exam description column, no Top Courses
+    # column at all — see the module docstring for how those are exported here.
     ws = wb["CL"]
     out = []
     skipped = 0
@@ -109,6 +139,9 @@ def export_career_library(wb):
         india_min, india_max = parse_india_salary(r[8])
         global_min, global_max = parse_global_salary(r[9])
 
+        grad_qualification, grad_electives = split_qualification(r[12])
+        pg_qualification, pg_electives = split_qualification(r[14])
+
         out.append(
             {
                 "cluster": cluster,
@@ -118,8 +151,8 @@ def export_career_library(wb):
                 "aiResilienceGrade": AI_GRADE_MAP.get(ai_grade_raw.lower(), "MEDIUM"),
                 "aiResilienceComment": s(r[5]) or "",
                 "oneLineDescription": s(r[6]) or "",
-                "roleOverview": s(r[22]),  # W: Role Overview & Scope
-                "keySkills": split_list(r[23]),  # X: Key Skill Requirements (comma-separated)
+                "roleOverview": s(r[18]),  # Role Overview & Scope
+                "keySkills": split_list(r[19]),  # Key Skill Requirements (comma-separated)
                 "topCompanies": split_list(r[7]),
                 "salaryIndiaRangeText": s(r[8]),
                 "salaryIndiaMinLPA": india_min,
@@ -127,18 +160,21 @@ def export_career_library(wb):
                 "salaryGlobalRangeText": s(r[9]),
                 "salaryGlobalMinUSD": global_min,
                 "salaryGlobalMaxUSD": global_max,
-                "qualification10th12th": qual_10_12,  # K
-                "qualification10th12thExplanation": s(r[11]),  # L: 10+2 Explanation
-                "qualificationGraduation": s(r[12]),  # M
-                "qualificationGraduationDefined": s(r[13]),  # N: Grad qualification DEFINED
-                "entranceExamsUGDescription": s(r[14]),  # O
-                "entranceExams": [EXAM_ALIASES.get(t, t) for t in split_list(r[15])],  # P: extracted
-                "qualificationPG": s(r[16]),  # Q
-                "qualificationPGDefined": s(r[17]),  # R: PG qualification DEFINED
-                "entranceExamsPG": split_list(r[18]),  # S
-                "certificationsStudent": split_list(r[19], ";"),  # T
-                "certificationsUG": split_list(r[20], ";"),  # U
-                "topCourses": split_list(r[21]),  # V
+                "qualification10th12th": qual_10_12,
+                "qualification10th12thExplanation": s(r[11]),  # 10+2 Explanation - Electives
+                # Grad + Focus Subjects DEFINED (col 12) split on "Focus Electives:" —
+                # degree list before, electives after (see split_qualification()).
+                "qualificationGraduation": grad_qualification,
+                "qualificationGraduationDefined": grad_electives,
+                "entranceExamsUGDescription": None,  # dropped from this sheet
+                "entranceExams": [EXAM_ALIASES.get(t, t) for t in split_list(r[13])],  # UG extracted
+                # PG + Focus Subjects (col 14), same split.
+                "qualificationPG": pg_qualification,
+                "qualificationPGDefined": pg_electives,
+                "entranceExamsPG": split_list(r[15]),
+                "certificationsStudent": split_list(r[16], ";"),
+                "certificationsUG": split_list(r[17], ";"),
+                "topCourses": [],  # dropped from this sheet
             }
         )
     print(f"CL: {len(out)} rows exported, {skipped} skipped (missing required field)")
@@ -299,16 +335,13 @@ def export_pg_entrance(wb):
 
 
 def main():
-    wb = openpyxl.load_workbook(SRC, data_only=True)
+    # Only the CL tab is re-exported here, from the 2609 CL-only sheet — the reference
+    # tabs (UG/PG institutions, courses, entrance exams) are unchanged since the 1808
+    # workbook, so their JSON files are left as-is rather than regenerated from SRC.
+    wb_cl = openpyxl.load_workbook(SRC_CL, data_only=True)
 
     exports = {
-        "career-library.json": export_career_library(wb),
-        "ug-institutions.json": export_ug_institutions(wb),
-        "ug-institutions-universities.json": export_ug_inst_uty(wb),
-        "ug-entrance-exams.json": export_ug_entrance(wb),
-        "ug-courses.json": export_ug_courses(wb),
-        "pg-institutions.json": export_pg_institutions(wb),
-        "pg-entrance-exams.json": export_pg_entrance(wb),
+        "career-library.json": export_career_library(wb_cl),
     }
 
     for filename, data in exports.items():

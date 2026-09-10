@@ -6,6 +6,15 @@ import type { CareerFitResult, DomainFit } from "../assessment/scoring/careerFit
 import { aiResilienceRank } from "../assessment/scoring/careerFit.js";
 import { loadAlignmentGuidance, loadScriGuidance } from "../counsellor-chart/guidance.js";
 import { getStudentFeedbackScore } from "../feedback/feedback.service.js";
+import { sendTemplateEmail } from "../email/email.service.js";
+
+// Fire-and-forget: same pattern as students.service.ts's sendEmailBestEffort — an email
+// failure here must never surface as a failure of the report fetch itself.
+function sendEmailBestEffort(to: string, templateKey: Parameters<typeof sendTemplateEmail>[1], data: unknown): void {
+  sendTemplateEmail(to, templateKey, data).catch((err) => {
+    console.error(`[reports] failed to send ${templateKey} to ${to}:`, err);
+  });
+}
 
 // A counsellor-added job role reads exactly like a computed one on the report, plus a
 // flag the frontend uses to badge/explain it — see mergeCounsellorJobRoles below.
@@ -215,10 +224,23 @@ export async function markReportDeliveredToStudent(studentId: string): Promise<v
   try {
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: { workflowStatus: true },
+      select: {
+        workflowStatus: true,
+        parentEmail: true,
+        fatherName: true,
+        motherName: true,
+        user: { select: { firstName: true, lastName: true } },
+      },
     });
     if (student?.workflowStatus !== "STUDENT_PARENT_FEEDBACK") return;
     await advanceWorkflowStatus(prisma, studentId, "CLOSED");
+
+    if (student.parentEmail) {
+      sendEmailBestEffort(student.parentEmail, "REPORT_READY_PARENT", {
+        parentName: student.fatherName || student.motherName || "Parent",
+        studentName: `${student.user.firstName} ${student.user.lastName}`,
+      });
+    }
   } catch (err) {
     console.error(`Closing case on report delivery failed for student ${studentId}:`, err);
   }

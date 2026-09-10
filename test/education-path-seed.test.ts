@@ -7,12 +7,21 @@ import {
 
 // The seed derives Education Path rows from prose-ish workbook columns, so the parsing
 // rules are where the risk is. These are pure — no DB.
+//
+// The "Focus Electives:" split now happens at export time (scripts/export-career-library.py
+// split_qualification()), so graduationProgrammes()/postGraduateProgrammes() here operate on
+// the already-isolated plain degree list, not the combined "<degrees>, Focus Electives: ..."
+// cell text.
 
 describe("Education Path seed — graduation parsing", () => {
-  it("takes the degree list and drops the 'Recommended focus' guidance", () => {
-    expect(
-      graduationProgrammes("BTech / BSc / BCA / Statistics / Maths, Recommended focus: CS/IT/Maths.")
-    ).toEqual(["BTech", "BSc", "BCA", "Statistics", "Maths"]);
+  it("splits a plain degree list into programmes", () => {
+    expect(graduationProgrammes("BTech / BSc / BCA / Statistics / Maths")).toEqual([
+      "BTech",
+      "BSc",
+      "BCA",
+      "Statistics",
+      "Maths",
+    ]);
   });
 
   it("strips the 'or a closely related field' hedge rather than baking it into the name", () => {
@@ -34,24 +43,22 @@ describe("Education Path seed — graduation parsing", () => {
 });
 
 describe("Education Path seed — PG parsing", () => {
-  it("reads only what follows the PG: marker", () => {
+  it("splits a plain PG degree list into programmes", () => {
     expect(
-      postGraduateProgrammes("BTech/BSc/BCA. PG: MSc Data Science, MBA Business Analytics, MTech Data Science.")
+      postGraduateProgrammes("MSc Data Science, MBA Business Analytics, MTech Data Science")
     ).toEqual(["MSc Data Science", "MBA Business Analytics", "MTech Data Science"]);
   });
 
   it("does not split inside parentheses", () => {
-    expect(postGraduateProgrammes("PG: M.Arch (Urban Design, Landscape, Sustainable Architecture)")).toEqual([
+    expect(postGraduateProgrammes("M.Arch (Urban Design, Landscape, Sustainable Architecture)")).toEqual([
       "M.Arch (Urban Design, Landscape, Sustainable Architecture)",
     ]);
   });
 
-  it("yields nothing when the marker is absent — the boilerplate columns aren't mined", () => {
-    expect(
-      postGraduateProgrammes(
-        "a relevant Master's / PG programme building on Acrobatics, or an equivalent specialization aligned with Movement Arts."
-      )
-    ).toEqual([]);
+  it("returns nothing for junk or empty source values", () => {
+    expect(postGraduateProgrammes("January")).toEqual([]);
+    expect(postGraduateProgrammes(null)).toEqual([]);
+    expect(postGraduateProgrammes("")).toEqual([]);
   });
 });
 
@@ -59,8 +66,9 @@ describe("Education Path seed — per-role derivation", () => {
   const base = {
     qualification10th12th: "12th PCM from a recognized board",
     qualification10th12thExplanation: "Minimum aggregate as per institution norms",
-    qualificationGraduationDefined: "BTech / BSc, Recommended focus: CS.",
-    qualificationPG: "BTech. PG: MTech AI, MSc CS.",
+    qualificationGraduation: "BTech / BSc",
+    qualificationGraduationDefined: "Focus Electives: CS.",
+    qualificationPG: "MTech AI, MSc CS",
     qualificationPGDefined: "a relevant Master's building on CS",
     certificationsStudent: ["Python Basics"],
     certificationsUG: ["AWS Cloud Practitioner"],
@@ -70,8 +78,8 @@ describe("Education Path seed — per-role derivation", () => {
     const derived = deriveForEntry(base);
     expect(derived).toEqual(
       expect.arrayContaining([
-        { level: "GRADUATE", programme: "BTech", description: "BTech / BSc, Recommended focus: CS." },
-        { level: "GRADUATE", programme: "BSc", description: "BTech / BSc, Recommended focus: CS." },
+        { level: "GRADUATE", programme: "BTech", description: "Focus Electives: CS." },
+        { level: "GRADUATE", programme: "BSc", description: "Focus Electives: CS." },
         { level: "POST_GRADUATE", programme: "MTech AI", description: "a relevant Master's building on CS" },
         { level: "POST_GRADUATE", programme: "MSc CS", description: "a relevant Master's building on CS" },
       ])
@@ -80,8 +88,8 @@ describe("Education Path seed — per-role derivation", () => {
 
   it("takes each level's description from its own explanation column", () => {
     const byLevel = Object.fromEntries(deriveForEntry(base).map((d) => [`${d.level} ${d.programme}`, d.description]));
-    // 10+2 explanation, graduation "Defined", PG "Defined" — the PG boilerplate is unusable
-    // as a programme name but is exactly right as prose.
+    // 10+2 explanation, graduation "Defined", PG "Defined" — the electives half of the
+    // combined cell is unusable as a programme name but is exactly right as prose.
     expect(byLevel["CLASS_10_PLUS_2 12th PCM from a recognized board"]).toBe(
       "Minimum aggregate as per institution norms"
     );
@@ -105,6 +113,7 @@ describe("Education Path seed — per-role derivation", () => {
       deriveForEntry({
         qualification10th12th: "January",
         qualification10th12thExplanation: "January",
+        qualificationGraduation: "January",
         qualificationGraduationDefined: "January",
         qualificationPG: "January",
         qualificationPGDefined: null,

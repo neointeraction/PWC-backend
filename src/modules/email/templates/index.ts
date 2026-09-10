@@ -1,6 +1,5 @@
 import type { z } from "zod";
 import { feedbackRequestParentDataSchema, renderFeedbackRequestParentEmail } from "./feedback-request-parent.js";
-import { loginCredentialsParentDataSchema, renderLoginCredentialsParentEmail } from "./login-credentials-parent.js";
 import { loginCredentialsStudentDataSchema, renderLoginCredentialsStudentEmail } from "./login-credentials-student.js";
 import { passwordResetDataSchema, renderPasswordResetEmail } from "./password-reset.js";
 import { preCounsellingParentDataSchema, renderPreCounsellingParentEmail } from "./pre-counselling-parent.js";
@@ -17,7 +16,7 @@ export interface RenderedEmail {
   text: string;
 }
 
-// One entry per kREATE communication template: the 9 rich lifecycle templates from
+// One entry per kREATE communication template: the 8 rich lifecycle templates from
 // docs/11.Class 910_Communication EMail Templates.pdf, the 31 reminder/session-status
 // templates (email equivalents of docs/Class 910_Workflow Prompts for Watsapp.xlsx rows
 // 3-16 — that sheet is WhatsApp copy; WhatsApp sending itself isn't implemented), plus 4
@@ -29,7 +28,6 @@ export const emailTemplateRegistry = {
   WELCOME_STUDENT: { schema: welcomeStudentDataSchema, render: renderWelcomeStudentEmail },
   WELCOME_PARENT: { schema: welcomeParentDataSchema, render: renderWelcomeParentEmail },
   LOGIN_CREDENTIALS_STUDENT: { schema: loginCredentialsStudentDataSchema, render: renderLoginCredentialsStudentEmail },
-  LOGIN_CREDENTIALS_PARENT: { schema: loginCredentialsParentDataSchema, render: renderLoginCredentialsParentEmail },
   PASSWORD_RESET: { schema: passwordResetDataSchema, render: renderPasswordResetEmail },
   PRE_COUNSELLING_PARENT: { schema: preCounsellingParentDataSchema, render: renderPreCounsellingParentEmail },
   SESSION_DETAILS_PARENT: { schema: sessionDetailsParentDataSchema, render: renderSessionDetailsParentEmail },
