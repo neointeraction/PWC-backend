@@ -73,6 +73,15 @@ export const entranceExamItemSchema = z.object({
   examMonth: z.string(),
   urlLink: z.string(),
   isManualEntry: z.boolean().optional(),
+  // Server-stamped on first save of a manual-entry row (see updateCounsellorChart);
+  // preserved on every subsequent save so it reflects when the row was actually added,
+  // not the chart's last-save time.
+  addedAt: z.string().optional(),
+  // Set when this row was auto-suggested from a Career Compass target role's linked
+  // entrance exams (see careerCompassItemSchema.roleId) rather than added by hand — the
+  // frontend uses this to drop the row again if that target role is later removed,
+  // without touching rows the counsellor added or edited themselves.
+  sourceRoleId: z.string().optional(),
 });
 export type EntranceExamItem = z.infer<typeof entranceExamItemSchema>;
 
@@ -86,6 +95,9 @@ export const collegesAfterItemSchema = z.object({
   ranking: z.string(),
   website: z.string(),
   isManualEntry: z.boolean().optional(),
+  addedAt: z.string().optional(),
+  // See entranceExamItemSchema.sourceRoleId — same auto-suggestion provenance tag.
+  sourceRoleId: z.string().optional(),
 });
 export type CollegesAfterItem = z.infer<typeof collegesAfterItemSchema>;
 
@@ -100,6 +112,7 @@ export const streamFitItemSchema = z.object({
   gradingLevel: z.string().optional(),
   meaning: z.string().optional(),
   isManualEntry: z.boolean().optional(),
+  addedAt: z.string().optional(),
 });
 export type StreamFitItem = z.infer<typeof streamFitItemSchema>;
 
@@ -112,6 +125,7 @@ export const graduationItemSchema = z.object({
   reasoning: z.string(),
   keyExams: z.string(),
   isManualEntry: z.boolean().optional(),
+  addedAt: z.string().optional(),
 });
 export type GraduationItem = z.infer<typeof graduationItemSchema>;
 
@@ -124,19 +138,27 @@ export const careerCompassClusterItemSchema = z.object({
   gradingLevel: z.string(),
   meaning: z.string(),
   isManualEntry: z.boolean().optional(),
+  addedAt: z.string().optional(),
 });
 export type CareerCompassClusterItem = z.infer<typeof careerCompassClusterItemSchema>;
 
 export const careerCompassItemSchema = z.object({
   id: z.string(),
+  cluster: z.string(),
+  industry: z.string(),
   domain: z.string(),
   role: z.string(),
   whyItFits: z.string(),
   topEmployers: z.string(),
-  aiResilience: z.string(),
   salaryIndia: z.string(),
   salaryAbroad: z.string(),
   isManualEntry: z.boolean().optional(),
+  addedAt: z.string().optional(),
+  // Career-library id of the picked Target Role (absent for manual entries) — lets the
+  // frontend re-derive the role's linked colleges/entrance exams for the Colleges After
+  // Class 11&12 / Entrance Exams auto-suggestion sync (see EntranceExamItem /
+  // CollegesAfterItem.sourceRoleId).
+  roleId: z.string().optional(),
 });
 export type CareerCompassItem = z.infer<typeof careerCompassItemSchema>;
 

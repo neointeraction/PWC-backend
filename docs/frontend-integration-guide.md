@@ -711,14 +711,16 @@ returns a template with `questions: []`; don't render an empty form, just skip i
 | `OPEN_TEXT` | textarea | `null` |
 | `NUMBER` | number input | `null` |
 | `SCALE` | 1–5 rating scale | `[{ value: "1"..."5", label }]` |
-| `MATRIX` | table/grid | `{ rows?: [{key,label}], fields: [{key,label,type,options?}] }` — see below |
+| `MATRIX` | table/grid | `{ rows?: [{key,label,optional?}], fields: [{key,label,type,options?}] }` — see below |
 
 `MATRIX` questions represent a whole table as **one** question. If `options.rows` is
 present, it's a grid (cross product of rows × fields — e.g. one row per subject, one
 column per data point). If `rows` is absent, `fields` are just several related inputs
 grouped together (e.g. "favourite subject" + "why"). Either way, the **answer you
 submit for a MATRIX question is a single JSON object** keyed by the sub-field keys
-(see 6.2).
+(see 6.2). A row with `optional: true` (e.g. `academic_record_table`'s "Other subject"
+row) is excluded from the on-`/submit` completeness check — it can be left blank even
+when the question overall `isRequired: true`.
 
 `allowOtherText: true` means the question (or, for `MATRIX`, one of its `options.fields`
 entries) has an "Any Other: ___" choice. The option that triggers it carries
@@ -1791,7 +1793,10 @@ before building UI that depends on any of them:
   saved array. Each is capped to its top 6 (ranked by the source industry's fit-order, then
   alphabetically) — same top-N treatment as `careerFit.top6Domains` — so expect at most 6
   rows in the computed state; a counsellor's saved edit isn't capped. A row on any of the 6 may carry `isManualEntry: true` for a free-text row
-  (not picked from the Career Library) — `GET /api/v1/counsellor-chart/manual-entries`
+  (not picked from the Career Library) — the backend stamps that row's `addedAt` with the
+  server time on the save where it's first added, and preserves it on every later save, so
+  it's a real per-row "when was this added" timestamp rather than the chart's last-save
+  time. `GET /api/v1/counsellor-chart/manual-entries`
   (Super Admin only) lists every such row across all students for review: `{ id,
   studentId, studentName, tableLabel, fields, addedBy, addedAt }`. See `docs/api-list.md`
   for the 6 tables' item shapes and table titles.

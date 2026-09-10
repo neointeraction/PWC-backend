@@ -19,7 +19,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
         { key: "maths", label: "Mathematics" },
         { key: "socsci", label: "Social Science" },
         { key: "cs", label: "Computer Science" },
-        { key: "other", label: "Other subject", labelEditable: true },
+        { key: "other", label: "Other subject", labelEditable: true, optional: true },
       ],
       fields: [
         { key: "c7", label: "Class 7", type: "SHORT_TEXT" },

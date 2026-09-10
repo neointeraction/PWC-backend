@@ -113,7 +113,10 @@ function isOtherTextMissing(value: unknown, otherOptionValue: string | undefined
 // isAnswerEmpty does for plain objects) let a single filled row pass a 10+ row matrix.
 function isMatrixIncomplete(options: unknown, answer: unknown): boolean {
   if (!options || typeof options !== "object") return false;
-  const { rows, fields } = options as { rows?: Array<{ key: string }>; fields?: MatrixFieldDef[] };
+  const { rows, fields } = options as {
+    rows?: Array<{ key: string; optional?: boolean }>;
+    fields?: MatrixFieldDef[];
+  };
   if (!fields || fields.length === 0) return false;
   const data = (typeof answer === "object" && answer !== null ? answer : {}) as Record<string, unknown>;
 
@@ -121,6 +124,7 @@ function isMatrixIncomplete(options: unknown, answer: unknown): boolean {
     return fields.some((f) => isAnswerEmpty(data[f.key]));
   }
   return rows.some((row) => {
+    if (row.optional) return false;
     const rowData = (data[row.key] ?? {}) as Record<string, unknown>;
     return fields.some((f) => isAnswerEmpty(rowData[f.key]));
   });

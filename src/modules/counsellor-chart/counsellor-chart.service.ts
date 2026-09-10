@@ -92,8 +92,21 @@ export async function getCounsellorChart(studentId: string) {
   };
 }
 
+// Stamps `addedAt` on any manual-entry row that doesn't already carry one — a row newly
+// added this save — and leaves rows that already have an `addedAt` untouched, so it
+// isn't overwritten on every subsequent save of the table (see counsellor-chart.schema.ts).
+function stampManualEntryAddedAt<T extends { isManualEntry?: boolean; addedAt?: string }>(
+  items: T[],
+  now: string
+): T[] {
+  return items.map((item) =>
+    item.isManualEntry === true && !item.addedAt ? { ...item, addedAt: now } : item
+  );
+}
+
 export async function updateCounsellorChart(studentId: string, body: PutCounsellorChartBody) {
   const existing = await loadOrCreateChart(studentId);
+  const now = new Date().toISOString();
 
   // Recompute the SCRI band from the merged (existing + incoming) indicator set.
   const merged = {
@@ -117,14 +130,24 @@ export async function updateCounsellorChart(studentId: string, body: PutCounsell
       ...(body.roadmapGrid !== undefined && { roadmapGrid: body.roadmapGrid }),
       ...(body.careerDnaNarrative !== undefined && { careerDnaNarrative: body.careerDnaNarrative }),
       ...(body.whyThisStream !== undefined && { whyThisStream: body.whyThisStream }),
-      ...(body.entranceExamsTable !== undefined && { entranceExamsTable: body.entranceExamsTable }),
-      ...(body.collegesTable !== undefined && { collegesTable: body.collegesTable }),
-      ...(body.streamFitTable !== undefined && { streamFitTable: body.streamFitTable }),
-      ...(body.graduationTable !== undefined && { graduationTable: body.graduationTable }),
-      ...(body.careerCompassClusterTable !== undefined && {
-        careerCompassClusterTable: body.careerCompassClusterTable,
+      ...(body.entranceExamsTable !== undefined && {
+        entranceExamsTable: stampManualEntryAddedAt(body.entranceExamsTable, now),
       }),
-      ...(body.careerCompassTable !== undefined && { careerCompassTable: body.careerCompassTable }),
+      ...(body.collegesTable !== undefined && {
+        collegesTable: stampManualEntryAddedAt(body.collegesTable, now),
+      }),
+      ...(body.streamFitTable !== undefined && {
+        streamFitTable: stampManualEntryAddedAt(body.streamFitTable, now),
+      }),
+      ...(body.graduationTable !== undefined && {
+        graduationTable: stampManualEntryAddedAt(body.graduationTable, now),
+      }),
+      ...(body.careerCompassClusterTable !== undefined && {
+        careerCompassClusterTable: stampManualEntryAddedAt(body.careerCompassClusterTable, now),
+      }),
+      ...(body.careerCompassTable !== undefined && {
+        careerCompassTable: stampManualEntryAddedAt(body.careerCompassTable, now),
+      }),
       ...(body.lastEditedBy !== undefined && { lastEditedBy: body.lastEditedBy }),
       scriConfidence: merged.confidence,
       scriReasonedThinking: merged.reasonedThinking,
@@ -295,7 +318,7 @@ export async function listManualEntries(): Promise<ManualEntryRow[]> {
       if (!items) continue;
       for (const item of items) {
         if (item.isManualEntry !== true) continue;
-        const { id, isManualEntry: _isManualEntry, ...rest } = item;
+        const { id, isManualEntry: _isManualEntry, addedAt, ...rest } = item;
         const fields: Record<string, string> = {};
         for (const [key, value] of Object.entries(rest)) fields[key] = String(value);
         rows.push({
@@ -305,7 +328,9 @@ export async function listManualEntries(): Promise<ManualEntryRow[]> {
           tableLabel: label,
           fields,
           addedBy: chart.lastEditedBy,
-          addedAt: chart.updatedAt.toISOString(),
+          // Falls back to the chart's last-save time only for rows written before this
+          // per-row stamp existed (see counsellor-chart.schema.ts's `addedAt` field).
+          addedAt: typeof addedAt === "string" ? addedAt : chart.updatedAt.toISOString(),
         });
       }
     }

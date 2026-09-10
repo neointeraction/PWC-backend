@@ -284,6 +284,70 @@ describe("Counsellor Chart API", () => {
     expect(row.fields.id).toBeUndefined();
   });
 
+  it("stamps addedAt per manual-entry row instead of collapsing to the chart's last-save time", async () => {
+    const first = await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentId}`)
+      .send({
+        careerCompassTable: [
+          {
+            id: "manual-cc-1",
+            cluster: "Technology",
+            industry: "Software",
+            domain: "Tech",
+            role: "Product Manager",
+            whyItFits: "Fits interests",
+            topEmployers: "Various",
+            salaryIndia: "10-20 LPA",
+            salaryAbroad: "$100k",
+            isManualEntry: true,
+          },
+        ],
+        lastEditedBy: "counsellor-1",
+      });
+    expect(first.status).toBe(200);
+    const firstAddedAt = first.body.counsellor.careerCompassTable[0].addedAt;
+    expect(typeof firstAddedAt).toBe("string");
+
+    // A later save adds a second row to the same table and re-saves the first, unchanged.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentId}`)
+      .send({
+        careerCompassTable: [
+          first.body.counsellor.careerCompassTable[0],
+          {
+            id: "manual-cc-2",
+            cluster: "Arts & Design",
+            industry: "Design",
+            domain: "Design",
+            role: "UX Designer",
+            whyItFits: "Creative fit",
+            topEmployers: "Various",
+            salaryIndia: "8-15 LPA",
+            salaryAbroad: "$80k",
+            isManualEntry: true,
+          },
+        ],
+        lastEditedBy: "counsellor-1",
+      });
+    expect(second.status).toBe(200);
+    const [row1, row2] = second.body.counsellor.careerCompassTable;
+    // The first row's addedAt is preserved, not bumped to this save's time.
+    expect(row1.addedAt).toBe(firstAddedAt);
+    // The newly added row gets its own, later, addedAt.
+    expect(row2.addedAt).not.toBe(firstAddedAt);
+    expect(typeof row2.addedAt).toBe("string");
+
+    const res = await authRequest(app, "SUPER_ADMIN").get("/api/v1/counsellor-chart/manual-entries");
+    const rows = res.body.filter(
+      (r: { studentId: string; id: string }) => r.studentId === studentId && r.id.startsWith("manual-cc-")
+    );
+    const queueRow1 = rows.find((r: { id: string }) => r.id === "manual-cc-1");
+    const queueRow2 = rows.find((r: { id: string }) => r.id === "manual-cc-2");
+    expect(queueRow1.addedAt).toBe(firstAddedAt);
+    expect(queueRow2.addedAt).toBe(row2.addedAt);
+  });
+
   it("403s a non-super-admin from the manual entries queue", async () => {
     const res = await authRequest(app, "ADMIN").get("/api/v1/counsellor-chart/manual-entries");
     expect(res.status).toBe(403);
