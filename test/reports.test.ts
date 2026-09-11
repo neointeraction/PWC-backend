@@ -124,6 +124,162 @@ describe("Reports — student assessment report", () => {
     expect(top6.filter((c) => c.addedByCounsellor).length).toBe(1);
   });
 
+  // From here on, every test saves `careerCompassTable`, which becomes authoritative for
+  // the report (see buildCareerCompassFromPersistedTable) — so this must run last among
+  // the tests exercising the pre-first-save (`mergeCounsellorJobRoles`) fallback path.
+  it("backfills cluster/industry and re-attaches fit score for a chart row saved without them", async () => {
+    // A counsellor chart row from before the Career Compass redesign (or one added
+    // without a career-library pick) can be persisted with blank cluster/industry — the
+    // report must still resolve them from the domain name, exactly like the counsellor
+    // chart's own hydration does (see buildCareerCompassFromPersistedTable in
+    // reports.service.ts).
+    const before = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
+    const originalTop6 = before.body.careerCompass.top6Domains as {
+      cluster: string;
+      industry: string;
+      domain: string;
+      fitScore: number;
+      addedByCounsellor: boolean;
+    }[];
+    // Skip the "Counsellor-Picked Role" seat from the previous test — that domain lives
+    // only in the career library, not the assessment's scored domain table, so it has
+    // nothing to backfill from. Pick an algorithmically-scored one instead.
+    const pick = originalTop6.find((c) => !c.addedByCounsellor)!;
+    expect(pick).toBeTruthy();
+
+    const putRes = await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentAId}`)
+      .send({
+        careerCompassTable: [
+          {
+            id: "cc-test-blank",
+            cluster: "",
+            industry: "",
+            domain: pick.domain,
+            role: "Blank Cluster Role",
+            whyItFits: "",
+            topEmployers: "",
+            salaryIndia: "",
+            salaryAbroad: "",
+          },
+        ],
+      });
+    expect(putRes.status).toBe(200);
+
+    const res = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
+    const top6 = res.body.careerCompass.top6Domains as {
+      cluster: string;
+      industry: string;
+      domain: string;
+      fitScore: number;
+    }[];
+    expect(top6).toHaveLength(1);
+    expect(top6[0].domain).toBe(pick.domain);
+    // Backfilled from the assessment's scored domain by name — not asserting an exact
+    // cluster/industry/fitScore match, since the career library has ~58 domain names that
+    // aren't unique across industries (a pre-existing data-quality gap the frontend's own
+    // name-only lookup has too, e.g. domainFitByKey/domainInfoByKey in
+    // counsellorChart.service.ts); the fix under test here is "no longer blank/unscored".
+    expect(top6[0].cluster).not.toBe("");
+    expect(top6[0].industry).not.toBe("");
+    expect(typeof top6[0].fitScore).toBe("number");
+  });
+
+  it("matches the counsellor chart's Stream Fit and Graduation tables exactly once saved", async () => {
+    const before = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
+    const originalStream = before.body.streamFit.top3[0] as { mainStream: string; subStream: string; fitScore: number };
+    const originalGrad = before.body.graduationPathways.top3[0] as {
+      clusterHead: string | null;
+      mainStream: string;
+      subStream: string;
+      fitScore: number;
+    };
+
+    const putRes = await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentAId}`)
+      .send({
+        streamFitTable: [
+          {
+            id: "sf-test-1",
+            mainStream: originalStream.mainStream,
+            subStream: originalStream.subStream,
+            coreSubjects: "Counsellor-Edited Core Subjects",
+            electives: "Counsellor-Edited Electives",
+          },
+        ],
+        graduationTable: [
+          {
+            id: "gp-test-1",
+            cluster: originalGrad.clusterHead ?? originalGrad.mainStream,
+            mainStream: originalGrad.mainStream,
+            subStream: originalGrad.subStream,
+            specialization: "Counsellor-Edited Specialization",
+            reasoning: "Counsellor-edited reasoning text",
+            keyExams: "Counsellor-Edited Exams",
+          },
+        ],
+      });
+    expect(putRes.status).toBe(200);
+
+    const res = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
+    expect(res.status).toBe(200);
+
+    const streamTop3 = res.body.streamFit.top3 as { mainStream: string; coreSubjects: string; fitScore: number }[];
+    expect(streamTop3).toHaveLength(1);
+    expect(streamTop3[0].coreSubjects).toBe("Counsellor-Edited Core Subjects");
+    expect(streamTop3[0].fitScore).toBe(originalStream.fitScore);
+
+    const gradTop3 = res.body.graduationPathways.top3 as {
+      specialisations: string;
+      explanation: string;
+      fitScore: number;
+    }[];
+    expect(gradTop3).toHaveLength(1);
+    expect(gradTop3[0].specialisations).toBe("Counsellor-Edited Specialization");
+    expect(gradTop3[0].explanation).toBe("Counsellor-edited reasoning text");
+    expect(gradTop3[0].fitScore).toBe(originalGrad.fitScore);
+  });
+
+  it("matches the counsellor chart's Career Compass table exactly once the counsellor has saved it", async () => {
+    // Simulate a counsellor editing Step3SectionC on the frontend: delete the algorithmic
+    // defaults and save a single custom row via the counsellor-chart PUT. This student
+    // also still has the "Counsellor-Picked Role" library entry from the previous test —
+    // proving the report ignores that fallback path once a chart table is saved, and
+    // shows exactly (and only) the row the counsellor edited.
+    const putRes = await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentAId}`)
+      .send({
+        careerCompassTable: [
+          {
+            id: "cc-test-1",
+            cluster: "Test Reports Cluster",
+            industry: "Test Reports Industry",
+            domain: "Test Reports Domain",
+            role: "Chart-Edited Role",
+            whyItFits: "Matches what the counsellor typed on the chart",
+            topEmployers: "Acme, Globex",
+            salaryIndia: "10-20 LPA",
+            salaryAbroad: "$50k-90k",
+            isManualEntry: true,
+          },
+        ],
+      });
+    expect(putRes.status).toBe(200);
+
+    const res = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
+    expect(res.status).toBe(200);
+    const top6 = res.body.careerCompass.top6Domains as {
+      addedByCounsellor: boolean;
+      representativeCareer: { jobRole: string; oneLineDescription: string };
+    }[];
+    expect(top6).toHaveLength(1);
+    expect(top6[0].representativeCareer.jobRole).toBe("Chart-Edited Role");
+    expect(top6[0].representativeCareer.oneLineDescription).toBe(
+      "Matches what the counsellor typed on the chart"
+    );
+    expect(top6[0].addedByCounsellor).toBe(true);
+  });
+
   it("404s when the student has no assessment result yet", async () => {
     const res = await authRequest(app).get(`/api/v1/reports/students/${studentBId}/assessment`);
     expect(res.status).toBe(404);

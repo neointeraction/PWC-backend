@@ -4,9 +4,23 @@ import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import type { AssessmentReport } from "../assessment/scoring/index.js";
 import type { CareerFitResult, DomainFit } from "../assessment/scoring/careerFit.js";
 import { aiResilienceRank } from "../assessment/scoring/careerFit.js";
+import type { StreamFit, StreamFitResult } from "../assessment/scoring/streamFit.js";
+import type { GraduationFit, GraduationFitResult } from "../assessment/scoring/graduationFit.js";
+import type {
+  CareerCompassItem as PersistedCareerCompassItem,
+  StreamFitItem as PersistedStreamFitItem,
+  GraduationItem as PersistedGraduationItem,
+} from "../counsellor-chart/counsellor-chart.schema.js";
 import { loadAlignmentGuidance, loadScriGuidance } from "../counsellor-chart/guidance.js";
 import { getStudentFeedbackScore } from "../feedback/feedback.service.js";
 import { sendTemplateEmail } from "../email/email.service.js";
+
+// Same natural-key normalization as the frontend's `fitKey` (counsellorChart.service.ts)
+// — lets a persisted row still match its assessment-scored domain across incidental
+// casing/whitespace differences.
+function domainKey(...parts: (string | null | undefined)[]): string {
+  return parts.map((p) => (p ?? "").trim().toLowerCase()).join("|");
+}
 
 // Fire-and-forget: same pattern as students.service.ts's sendEmailBestEffort — an email
 // failure here must never surface as a failure of the report fetch itself.
@@ -100,6 +114,154 @@ function mergeCounsellorJobRoles(
   };
 }
 
+// Once a counsellor has saved any edit to the Career Compass (Target Roles & Compensation)
+// table on the counsellor chart (Step3SectionC on the frontend), `CounsellorChart
+// .careerCompassTable` holds the exact row set they see and edited there — including rows
+// they deleted from the algorithmic default, and any they added via a career-library pick
+// or manual entry. The report must show exactly this set, not a second, independently
+// recomputed one, so this builds the report's cards directly from those persisted rows
+// instead of re-deriving from `careerFit.top6Domains` (see mergeCounsellorJobRoles above,
+// which is now only the pre-first-save fallback).
+async function buildCareerCompassFromPersistedTable(
+  careerFit: CareerFitResult | null,
+  persistedTable: PersistedCareerCompassItem[]
+): Promise<CareerFitResult & { top6Domains: CareerCompassCard[] }> {
+  const roleIds = [...new Set(persistedTable.map((r) => r.roleId).filter((id): id is string => !!id))];
+  const libraryEntries = roleIds.length
+    ? await prisma.careerLibraryEntry.findMany({ where: { id: { in: roleIds } } })
+    : [];
+  const libraryById = new Map(libraryEntries.map((e) => [e.id, e]));
+
+  // Keyed on (industry, domain) — a domain name is NOT globally unique in the career
+  // library (58 of 571 live domain names repeat across unrelated industries, e.g. "Data
+  // Science" under both Information Technology & Digital and Finance — confirmed
+  // legitimate via audit, not data-entry duplicates), so a domain-only key can silently
+  // collide two different industries' scores together. A domain-only fallback map is
+  // kept alongside for rows persisted before the Career Compass redesign (or added
+  // without a career-library pick), which can have blank `industry`/`cluster` — same
+  // gap the counsellor chart's own hydration handles — and is only consulted when the
+  // compound key misses.
+  const scoredDomainByCompoundKey = new Map(
+    (careerFit?.rankedDomains ?? []).map((d) => [domainKey(d.industry, d.domain), d])
+  );
+  const scoredDomainByNameOnly = new Map((careerFit?.rankedDomains ?? []).map((d) => [domainKey(d.domain), d]));
+  const originalCareerByCompoundKey = new Map(
+    (careerFit?.top6Domains ?? []).map((d) => [domainKey(d.industry, d.domain), d.representativeCareer])
+  );
+  const originalCareerByNameOnly = new Map(
+    (careerFit?.top6Domains ?? []).map((d) => [domainKey(d.domain), d.representativeCareer])
+  );
+
+  const top6Domains: CareerCompassCard[] = persistedTable.map((row) => {
+    const scored =
+      scoredDomainByCompoundKey.get(domainKey(row.industry, row.domain)) ??
+      (row.industry ? undefined : scoredDomainByNameOnly.get(domainKey(row.domain)));
+    const libraryEntry = row.roleId ? libraryById.get(row.roleId) : undefined;
+    const originalCareer =
+      originalCareerByCompoundKey.get(domainKey(row.industry, row.domain)) ??
+      (row.industry ? undefined : originalCareerByNameOnly.get(domainKey(row.domain)));
+    const aiResilienceGrade = libraryEntry?.aiResilienceGrade ?? originalCareer?.aiResilienceGrade ?? "MEDIUM";
+    const aiResilienceComment = libraryEntry?.aiResilienceComment ?? originalCareer?.aiResilienceComment ?? "";
+    const cluster = row.cluster || scored?.cluster || "";
+    const industry = row.industry || scored?.industry || "";
+
+    return {
+      cluster,
+      industry,
+      domain: row.domain,
+      fitScore: scored?.fitScore ?? (null as unknown as number), // not algorithmically scored, see loadCounsellorJobRoleCards
+      level: scored?.level ?? "Not Scored",
+      meaning: scored?.meaning ?? "This role wasn't matched against a scored assessment domain.",
+      bestAiResilienceRank: aiResilienceRank(aiResilienceGrade),
+      // Absent both a career-library pick and a manual-entry flag, this row is an
+      // untouched algorithmic default the counsellor never edited — see the schema
+      // comment on CareerCompassItem.roleId for why default rows never carry a roleId.
+      addedByCounsellor: !!(row.isManualEntry || row.roleId),
+      representativeCareer: {
+        jobRole: row.role,
+        cluster,
+        industry,
+        domain: row.domain,
+        aiResilienceGrade,
+        aiResilienceComment,
+        oneLineDescription: row.whyItFits,
+        topCompanies: row.topEmployers
+          ? row.topEmployers.split(",").map((s) => s.trim()).filter(Boolean)
+          : [],
+        salaryIndiaRangeText: row.salaryIndia || null,
+        salaryGlobalRangeText: row.salaryAbroad || null,
+      },
+    };
+  });
+
+  return {
+    rankedDomains: careerFit?.rankedDomains ?? [],
+    top6Domains,
+    top3Industries: careerFit?.top3Industries ?? [],
+  };
+}
+
+// Same "report must match the chart exactly, once the counsellor has saved an edit"
+// fix as buildCareerCompassFromPersistedTable, for the Stream Fit table (Step3SectionC's
+// "Assessment Result View — Stream Fit & Pathways"). `top3` is what the report renders;
+// `ranked` is kept as the full algorithmic list (still useful as a fit-score lookup
+// elsewhere) and is never counsellor-edited.
+function buildStreamFitFromPersistedTable(
+  streamFit: StreamFitResult,
+  persistedTable: PersistedStreamFitItem[]
+): StreamFitResult {
+  const scoredByKey = new Map(streamFit.ranked.map((s) => [domainKey(s.mainStream, s.subStream), s]));
+
+  const top3: StreamFit[] = persistedTable.map((row) => {
+    const scored = scoredByKey.get(domainKey(row.mainStream, row.subStream));
+    return {
+      mainStream: row.mainStream,
+      subStream: row.subStream,
+      coreSubjects: row.coreSubjects || scored?.coreSubjects || null,
+      electiveSubjects: row.electives || scored?.electiveSubjects || null,
+      explanation: row.explanation || scored?.explanation || null,
+      // null (not 0) when there's no scored match — a manually-added row has no fit
+      // score at all, and 0 would incorrectly grade as "Explore Carefully" downstream.
+      fitScore: scored?.fitScore ?? (null as unknown as number),
+      level: scored?.level ?? row.gradingLevel ?? "Not Scored",
+      meaning: scored?.meaning ?? row.meaning ?? "This sub-stream wasn't matched against a scored assessment option.",
+      weights: scored?.weights ?? {},
+    };
+  });
+
+  return { ranked: streamFit.ranked, top3 };
+}
+
+// Same fix for the Graduation Fit table (Step3SectionC's "Graduation Table").
+function buildGraduationFitFromPersistedTable(
+  graduationFit: GraduationFitResult,
+  persistedTable: PersistedGraduationItem[]
+): GraduationFitResult {
+  const scoredByKey = new Map(
+    graduationFit.ranked.map((g) => [domainKey(g.clusterHead, g.mainStream, g.subStream), g])
+  );
+
+  const top3: GraduationFit[] = persistedTable.map((row) => {
+    const scored = scoredByKey.get(domainKey(row.cluster, row.mainStream, row.subStream));
+    return {
+      clusterHead: row.cluster || scored?.clusterHead || null,
+      mainStream: row.mainStream,
+      subStream: row.subStream,
+      specialisations: row.specialization || scored?.specialisations || null,
+      eligibility: scored?.eligibility ?? null,
+      keyExams: row.keyExams || scored?.keyExams || null,
+      explanation: row.reasoning || scored?.explanation || null,
+      // null (not 0) when there's no scored match — see the same comment in
+      // buildStreamFitFromPersistedTable above.
+      fitScore: scored?.fitScore ?? (null as unknown as number),
+      level: scored?.level ?? "Not Scored",
+      meaning: scored?.meaning ?? "This pathway wasn't matched against a scored assessment option.",
+    };
+  });
+
+  return { ranked: graduationFit.ranked, top3 };
+}
+
 // Assembles the full student assessment report as one structured payload — the frontend
 // renders the print/PDF view from this. Pulls together: the computed AssessmentReport
 // (from the latest submitted attempt), the counsellor-authored narrative (CounsellorChart
@@ -140,8 +302,28 @@ export async function assembleStudentAssessmentReport(studentId: string) {
   // Feedback is a bonus section — never let it break report assembly.
   const feedback = await getStudentFeedbackScore(studentId).catch(() => null);
 
-  const counsellorJobRoleCards = await loadCounsellorJobRoleCards(studentId);
-  const careerCompass = mergeCounsellorJobRoles(report.careerFit, counsellorJobRoleCards);
+  // Once the counsellor has saved any edit to the chart's Career Compass table, that
+  // persisted row set is authoritative — the report must match what they see/edited on
+  // the chart exactly (see buildCareerCompassFromPersistedTable). Before their first save
+  // (chart.careerCompassTable is still null), fall back to the pure algorithmic top-6 plus
+  // any job roles added via the separate Career Library "scoped to this student" flow.
+  const persistedCompassTable = (chart?.careerCompassTable as PersistedCareerCompassItem[] | null) ?? null;
+  const careerCompass = persistedCompassTable
+    ? await buildCareerCompassFromPersistedTable(report.careerFit, persistedCompassTable)
+    : mergeCounsellorJobRoles(report.careerFit, await loadCounsellorJobRoleCards(studentId));
+
+  // Same "report matches the chart" guarantee for Stream Fit and Graduation Pathways —
+  // once the counsellor has saved an edit to either table on the chart, the report shows
+  // exactly those rows instead of an independently recomputed top-3.
+  const persistedStreamFitTable = (chart?.streamFitTable as PersistedStreamFitItem[] | null) ?? null;
+  const streamFit = persistedStreamFitTable
+    ? buildStreamFitFromPersistedTable(report.streamFit, persistedStreamFitTable)
+    : report.streamFit;
+
+  const persistedGraduationTable = (chart?.graduationTable as PersistedGraduationItem[] | null) ?? null;
+  const graduationPathways = persistedGraduationTable
+    ? buildGraduationFitFromPersistedTable(report.graduationPathways, persistedGraduationTable)
+    : report.graduationPathways;
 
   const counsellorNarrative = chart
     ? {
@@ -171,7 +353,7 @@ export async function assembleStudentAssessmentReport(studentId: string) {
   return {
     student: {
       id: student.id,
-      name: `${student.user.firstName} ${student.user.lastName}`,
+      name: `${student.user.firstName} ${student.user.lastName}`.trim(),
       email: student.user.email,
       studentCode: student.studentCode,
       academicYear: student.academicYear,
@@ -195,8 +377,8 @@ export async function assembleStudentAssessmentReport(studentId: string) {
       cognitive: report.cognitive,
     },
     careerCompass, // top6Domains (+ representative careers) + top3Industries, or null — counsellor-added job roles take priority seats
-    streamFit: report.streamFit, // { top3, ranked }
-    graduationPathways: report.graduationPathways, // { top3, ranked }
+    streamFit, // { top3, ranked }
+    graduationPathways, // { top3, ranked }
     reliability: report.reliability, // { ari, aci, ori, rvs }
     counsellorNarrative,
     feedback,
