@@ -13,5 +13,14 @@
 // function or server"). Importing source keeps the whole function in one bundle whose
 // default export is unambiguously the Express app.
 import { createApp } from "../src/app.js";
+import { loadScoringReferenceData } from "../src/modules/assessment/scoring/data/store.js";
+
+// src/server.ts's boot sequence (app.listen()) never runs here, so this is the only
+// place that can load the assessment scoring engine's in-memory reference cache before
+// a request needs it — without this, every assessment submission throws "Scoring
+// reference data not loaded" (store.ts's getCache() guard). A warm Lambda instance
+// reuses this module's already-resolved state across invocations, so this only runs
+// once per cold start, same as the local server.
+await loadScoringReferenceData();
 
 export default createApp();
