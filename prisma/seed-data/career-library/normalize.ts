@@ -188,6 +188,7 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
   const ugCourses = await prisma.ugCourse.findMany({
     select: {
       courseName: true,
+      careerCluster: true,
       fullForm: true,
       durationYears: true,
       stream12thRequirements: true,
@@ -234,15 +235,17 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
   );
 
   // --- Load canonical id maps ---
-  const [examRows, instRows, courseRows, ugInstByIndustry] = await Promise.all([
+  const [examRows, instRows, courseRows, ugInstByIndustry, clusterRows] = await Promise.all([
     prisma.entranceExam.findMany({ select: { id: true, name: true, level: true } }),
     prisma.institution.findMany({ select: { id: true, name: true } }),
     prisma.course.findMany({ select: { id: true, name: true, level: true } }),
     prisma.ugInstitution.findMany({ select: { industry: true, name: true } }),
+    prisma.careerCluster.findMany({ select: { id: true, name: true } }),
   ]);
   const examId = new Map(examRows.map((r) => [`${r.name}||${r.level}`, r.id]));
   const instId = new Map(instRows.map((r) => [r.name, r.id]));
   const courseId = new Map(courseRows.map((r) => [`${r.name}||${r.level}`, r.id]));
+  const clusterIdByName = new Map(clusterRows.map((r) => [r.name, r.id]));
 
   // industry -> set of institution names (for the college backfill via industry match)
   const industryInst = new Map<string, Set<string>>();
@@ -252,6 +255,32 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
     if (!ind || !nm) continue;
     if (!industryInst.has(ind)) industryInst.set(ind, new Set());
     industryInst.get(ind)!.add(nm);
+  }
+
+  // "UG Courses" tab's careerCluster column doesn't always spell a cluster name exactly as
+  // CareerCluster does — verified by hand against the 13 seeded clusters. "Engineering + IT"
+  // covers both; "Multiple (Discipline-dependent)" isn't scoped to any one cluster, so it
+  // fans out to all of them rather than being dropped.
+  const allClusterNames = clusterRows.map((r) => r.name);
+  const CLUSTER_ALIASES: Record<string, string[]> = {
+    "Engineering + IT": ["Engineering", "Information Technology & Digital"],
+    "Multiple (Discipline-dependent)": allClusterNames,
+  };
+  const expandClusterNames = (name: string): string[] => CLUSTER_ALIASES[name] ?? [name];
+
+  // cluster -> set of UG course names (for the course backfill via cluster match, same
+  // shape as the industry-based college backfill above — see
+  // docs/career-library-normalization-spec.md §9).
+  const clusterCourses = new Map<string, Set<string>>();
+  for (const c of ugCourses) {
+    const nm = clean(c.courseName);
+    if (!nm) continue;
+    for (const clusterName of expandClusterNames(clean(c.careerCluster))) {
+      const cId = clusterIdByName.get(clusterName);
+      if (!cId) continue;
+      if (!clusterCourses.has(cId)) clusterCourses.set(cId, new Set());
+      clusterCourses.get(cId)!.add(nm);
+    }
   }
 
   // --- Backfill join rows ---
@@ -278,6 +307,15 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       const id = instId.get(nm);
       // Institutions are shared at the industry level — same as courses above.
       if (id) instJoins.push({ industryId: e.industryId, institutionId: id });
+    }
+  }
+  // Course-cluster backfill is cluster-scoped, not per-entry — mirrors the industry-based
+  // college backfill above but iterates clusters directly since there's no per-entry field
+  // to walk (entries' topCourses is the legacy per-entry source and is empty post-2609-import).
+  for (const [cId, names] of clusterCourses) {
+    for (const nm of names) {
+      const id = courseId.get(`${nm}||UG`);
+      if (id) courseJoins.push({ clusterId: cId, courseId: id });
     }
   }
 

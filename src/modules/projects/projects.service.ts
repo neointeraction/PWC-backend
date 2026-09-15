@@ -316,12 +316,21 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
     // Fire-and-forget, same as the standalone student-create endpoint — only sent once the
     // transaction has actually committed, so a rolled-back wizard never emails anyone.
     for (const s of pendingEmails) {
-      sendEmailBestEffort(s.email, "LOGIN_CREDENTIALS_STUDENT", {
+      // Chained, not fired independently, so WELCOME_STUDENT (which promises "details in
+      // the next mail") actually goes out before LOGIN_CREDENTIALS_STUDENT — see
+      // students.service.ts's createStudent for the same pattern.
+      sendTemplateEmail(s.email, "WELCOME_STUDENT", {
         studentName: `${s.firstName} ${s.lastName}`,
-        loginId: s.email,
-        defaultPassword: s.tempPassword,
-        loginLink: env.APP_WEB_URL,
-      });
+      })
+        .catch((err) => console.error(`[projects] failed to send WELCOME_STUDENT to ${s.email}:`, err))
+        .finally(() => {
+          sendEmailBestEffort(s.email, "LOGIN_CREDENTIALS_STUDENT", {
+            studentName: `${s.firstName} ${s.lastName}`,
+            loginId: s.email,
+            defaultPassword: s.tempPassword,
+            loginLink: env.APP_WEB_URL,
+          });
+        });
       if (s.parentEmail) {
         sendEmailBestEffort(s.parentEmail, "WELCOME_PARENT", {
           parentName: s.fatherName || s.motherName || "Parent",

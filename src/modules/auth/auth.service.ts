@@ -14,6 +14,16 @@ function hashToken(rawToken: string): string {
   return crypto.createHash("sha256").update(rawToken).digest("hex");
 }
 
+// Fire-and-forget, matching the pattern in students.service.ts/sessions.service.ts/etc.
+// forgotPassword must resolve identically whether or not the email exists (see comment
+// there) — letting a provider failure throw here would surface as a 500 only for real
+// accounts, an error-shape tell an attacker could use to enumerate emails.
+function sendEmailBestEffort(to: string, templateKey: Parameters<typeof sendTemplateEmail>[1], data: unknown): void {
+  sendTemplateEmail(to, templateKey, data).catch((err) => {
+    console.error(`[auth] failed to send ${templateKey} to ${to}:`, err);
+  });
+}
+
 function signAccessToken(user: Pick<User, "id" | "role" | "email">): string {
   const payload: AccessTokenPayload = { sub: user.id, role: user.role, email: user.email };
   return jwt.sign(payload, env.JWT_ACCESS_SECRET, { expiresIn: env.JWT_ACCESS_EXPIRES_IN } as jwt.SignOptions);
@@ -145,7 +155,7 @@ export async function forgotPassword(email: string): Promise<{ rawToken: string 
   });
 
   const resetLink = `${env.APP_WEB_URL}/reset-password-confirm?token=${rawToken}`;
-  await sendTemplateEmail(user.email, "PASSWORD_RESET", {
+  sendEmailBestEffort(user.email, "PASSWORD_RESET", {
     name: user.firstName,
     resetLink,
     expiresInText: env.PASSWORD_RESET_EXPIRES_IN,

@@ -17,8 +17,8 @@ export function renderLayout(bodyHtml: string): string {
                     <td align="left" valign="middle">
                       <img src="cid:${KREATE_LOGO_CID}" alt="Kreate" width="120" height="47" style="display:block;border:0;max-width:120px;height:auto;" />
                     </td>
-                    <td align="right" valign="middle" style="color:#4c1d95;font-size:14px;font-weight:bold;line-height:1.4;">
-                      Career<br />Counselling
+                    <td align="right" valign="middle" style="color:#4c1d95;font-size:14px;font-weight:bold;white-space:nowrap;">
+                      Career Counselling
                     </td>
                   </tr>
                 </table>
