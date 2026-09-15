@@ -104,12 +104,21 @@ export async function createStudent(input: CreateStudentInput) {
       });
     });
 
-    sendEmailBestEffort(student.user.email, "LOGIN_CREDENTIALS_STUDENT", {
+    // Chained (not both fired independently) so the welcome mail is actually dispatched
+    // before the credentials mail — WELCOME_STUDENT's copy promises "details in the next
+    // mail", so send order matters here, unlike other best-effort sends in this file.
+    sendTemplateEmail(student.user.email, "WELCOME_STUDENT", {
       studentName: `${student.user.firstName} ${student.user.lastName}`,
-      loginId: student.user.email,
-      defaultPassword: tempPassword,
-      loginLink: env.APP_WEB_URL,
-    });
+    })
+      .catch((err) => console.error(`[students] failed to send WELCOME_STUDENT to ${student.user.email}:`, err))
+      .finally(() => {
+        sendEmailBestEffort(student.user.email, "LOGIN_CREDENTIALS_STUDENT", {
+          studentName: `${student.user.firstName} ${student.user.lastName}`,
+          loginId: student.user.email,
+          defaultPassword: tempPassword,
+          loginLink: env.APP_WEB_URL,
+        });
+      });
 
     if (student.parentEmail) {
       sendEmailBestEffort(student.parentEmail, "WELCOME_PARENT", {
