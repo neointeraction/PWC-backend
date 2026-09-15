@@ -264,7 +264,7 @@ describe("Students API", () => {
     expect(otherClass.body.some((s: { id: string }) => s.id === studentId)).toBe(false);
   });
 
-  it("rejects a duplicate parent mobile with 409", async () => {
+  it("allows siblings to share a parent mobile", async () => {
     await authRequest(app).post("/api/v1/students").send({
       firstName: "Meera",
       lastName: "Iyer",
@@ -299,7 +299,8 @@ describe("Students API", () => {
       motherOccupation: "Doctor",
     });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(201);
+    expect(res.body.student.parentMobile).toBe("9876500099");
   });
 
   it("discontinues a student (marking inactive without deleting) and can reinstate them", async () => {

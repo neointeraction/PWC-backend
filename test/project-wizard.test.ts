@@ -118,7 +118,19 @@ describe("Project wizard API", () => {
           fromDate: "2026-01-01",
           toDate: "2026-12-31",
         },
-        students: [],
+        students: [
+          {
+            firstName: "Wiz",
+            lastName: "StudentB",
+            email: "wiz-student-b@test-wizard.example",
+            mobile: "+919876590202",
+            studentCode: "SWIZB",
+            className: "Grade 9",
+            divisionName: "A",
+            parentMobile: "+919876590203",
+            parentEmail: "wiz-parent-b@test-wizard.example",
+          },
+        ],
         counsellorSlots: [
           { counsellorCode: "CWIZEXIST", date: "2026-02-01", startTime: "09:00", endTime: "09:30" },
         ],
@@ -151,7 +163,19 @@ describe("Project wizard API", () => {
           fromDate: "2026-01-01",
           toDate: "2026-12-31",
         },
-        students: [],
+        students: [
+          {
+            firstName: "Wiz",
+            lastName: "StudentC",
+            email: "wiz-student-c@test-wizard.example",
+            mobile: "+919876590302",
+            studentCode: "SWIZC",
+            className: "Grade 9",
+            divisionName: "A",
+            parentMobile: "+919876590303",
+            parentEmail: "wiz-parent-c@test-wizard.example",
+          },
+        ],
         counsellorSlots: [
           { counsellorCode: "CWIZUNKNOWN", date: "2026-02-01", startTime: "09:00", endTime: "09:30" },
         ],
