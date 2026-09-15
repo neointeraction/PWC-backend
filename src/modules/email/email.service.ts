@@ -3,6 +3,7 @@ import { BadRequestError } from "../../common/errors/AppError.js";
 import { createConsoleProvider } from "./providers/console.provider.js";
 import { createMailgunProvider } from "./providers/mailgun.provider.js";
 import { createResendProvider } from "./providers/resend.provider.js";
+import { createPostmarkProvider } from "./providers/postmark.provider.js";
 import type { EmailProvider, SendEmailResult } from "./providers/email-provider.js";
 import { emailTemplateRegistry, renderEmailTemplate, type EmailTemplateKey } from "./templates/index.js";
 
@@ -17,7 +18,9 @@ function getProvider(): EmailProvider {
         ? createMailgunProvider()
         : env.EMAIL_PROVIDER === "resend"
           ? createResendProvider()
-          : createConsoleProvider();
+          : env.EMAIL_PROVIDER === "postmark"
+            ? createPostmarkProvider()
+            : createConsoleProvider();
   }
   return cachedProvider;
 }
@@ -39,7 +42,13 @@ export async function sendTemplateEmail(
 
   const rendered = renderEmailTemplate(templateKey, parsed.data as never);
   const provider = getProvider();
-  const result = await provider.send({ to, subject: rendered.subject, html: rendered.html, text: rendered.text });
+  const result = await provider.send({
+    to,
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+    inlineImages: rendered.inlineImages,
+  });
 
   return { ...result, subject: rendered.subject, provider: provider.name };
 }

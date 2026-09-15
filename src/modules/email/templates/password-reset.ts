@@ -14,8 +14,8 @@ export function renderPasswordResetEmail(data: PasswordResetData) {
   const body = [
     paragraph(`Hi ${name},`),
     heading("Reset Your Password"),
-    paragraph("We received a request to reset your kREATE account password. Click the button below to choose a new one."),
     button("Reset Password", resetLink),
+    paragraph("We received a request to reset your kREATE account password."),
     paragraph(`This link expires in ${expiresInText} and can be used once.`),
     paragraph("If you didn't request this, you can safely ignore this email — your password won't change."),
   ].join("");

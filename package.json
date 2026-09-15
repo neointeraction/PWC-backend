@@ -35,6 +35,7 @@
     "jsonwebtoken": "^9.0.2",
     "mailgun.js": "^13.3.0",
     "node-cron": "^4.6.0",
+    "postmark": "^5.1.0",
     "resend": "^6.26.0",
     "swagger-ui-express": "^5.0.1",
     "zod": "^3.24.1"

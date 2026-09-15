@@ -15,9 +15,9 @@ export function renderLoginCredentialsStudentEmail(data: LoginCredentialsStudent
   const body = [
     paragraph(`Hi ${studentName},`),
     heading("Your Login Credentials"),
+    button("Log In", loginLink),
     paragraph(`Login ID: ${loginId}`),
     paragraph(`Password: ${defaultPassword}`),
-    button("Log In", loginLink),
     paragraph(
       "This is a default password. On first login you'll be asked to change it. This is the step that activates your account."
     ),

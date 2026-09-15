@@ -1,3 +1,5 @@
+import { KREATE_LOGO_CID } from "./logo.js";
+
 // Shared HTML shell so every template gets consistent, email-client-safe styling
 // without repeating the boilerplate in each template file.
 export function renderLayout(bodyHtml: string): string {
@@ -9,8 +11,17 @@ export function renderLayout(bodyHtml: string): string {
         <td align="center">
           <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;">
             <tr>
-              <td style="background-color:#4c1d95;padding:20px 32px;">
-                <span style="color:#ffffff;font-size:20px;font-weight:bold;">kREATE Career Counselling</span>
+              <td style="padding:20px 32px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td align="left" valign="middle">
+                      <img src="cid:${KREATE_LOGO_CID}" alt="Kreate" width="120" height="47" style="display:block;border:0;max-width:120px;height:auto;" />
+                    </td>
+                    <td align="right" valign="middle" style="color:#4c1d95;font-size:14px;font-weight:bold;line-height:1.4;">
+                      Career<br />Counselling
+                    </td>
+                  </tr>
+                </table>
               </td>
             </tr>
             <tr>
@@ -19,8 +30,8 @@ export function renderLayout(bodyHtml: string): string {
               </td>
             </tr>
             <tr>
-              <td style="padding:20px 32px;background-color:#fafafa;color:#71717a;font-size:12px;">
-                Team kREATE | Design Destiny
+              <td align="center" style="padding:20px 32px;background-color:#fafafa;color:#71717a;font-size:12px;text-align:center;">
+                &copy;<a href="https://designdestiny.org/" style="color:#71717a;text-decoration:underline;">Design Destiny</a>. All Rights Reserved.
               </td>
             </tr>
           </table>

@@ -25,7 +25,7 @@ const envSchema = z.object({
 
   // Email — EMAIL_PROVIDER selects the active provider so it can be swapped without
   // touching call sites. "console" just logs the email (safe default for local dev).
-  EMAIL_PROVIDER: z.enum(["console", "mailgun", "resend"]).default("console"),
+  EMAIL_PROVIDER: z.enum(["console", "mailgun", "resend", "postmark"]).default("console"),
   EMAIL_FROM_NAME: z.string().default("Team kREATE"),
   EMAIL_FROM_ADDRESS: z.string().email().default("noreply@example.com"),
   MAILGUN_API_KEY: z.string().optional(),
@@ -33,6 +33,9 @@ const envSchema = z.object({
   // "us" (Mailgun's American endpoint, api.mailgun.net) or "eu" (api.eu.mailgun.net).
   MAILGUN_REGION: z.enum(["us", "eu"]).default("us"),
   RESEND_API_KEY: z.string().optional(),
+  POSTMARK_API_KEY: z.string().optional(),
+  // Optional Postmark message stream (defaults to "outbound" server-side if unset).
+  POSTMARK_MESSAGE_STREAM: z.string().optional(),
   // Fixed inbox for operational alerts that aren't addressed to a specific student/
   // parent/counsellor (currently: session no-show flags — see sessions.service.ts).
   // No code path queries ADMIN/SUPER_ADMIN users for this; it's config, not a lookup.
@@ -77,6 +80,11 @@ if (parsed.data.EMAIL_PROVIDER === "mailgun" && (!parsed.data.MAILGUN_API_KEY ||
 
 if (parsed.data.EMAIL_PROVIDER === "resend" && !parsed.data.RESEND_API_KEY) {
   console.error("RESEND_API_KEY is required when EMAIL_PROVIDER=resend");
+  throw new Error("Invalid environment variables");
+}
+
+if (parsed.data.EMAIL_PROVIDER === "postmark" && !parsed.data.POSTMARK_API_KEY) {
+  console.error("POSTMARK_API_KEY is required when EMAIL_PROVIDER=postmark");
   throw new Error("Invalid environment variables");
 }
 

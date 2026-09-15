@@ -18,6 +18,16 @@ export function createResendProvider(): EmailProvider {
         subject: email.subject,
         html: email.html,
         text: email.text,
+        ...(email.inlineImages?.length
+          ? {
+              attachments: email.inlineImages.map((image) => ({
+                filename: image.filename,
+                content: image.base64Content,
+                contentType: image.contentType,
+                contentId: image.cid,
+              })),
+            }
+          : {}),
       });
 
       if (result.error) {

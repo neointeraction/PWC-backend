@@ -1,6 +1,8 @@
 import type { z } from "zod";
+import type { InlineImage } from "../providers/email-provider.js";
 import { feedbackRequestParentDataSchema, renderFeedbackRequestParentEmail } from "./feedback-request-parent.js";
 import { loginCredentialsStudentDataSchema, renderLoginCredentialsStudentEmail } from "./login-credentials-student.js";
+import { KREATE_LOGO_BASE64, KREATE_LOGO_CID, KREATE_LOGO_CONTENT_TYPE } from "./logo.js";
 import { passwordResetDataSchema, renderPasswordResetEmail } from "./password-reset.js";
 import { preCounsellingParentDataSchema, renderPreCounsellingParentEmail } from "./pre-counselling-parent.js";
 import * as reminders from "./reminders.js";
@@ -14,7 +16,19 @@ export interface RenderedEmail {
   subject: string;
   html: string;
   text: string;
+  inlineImages?: InlineImage[];
 }
+
+// Every template's HTML references the kREATE logo via `cid:${KREATE_LOGO_CID}`
+// (see layout.ts) rather than a data-URI, since data-URI images are stripped or
+// blocked by several email clients. Attaching it here, once, means every provider
+// send call carries the inline image without each template having to know about it.
+const LOGO_INLINE_IMAGE: InlineImage = {
+  cid: KREATE_LOGO_CID,
+  filename: KREATE_LOGO_CID,
+  contentType: KREATE_LOGO_CONTENT_TYPE,
+  base64Content: KREATE_LOGO_BASE64,
+};
 
 // One entry per kREATE communication template: the 8 rich lifecycle templates from
 // docs/11.Class 910_Communication EMail Templates.pdf, the 31 reminder/session-status
@@ -84,5 +98,6 @@ export function renderEmailTemplate<K extends EmailTemplateKey>(
 ): RenderedEmail {
   const entry = emailTemplateRegistry[templateKey];
   const parsedData = entry.schema.parse(data);
-  return entry.render(parsedData as never);
+  const rendered = entry.render(parsedData as never);
+  return { ...rendered, inlineImages: [LOGO_INLINE_IMAGE] };
 }

@@ -27,6 +27,14 @@ export function createMailgunProvider(): EmailProvider {
         subject: email.subject,
         html: email.html,
         text: email.text,
+        ...(email.inlineImages?.length
+          ? {
+              inline: email.inlineImages.map((image) => ({
+                data: Buffer.from(image.base64Content, "base64"),
+                filename: image.filename,
+              })),
+            }
+          : {}),
       });
 
       return { providerMessageId: result.id ?? "unknown" };

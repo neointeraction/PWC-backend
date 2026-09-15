@@ -13,6 +13,7 @@ export function renderPreCounsellingParentEmail(data: PreCounsellingParentData) 
   const body = [
     paragraph(`Hi ${parentName},`),
     paragraph("This is not a report card, and it is not about evaluating your child."),
+    button("Complete Pre-Counselling Form", formLink),
     paragraph(
       "As a parent, you observe your child in contexts that no teacher or counsellor ever sees - at home, in unguarded moments. That perspective is irreplaceable, and this form is how you share it."
     ),
@@ -27,9 +28,8 @@ export function renderPreCounsellingParentEmail(data: PreCounsellingParentData) 
       <li>Answer based on what you genuinely observe, not what you hope for. Accurate observations including doubts, concerns, or gaps give the counsellor the clearest picture to work from.</li>
     </ul>`,
     paragraph(
-      "Please complete the form using the link below. Kindly finish it in one sitting, the link expires once submitted and cannot be edited afterward."
+      "Please complete the form using the button above. Kindly finish it in one sitting, the link expires once submitted and cannot be edited afterward."
     ),
-    button("Complete Pre-Counselling Form", formLink),
     paragraph("All the Best!"),
   ].join("");
 

@@ -16,7 +16,6 @@ export function renderFeedbackRequestParentEmail(data: FeedbackRequestParentData
     paragraph(
       `${studentName}'s counselling sessions are now complete. Before the final Career kREATE Report can be released, we need feedback from both ${studentName} and you.`
     ),
-    paragraph("Please take a few minutes to share your feedback using the link below:"),
     button("Share Feedback", feedbackFormLink),
     paragraph(
       "The report becomes available for download as soon as both feedback forms are submitted, so we'd appreciate you completing yours at the earliest."
