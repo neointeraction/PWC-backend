@@ -246,7 +246,7 @@ model Student {
   whatsappNumber   String?
   // Primary contact for parent communication (session links, pre-counselling/feedback
   // links) — captured on the Student Profile Form, Section A.
-  parentMobile     String?           @unique
+  parentMobile     String?
   parentEmail      String?
   // Student Profile Form, Section B/C — captured separately per parent.
   fatherName       String

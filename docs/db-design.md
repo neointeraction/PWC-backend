@@ -197,7 +197,7 @@ Extends `User` (role=STUDENT).
 | divisionName | String | free text (e.g. "A") — same, no lookup |
 | mobile | String | unique, E.164 |
 | whatsappNumber | String? | optional, only if different from mobile |
-| parentMobile | String? | optional, unique when set, E.164; primary contact for session links/notifications (Student Profile Form, Section A) — left empty rather than falling back to the student's own `mobile` |
+| parentMobile | String? | optional, not unique (siblings may share a parent's number), E.164; primary contact for session links/notifications (Student Profile Form, Section A) — left empty rather than falling back to the student's own `mobile` |
 | parentEmail | String? | optional, not unique (siblings can share a parent's email); primary contact — `PRE_COUNSELLING_PARENT` and the various session-lifecycle parent emails are skipped (not sent) when this is unset |
 | fatherName | String | Student Profile Form, Section B |
 | fatherOccupation | String? | optional (bulk imports may omit) |

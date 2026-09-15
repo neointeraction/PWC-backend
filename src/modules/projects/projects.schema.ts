@@ -93,7 +93,9 @@ export type WizardCounsellorSlot = z.infer<typeof wizardCounsellorSlotSchema>;
 
 export const createProjectWizardSchema = z.object({
   project: createProjectSchema,
-  students: z.array(createStudentSchema.omit({ projectId: true })).default([]),
+  students: z
+    .array(createStudentSchema.omit({ projectId: true }))
+    .min(1, "At least one student is required"),
   counsellorSlots: z.array(wizardCounsellorSlotSchema).default([]),
 });
 export type CreateProjectWizardInput = z.infer<typeof createProjectWizardSchema>;
