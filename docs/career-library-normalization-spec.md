@@ -229,3 +229,38 @@ cluster/industry shows and edits the same list, not an independent copy.
   which exams/qualifications lead to a role is genuinely role-specific in a way a "top
   courses" or "top colleges" list for an entire cluster/industry isn't.
 ```
+
+## 10. Reverted: courses and institutions curated per job role again (2026-09-16)
+
+**Confirmed:** §9's shared-list design turned out to be the wrong call — editing one job
+role's courses/institutions must not silently edit a sibling role's, even when they roll up
+to the same cluster/industry. `CareerCourse`/`CareerInstitution` move back to being keyed by
+`careerEntryId`, exactly like `CareerEntranceExam`/`CareerEducationEntry` already are. Every
+lookup table (exams, courses, institutions, education entries) is now curated per job role
+the same way.
+
+- `CareerCourse` is `careerEntryId` + `courseId` again (was `clusterId` + `courseId`);
+  `CareerInstitution` is `careerEntryId` + `institutionId` again (was `industryId` +
+  `institutionId`). Migration `20260916064514_career_course_institution_per_job_role`
+  expands each cluster's/industry's existing shared list onto every job role that was reading
+  it at the time (a one-time copy — 80 cluster-level course rows became ~9.6k per-role rows;
+  689 industry-level institution rows became ~19.7k), so no job role lost anything on the
+  cutover; from then on each role's list is independently editable.
+- **Create/Update** (`POST`/`PATCH /career-library`, proposal approve): `courses`/
+  `institutions` link straight onto this entry's own `careerEntryId`, no cluster/industry
+  lookup involved — same "provided array replaces, omitted array is left alone" rule as
+  exams, now actually scoped to just this job role.
+- **Seeding still uses the cluster/industry mapping** (`prisma/seed-data/career-library/
+  normalize.ts`): the source workbook's cluster→courses and industry→institutions mapping is
+  expanded onto every job role under that cluster/industry as each entry's *starting* list —
+  seeding is the only place cluster/industry membership drives what gets linked. After that,
+  admin/counsellor edits touch one job role at a time.
+- `?domainId=` scoping on the courses/institutions dropdowns goes back to meaning "what has
+  this domain's own job role(s) linked" (via the join table's `careerEntry.domainId`), the
+  same mechanism exams/education entries already used.
+- **Master-data cleanup:** removing a course/institution/exam/education-entry id from a job
+  role's link array (via `PATCH`, or deleting the job role outright) now checks whether that
+  canonical row still has *any* remaining link, anywhere, and deletes it if not — reference
+  data an admin explicitly reviewed and approved is treated the same as a counsellor's
+  proposal once nothing points at it any more. This is separate from (and in addition to) the
+  explicit reviewer reject flow in §7, which only ever applied to non-`ACTIVE` rows.

@@ -444,13 +444,14 @@ model CareerLibraryEntry {
 
   // Normalized many-to-many links (the String[] columns above are kept transitionally and
   // dropped once these are verified — see docs/career-library-normalization-spec.md).
-  // Courses and institutions are NOT linked here — they're shared at the cluster/industry
-  // level (see CareerCluster.courseLinks / CareerIndustry.institutionLinks below): every job
-  // role under the same cluster shares one course list, and every job role under the same
-  // industry shares one institution list, so an add/remove from any job role's screen is
-  // visible on every sibling role. Only entrance exams stay curated per job role.
+  // Courses and institutions are curated per job role, same as entrance exams — editing one
+  // job role's list never affects a sibling role's, even under the same cluster/industry.
+  // Cluster/industry mappings are only used to seed each role's initial list (see
+  // prisma/seed-data/career-library/normalize.ts); after that each role's list is independent.
   entranceExamLinks CareerEntranceExam[]
   educationLinks    CareerEducationEntry[]
+  courseLinks       CareerCourse[]
+  institutionLinks  CareerInstitution[]
 
   @@index([domainId])
   @@index([studentId])
@@ -534,9 +535,6 @@ model CareerCluster {
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
   industries CareerIndustry[]
-  // Shared course list for every job role whose leaf domain rolls up to this cluster — see
-  // the comment on CareerLibraryEntry.entranceExamLinks.
-  courseLinks CareerCourse[]
 
   @@map("career_clusters")
 }
@@ -550,8 +548,6 @@ model CareerIndustry {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   domains   CareerDomain[]
-  // Shared institution list for every job role whose leaf domain rolls up to this industry.
-  institutionLinks CareerInstitution[]
 
   @@index([clusterId])
   @@map("career_industries")
@@ -857,30 +853,28 @@ model CareerEntranceExam {
   @@map("career_entrance_exams")
 }
 
-// Keyed by industryId (not careerEntryId): institutions are shared across every job role
-// under the same industry, not curated per job role. See CareerLibraryEntry's comment.
+// Curated per job role, same shape as CareerEntranceExam — see CareerLibraryEntry's comment.
 model CareerInstitution {
-  industryId    String
+  careerEntryId String
   institutionId String
-  industry      CareerIndustry @relation(fields: [industryId], references: [id], onDelete: Cascade)
-  institution   Institution    @relation(fields: [institutionId], references: [id], onDelete: Cascade)
-  createdAt     DateTime       @default(now())
+  careerEntry   CareerLibraryEntry @relation(fields: [careerEntryId], references: [id], onDelete: Cascade)
+  institution   Institution        @relation(fields: [institutionId], references: [id], onDelete: Cascade)
+  createdAt     DateTime           @default(now())
 
-  @@id([industryId, institutionId])
+  @@id([careerEntryId, institutionId])
   @@index([institutionId])
   @@map("career_institutions")
 }
 
-// Keyed by clusterId (not careerEntryId): courses are shared across every job role under the
-// same cluster, not curated per job role. See CareerLibraryEntry's comment.
+// Curated per job role, same shape as CareerEntranceExam — see CareerLibraryEntry's comment.
 model CareerCourse {
-  clusterId String
-  courseId  String
-  cluster   CareerCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
-  course    Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  createdAt DateTime      @default(now())
+  careerEntryId String
+  courseId      String
+  careerEntry   CareerLibraryEntry @relation(fields: [careerEntryId], references: [id], onDelete: Cascade)
+  course        Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  createdAt     DateTime           @default(now())
 
-  @@id([clusterId, courseId])
+  @@id([careerEntryId, courseId])
   @@index([courseId])
   @@map("career_courses")
 }

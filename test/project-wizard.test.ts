@@ -151,7 +151,7 @@ describe("Project wizard API", () => {
     await prisma.user.delete({ where: { id: existingCounsellorUser.id } });
   });
 
-  it("rejects a new counsellorCode with no identity row, and creates nothing", async () => {
+  it("skips an unknown counsellorCode with no identity row instead of failing the call", async () => {
     const res = await authRequest(app)
       .post("/api/v1/projects/wizard")
       .send({
@@ -181,13 +181,21 @@ describe("Project wizard API", () => {
         ],
       });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(201);
+    expect(res.body.studentsCreated).toBe(1);
+    expect(res.body.counsellorsAssigned).toBe(0);
+    expect(res.body.slotsImported).toBe(0);
+    expect(res.body.slotsSkipped).toHaveLength(1);
+    expect(res.body.slotsSkipped[0]).toMatchObject({ counsellorCode: "CWIZUNKNOWN" });
 
     const project = await prisma.project.findUnique({ where: { code: "PWIZ3" } });
-    expect(project).toBeNull();
+    expect(project).not.toBeNull();
+
+    const counsellor = await prisma.counsellor.findUnique({ where: { counsellorCode: "CWIZUNKNOWN" } });
+    expect(counsellor).toBeNull();
   });
 
-  it("rolls back the whole project when a student row conflicts on a duplicate field", async () => {
+  it("skips a student row that conflicts on a duplicate field, but still creates the rest", async () => {
     await prisma.user.create({
       data: {
         email: "wiz-dup@test-wizard.example",
@@ -221,13 +229,164 @@ describe("Project wizard API", () => {
             parentMobile: "+919876590403",
             parentEmail: "wiz-parent-d@test-wizard.example",
           },
+          {
+            firstName: "Clean",
+            lastName: "StudentD2",
+            email: "wiz-clean-d2@test-wizard.example",
+            mobile: "+919876590405",
+            studentCode: "SWIZD2",
+            className: "Grade 9",
+            divisionName: "A",
+            parentMobile: "+919876590406",
+            parentEmail: "wiz-parent-d2@test-wizard.example",
+          },
         ],
         counsellorSlots: [],
       });
 
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(201);
+    expect(res.body.studentsCreated).toBe(1);
+    expect(res.body.studentsSkipped).toHaveLength(1);
+    expect(res.body.studentsSkipped[0]).toMatchObject({ index: 0, reason: expect.stringContaining("email") });
 
     const project = await prisma.project.findUnique({ where: { code: "PWIZ4" } });
+    expect(project).not.toBeNull();
+
+    const skippedStudent = await prisma.student.findUnique({ where: { studentCode: "SWIZD" } });
+    expect(skippedStudent).toBeNull();
+
+    const createdStudent = await prisma.student.findUnique({ where: { studentCode: "SWIZD2" } });
+    expect(createdStudent).not.toBeNull();
+  });
+
+  it("still fails the whole call when every student row conflicts", async () => {
+    await prisma.user.create({
+      data: {
+        email: "wiz-dup-e@test-wizard.example",
+        passwordHash: "x",
+        role: "STUDENT",
+        firstName: "Dup",
+        lastName: "ExistingE",
+      },
+    });
+
+    const res = await authRequest(app)
+      .post("/api/v1/projects/wizard")
+      .send({
+        project: {
+          code: "PWIZ5",
+          name: "Test Project Wizard E",
+          contactNumber: "+919876590501",
+          primaryEmail: "wize@test-wizard.example",
+          fromDate: "2026-01-01",
+          toDate: "2026-12-31",
+        },
+        students: [
+          {
+            firstName: "Dup",
+            lastName: "StudentE",
+            email: "wiz-dup-e@test-wizard.example",
+            mobile: "+919876590502",
+            studentCode: "SWIZE",
+            className: "Grade 9",
+            divisionName: "A",
+            parentMobile: "+919876590503",
+            parentEmail: "wiz-parent-e@test-wizard.example",
+          },
+        ],
+        counsellorSlots: [],
+      });
+
+    expect(res.status).toBe(400);
+
+    const project = await prisma.project.findUnique({ where: { code: "PWIZ5" } });
     expect(project).toBeNull();
+  });
+
+  it("skips a counsellor slot that collides with an existing booking, but keeps the rest", async () => {
+    const existingCounsellorUser = await prisma.user.create({
+      data: {
+        email: "wiz-slot-counsellor@test-wizard.example",
+        passwordHash: "x",
+        role: "COUNSELLOR",
+        firstName: "Slot",
+        lastName: "Counsellor",
+      },
+    });
+    const existingCounsellor = await prisma.counsellor.create({
+      data: { userId: existingCounsellorUser.id, counsellorCode: "CWIZSLOT", mobile: "+919876590601" },
+    });
+    const priorProject = await prisma.project.create({
+      data: {
+        code: "PWIZPRIOR",
+        name: "Test Project Wizard Prior",
+        address: "1 Prior St",
+        contactNumber: "+919876590602",
+        primaryEmail: "wizprior@test-wizard.example",
+        fromDate: new Date("2026-01-01"),
+        toDate: new Date("2026-12-31"),
+        languageId: (await prisma.language.findFirstOrThrow({ where: { code: "en" } })).id,
+      },
+    });
+    await prisma.counsellorSlot.create({
+      data: {
+        counsellorId: existingCounsellor.id,
+        projectId: priorProject.id,
+        slotDate: new Date("2026-02-01T00:00:00.000Z"),
+        startTime: "10:00",
+        endTime: "10:30",
+      },
+    });
+
+    const res = await authRequest(app)
+      .post("/api/v1/projects/wizard")
+      .send({
+        project: {
+          code: "PWIZ6",
+          name: "Test Project Wizard F",
+          contactNumber: "+919876590701",
+          primaryEmail: "wizf@test-wizard.example",
+          fromDate: "2026-01-01",
+          toDate: "2026-12-31",
+        },
+        students: [
+          {
+            firstName: "Wiz",
+            lastName: "StudentF",
+            email: "wiz-student-f@test-wizard.example",
+            mobile: "+919876590702",
+            studentCode: "SWIZF",
+            className: "Grade 9",
+            divisionName: "A",
+            parentMobile: "+919876590703",
+            parentEmail: "wiz-parent-f@test-wizard.example",
+          },
+        ],
+        counsellorSlots: [
+          // Collides with the slot already booked on priorProject — same counsellor, same date+time.
+          { counsellorCode: "CWIZSLOT", date: "2026-02-01", startTime: "10:00", endTime: "10:30" },
+          { counsellorCode: "CWIZSLOT", date: "2026-02-01", startTime: "11:00", endTime: "11:30" },
+        ],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.counsellorsAssigned).toBe(1);
+    expect(res.body.slotsImported).toBe(1);
+    expect(res.body.slotsSkipped).toHaveLength(1);
+    expect(res.body.slotsSkipped[0]).toMatchObject({
+      counsellorCode: "CWIZSLOT",
+      date: "2026-02-01",
+      startTime: "10:00",
+      reason: expect.stringContaining("already booked"),
+    });
+
+    const project = await prisma.project.findUnique({ where: { code: "PWIZ6" } });
+    const slots = await prisma.counsellorSlot.findMany({ where: { projectId: project!.id } });
+    expect(slots).toHaveLength(1);
+    expect(slots[0]?.startTime).toBe("11:00");
+
+    await prisma.counsellorSlot.deleteMany({ where: { projectId: priorProject.id } });
+    await prisma.project.delete({ where: { id: priorProject.id } });
+    await prisma.user.delete({ where: { id: existingCounsellorUser.id } });
   });
 });

@@ -3,8 +3,9 @@ import { prisma } from "../src/config/prisma.js";
 import { computeEntranceExamsAndColleges } from "../src/modules/counsellor-chart/entrance-exams-colleges.js";
 
 // Verifies the join from careerFit.top3Industries -> CareerIndustry -> its domains'
-// CareerLibraryEntry (for exams) / its own institutionLinks (for colleges), including
-// dedup across industries and the ACTIVE-only status gate.
+// CareerLibraryEntry -> that entry's own institutionLinks/courseLinks (courses/institutions
+// are curated per job role, same as exams), including dedup across industries and the
+// ACTIVE-only status gate.
 
 describe("computeEntranceExamsAndColleges", () => {
   let clusterId: string;
@@ -80,19 +81,19 @@ describe("computeEntranceExamsAndColleges", () => {
     });
     await prisma.careerInstitution.createMany({
       data: [
-        { industryId: industryAId, institutionId: activeInstitution.id },
-        { industryId: industryAId, institutionId: pendingInstitution.id },
+        { careerEntryId: entryA.id, institutionId: activeInstitution.id },
+        { careerEntryId: entryA.id, institutionId: pendingInstitution.id },
       ],
     });
 
     const course = await prisma.course.create({ data: { name: "Test EEC Course", level: "UG", status: "ACTIVE" } });
-    await prisma.careerCourse.create({ data: { clusterId, courseId: course.id } });
+    await prisma.careerCourse.create({ data: { careerEntryId: entryA.id, courseId: course.id } });
   });
 
   afterAll(async () => {
     await prisma.careerEntranceExam.deleteMany({ where: { entranceExam: { name: { startsWith: "Test EEC" } } } });
     await prisma.careerInstitution.deleteMany({ where: { institution: { name: { startsWith: "Test EEC" } } } });
-    await prisma.careerCourse.deleteMany({ where: { clusterId } });
+    await prisma.careerCourse.deleteMany({ where: { course: { name: { startsWith: "Test EEC" } } } });
     await prisma.careerLibraryEntry.deleteMany({ where: { jobRole: { startsWith: "Test EEC" } } });
     await prisma.entranceExam.deleteMany({ where: { name: { startsWith: "Test EEC" } } });
     await prisma.institution.deleteMany({ where: { name: { startsWith: "Test EEC" } } });

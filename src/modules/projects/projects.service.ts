@@ -190,6 +190,18 @@ interface PendingStudentEmail {
   tempPassword: string;
 }
 
+interface StudentSkip {
+  index: number;
+  reason: string;
+}
+
+interface SlotSkip {
+  counsellorCode: string;
+  date: string;
+  startTime: string;
+  reason: string;
+}
+
 export async function createProjectWizard(input: CreateProjectWizardInput) {
   const languageId = await resolveLanguageId(input.project.languageId);
 
@@ -203,115 +215,272 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
   }
 
   try {
-    const { project, pendingEmails } = await prisma.$transaction(async (tx) => {
-      const project = await tx.project.create({
-        data: {
-          code: input.project.code,
-          name: input.project.name,
-          address: input.project.address ?? "",
-          contactNumber: input.project.contactNumber,
-          primaryEmail: input.project.primaryEmail,
-          fromDate: input.project.fromDate,
-          toDate: input.project.toDate,
-          status: input.project.status,
-          languageId,
-        },
-      });
-
-      // --- Students ---
-      const pendingEmails: PendingStudentEmail[] = [];
-      for (const s of input.students) {
-        const tempPassword = s.password ?? generateTempPassword();
-        const passwordHash = await argon2.hash(tempPassword);
-        const user = await tx.user.create({
-          data: { email: s.email, passwordHash, role: "STUDENT", firstName: s.firstName, lastName: s.lastName },
-        });
-        await tx.student.create({
+    const { project, pendingEmails, studentsSkipped, counsellorsAssigned, slotsImported, slotsSkipped } =
+      await prisma.$transaction(async (tx) => {
+        const project = await tx.project.create({
           data: {
-            userId: user.id,
-            studentCode: s.studentCode,
-            projectId: project.id,
-            className: s.className,
-            divisionName: s.divisionName,
-            mobile: s.mobile,
-            whatsappNumber: s.whatsappNumber,
-            parentMobile: s.parentMobile,
-            parentEmail: s.parentEmail,
-            // fatherName column is NOT NULL so default to ""; the others are nullable —
-            // mirrors createStudent in students.service.ts.
-            fatherName: s.fatherName ?? "",
-            fatherOccupation: s.fatherOccupation,
-            fatherEmployer: s.fatherEmployer,
-            motherName: s.motherName,
-            motherOccupation: s.motherOccupation,
-            motherEmployer: s.motherEmployer,
+            code: input.project.code,
+            name: input.project.name,
+            address: input.project.address ?? "",
+            contactNumber: input.project.contactNumber,
+            primaryEmail: input.project.primaryEmail,
+            fromDate: input.project.fromDate,
+            toDate: input.project.toDate,
+            status: input.project.status,
+            languageId,
           },
         });
-        pendingEmails.push({
-          email: s.email,
-          firstName: s.firstName,
-          lastName: s.lastName,
-          parentEmail: s.parentEmail,
-          fatherName: s.fatherName ?? "",
-          motherName: s.motherName ?? null,
-          tempPassword,
-        });
-      }
 
-      // --- Counsellors (match-or-create by counsellorCode) + project assignment ---
-      const counsellorIdByCode = new Map<string, string>();
-      for (const [code, rows] of rowsByCode) {
-        let counsellor = await tx.counsellor.findUnique({ where: { counsellorCode: code } });
-        if (!counsellor) {
-          const identityRow = rows.find((r) => r.email && r.firstName && r.lastName && r.mobile);
-          if (!identityRow) {
-            throw new BadRequestError(
-              `Counsellor "${code}" doesn't exist yet — at least one row for this counsellorCode needs firstName, lastName, email and mobile so it can be created`
-            );
+        // --- Students: batch-check every row against existing Users/Students (and
+        // against each other) *before* inserting anything, so a conflicting row is
+        // skipped instead of aborting the whole transaction. ---
+        const emails = [...new Set(input.students.map((s) => s.email))];
+        const studentCodes = [...new Set(input.students.map((s) => s.studentCode))];
+        const mobiles = [...new Set(input.students.map((s) => s.mobile))];
+
+        const existingUsers = await tx.user.findMany({
+          where: { email: { in: emails } },
+          select: { email: true },
+        });
+        const existingEmails = new Set(existingUsers.map((u) => u.email));
+
+        const existingStudents = await tx.student.findMany({
+          where: { OR: [{ studentCode: { in: studentCodes } }, { mobile: { in: mobiles } }] },
+          select: { studentCode: true, mobile: true },
+        });
+        const existingStudentCodes = new Set(existingStudents.map((s) => s.studentCode));
+        const existingMobiles = new Set(existingStudents.map((s) => s.mobile));
+
+        const studentsSkipped: StudentSkip[] = [];
+        const seenEmails = new Set<string>();
+        const seenStudentCodes = new Set<string>();
+        const seenMobiles = new Set<string>();
+        const validStudents: { row: (typeof input.students)[number]; index: number }[] = [];
+
+        input.students.forEach((s, index) => {
+          const reasons: string[] = [];
+          if (existingEmails.has(s.email) || seenEmails.has(s.email)) reasons.push("email already exists");
+          if (existingStudentCodes.has(s.studentCode) || seenStudentCodes.has(s.studentCode)) {
+            reasons.push("studentCode already exists");
           }
-          const passwordHash = await argon2.hash(generateTempPassword());
+          if (existingMobiles.has(s.mobile) || seenMobiles.has(s.mobile)) reasons.push("mobile already exists");
+
+          if (reasons.length > 0) {
+            studentsSkipped.push({ index, reason: reasons.join("; ") });
+            return;
+          }
+          seenEmails.add(s.email);
+          seenStudentCodes.add(s.studentCode);
+          seenMobiles.add(s.mobile);
+          validStudents.push({ row: s, index });
+        });
+
+        if (validStudents.length === 0) {
+          throw new BadRequestError(
+            "No students could be created — every row conflicted with an existing record",
+            { studentsSkipped }
+          );
+        }
+
+        const pendingEmails: PendingStudentEmail[] = [];
+        for (const { row: s } of validStudents) {
+          const tempPassword = s.password ?? generateTempPassword();
+          const passwordHash = await argon2.hash(tempPassword);
           const user = await tx.user.create({
-            data: {
-              email: identityRow.email!,
-              passwordHash,
-              role: "COUNSELLOR",
-              firstName: identityRow.firstName!,
-              lastName: identityRow.lastName!,
-            },
+            data: { email: s.email, passwordHash, role: "STUDENT", firstName: s.firstName, lastName: s.lastName },
           });
-          counsellor = await tx.counsellor.create({
+          await tx.student.create({
             data: {
               userId: user.id,
-              counsellorCode: code,
-              mobile: identityRow.mobile!,
-              meetingLink: identityRow.meetingLink,
+              studentCode: s.studentCode,
+              projectId: project.id,
+              className: s.className,
+              divisionName: s.divisionName,
+              mobile: s.mobile,
+              whatsappNumber: s.whatsappNumber,
+              parentMobile: s.parentMobile,
+              parentEmail: s.parentEmail,
+              // fatherName column is NOT NULL so default to ""; the others are nullable —
+              // mirrors createStudent in students.service.ts.
+              fatherName: s.fatherName ?? "",
+              fatherOccupation: s.fatherOccupation,
+              fatherEmployer: s.fatherEmployer,
+              motherName: s.motherName,
+              motherOccupation: s.motherOccupation,
+              motherEmployer: s.motherEmployer,
             },
           });
+          pendingEmails.push({
+            email: s.email,
+            firstName: s.firstName,
+            lastName: s.lastName,
+            parentEmail: s.parentEmail,
+            fatherName: s.fatherName ?? "",
+            motherName: s.motherName ?? null,
+            tempPassword,
+          });
         }
-        counsellorIdByCode.set(code, counsellor.id);
 
-        await tx.projectCounsellor.upsert({
-          where: { projectId_counsellorId: { projectId: project.id, counsellorId: counsellor.id } },
-          create: { projectId: project.id, counsellorId: counsellor.id },
-          update: {},
-        });
-      }
+        // --- Counsellors (match-or-create by counsellorCode) + slots, each row
+        // validated independently so one unknown code or one booked slot only costs
+        // that row/code, not the rest of the sheet. ---
+        const codes = [...rowsByCode.keys()];
+        const existingCounsellors = await tx.counsellor.findMany({ where: { counsellorCode: { in: codes } } });
+        const existingByCode = new Map(existingCounsellors.map((c) => [c.counsellorCode, c]));
 
-      // --- Slots ---
-      if (input.counsellorSlots.length > 0) {
-        await tx.counsellorSlot.createMany({
-          data: input.counsellorSlots.map((row) => ({
-            counsellorId: counsellorIdByCode.get(row.counsellorCode)!,
-            projectId: project.id,
-            slotDate: toSlotDate(row.date),
-            startTime: row.startTime,
-            endTime: row.endTime,
-          })),
-        });
-      }
+        const existingCounsellorEmails = new Set(
+          (
+            await tx.user.findMany({
+              where: {
+                role: "COUNSELLOR",
+                email: { in: [...new Set(input.counsellorSlots.map((r) => r.email).filter((v): v is string => !!v))] },
+              },
+              select: { email: true },
+            })
+          ).map((u) => u.email)
+        );
+        const existingCounsellorMobiles = new Set(
+          (
+            await tx.counsellor.findMany({
+              where: {
+                mobile: { in: [...new Set(input.counsellorSlots.map((r) => r.mobile).filter((v): v is string => !!v))] },
+              },
+              select: { mobile: true },
+            })
+          ).map((c) => c.mobile)
+        );
 
-      return { project, pendingEmails };
-    });
+        const slotsSkipped: SlotSkip[] = [];
+        const seenNewCounsellorEmails = new Set<string>();
+        const seenNewCounsellorMobiles = new Set<string>();
+        let counsellorsAssigned = 0;
+        const cleanSlots: { counsellorId: string; date: string; startTime: string; endTime: string }[] = [];
+
+        for (const [code, rows] of rowsByCode) {
+          let counsellor = existingByCode.get(code);
+          const preExisting = !!counsellor;
+
+          if (!counsellor) {
+            const identityRow = rows.find((r) => r.email && r.firstName && r.lastName && r.mobile);
+            let skipReason: string | undefined;
+            if (!identityRow) {
+              skipReason = `counsellorCode "${code}" doesn't exist yet and no row for it supplies firstName/lastName/email/mobile to create one`;
+            } else if (existingCounsellorEmails.has(identityRow.email!) || seenNewCounsellorEmails.has(identityRow.email!)) {
+              skipReason = `counsellorCode "${code}" can't be created — email already in use`;
+            } else if (
+              existingCounsellorMobiles.has(identityRow.mobile!) ||
+              seenNewCounsellorMobiles.has(identityRow.mobile!)
+            ) {
+              skipReason = `counsellorCode "${code}" can't be created — mobile already in use`;
+            }
+
+            if (skipReason) {
+              for (const row of rows) {
+                slotsSkipped.push({ counsellorCode: code, date: row.date, startTime: row.startTime, reason: skipReason });
+              }
+              continue;
+            }
+
+            seenNewCounsellorEmails.add(identityRow!.email!);
+            seenNewCounsellorMobiles.add(identityRow!.mobile!);
+
+            const passwordHash = await argon2.hash(generateTempPassword());
+            const user = await tx.user.create({
+              data: {
+                email: identityRow!.email!,
+                passwordHash,
+                role: "COUNSELLOR",
+                firstName: identityRow!.firstName!,
+                lastName: identityRow!.lastName!,
+              },
+            });
+            counsellor = await tx.counsellor.create({
+              data: {
+                userId: user.id,
+                counsellorCode: code,
+                mobile: identityRow!.mobile!,
+                meetingLink: identityRow!.meetingLink,
+              },
+            });
+          }
+
+          // Slot collisions for a pre-existing counsellor only — [counsellorId, slotDate,
+          // startTime] is globally unique per counsellor, not per project (addSlots in
+          // sessions.service.ts pre-checks the same way). A counsellor just created above
+          // can't already have slots, so skip the query.
+          const existingSlots = preExisting
+            ? await tx.counsellorSlot.findMany({
+                where: {
+                  counsellorId: counsellor.id,
+                  OR: rows.map((r) => ({ slotDate: toSlotDate(r.date), startTime: r.startTime })),
+                },
+                select: { slotDate: true, startTime: true },
+              })
+            : [];
+          const existingSlotKeys = new Set(
+            existingSlots.map((s) => `${s.slotDate.toISOString().slice(0, 10)}|${s.startTime}`)
+          );
+
+          const seenRowKeys = new Set<string>();
+          let landedForThisCode = 0;
+          for (const row of rows) {
+            const key = `${row.date}|${row.startTime}`;
+            if (existingSlotKeys.has(key)) {
+              slotsSkipped.push({
+                counsellorCode: code,
+                date: row.date,
+                startTime: row.startTime,
+                reason: "slot already booked for this counsellor",
+              });
+              continue;
+            }
+            if (seenRowKeys.has(key)) {
+              slotsSkipped.push({
+                counsellorCode: code,
+                date: row.date,
+                startTime: row.startTime,
+                reason: "duplicate slot in this request",
+              });
+              continue;
+            }
+            seenRowKeys.add(key);
+            cleanSlots.push({ counsellorId: counsellor.id, date: row.date, startTime: row.startTime, endTime: row.endTime });
+            landedForThisCode++;
+          }
+
+          // Assignment reflects only slots that actually landed — a code that resolved
+          // to a real counsellor but had every slot skipped doesn't get assigned here.
+          if (landedForThisCode > 0) {
+            await tx.projectCounsellor.upsert({
+              where: { projectId_counsellorId: { projectId: project.id, counsellorId: counsellor.id } },
+              create: { projectId: project.id, counsellorId: counsellor.id },
+              update: {},
+            });
+            counsellorsAssigned++;
+          }
+        }
+
+        if (cleanSlots.length > 0) {
+          await tx.counsellorSlot.createMany({
+            data: cleanSlots.map((row) => ({
+              counsellorId: row.counsellorId,
+              projectId: project.id,
+              slotDate: toSlotDate(row.date),
+              startTime: row.startTime,
+              endTime: row.endTime,
+            })),
+          });
+        }
+
+        return {
+          project,
+          pendingEmails,
+          studentsSkipped,
+          counsellorsAssigned,
+          slotsImported: cleanSlots.length,
+          slotsSkipped,
+        };
+      });
 
     // Fire-and-forget, same as the standalone student-create endpoint — only sent once the
     // transaction has actually committed, so a rolled-back wizard never emails anyone.
@@ -345,10 +514,12 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
     return {
       project: await getProjectById(project.id),
       studentsCreated: pendingEmails.length,
-      counsellorsAssigned: rowsByCode.size,
-      slotsImported: input.counsellorSlots.length,
+      studentsSkipped,
+      counsellorsAssigned,
+      slotsImported,
+      slotsSkipped,
     };
   } catch (err) {
-    handlePrismaError(err); // P2002 on any unique field (email/mobile/code/...) → 409
+    handlePrismaError(err); // P2002 on the project's own fields (name/contactNumber/primaryEmail/code) → 409
   }
 }

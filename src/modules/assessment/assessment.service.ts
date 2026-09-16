@@ -513,15 +513,16 @@ async function loadCareerLibraryForFit(): Promise<{
 
 // Career Fit's top3Industries only carries cluster/industry names (not ids), so
 // stream-requirement resolution re-looks-up clusters by name — same tradeoff as
-// entrance-exams-colleges.ts, which does the equivalent for industries. Joined via
-// CareerCourse (cluster-level, not industry/domain — see the model comment) rather than
-// CareerLibraryEntry, matching how "Colleges After Class 11&12" pulls its course names.
+// entrance-exams-colleges.ts, which does the equivalent for industries. Courses are curated
+// per job role now (CareerCourse.careerEntryId, not cluster-level — see the model comment),
+// so this aggregates over every job role whose domain rolls up to the cluster, unioning their
+// course lists' stream requirements.
 async function loadStreamRequirementsByCluster(clusterNames: string[]): Promise<Map<string, string>> {
   if (clusterNames.length === 0) return new Map();
-  const clusters = await prisma.careerCluster.findMany({
-    where: { name: { in: [...new Set(clusterNames)] }, deletedAt: null },
+  const entries = await prisma.careerLibraryEntry.findMany({
+    where: { domain: { industry: { cluster: { name: { in: [...new Set(clusterNames)] }, deletedAt: null } } } },
     select: {
-      name: true,
+      domain: { select: { industry: { select: { cluster: { select: { name: true } } } } } },
       courseLinks: {
         where: { course: { status: "ACTIVE" } },
         select: { course: { select: { stream12thRequirements: true } } },
@@ -529,17 +530,18 @@ async function loadStreamRequirementsByCluster(clusterNames: string[]): Promise<
     },
   });
 
-  const result = new Map<string, string>();
-  for (const cluster of clusters) {
-    const requirements = [
-      ...new Set(
-        cluster.courseLinks
-          .map((link) => link.course.stream12thRequirements)
-          .filter((r): r is string => !!r)
-      ),
-    ];
-    result.set(cluster.name, requirements.join("; "));
+  const byCluster = new Map<string, Set<string>>();
+  for (const entry of entries) {
+    const clusterName = entry.domain.industry.cluster.name;
+    const requirements = byCluster.get(clusterName) ?? new Set<string>();
+    for (const link of entry.courseLinks) {
+      if (link.course.stream12thRequirements) requirements.add(link.course.stream12thRequirements);
+    }
+    byCluster.set(clusterName, requirements);
   }
+
+  const result = new Map<string, string>();
+  for (const [name, requirements] of byCluster) result.set(name, [...requirements].join("; "));
   return result;
 }
 
