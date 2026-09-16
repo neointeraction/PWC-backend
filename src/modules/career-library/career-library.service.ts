@@ -241,15 +241,26 @@ export async function getCareerLibraryEntryById(id: string) {
   }
   const { entranceExamLinks, educationLinks, courseLinks, institutionLinks, ...rest } = entry;
 
+  // Legacy value-match lookups below key off the domain -> industry -> cluster chain. That
+  // chain is NOT NULL in the schema, but a handful of rows carry a dangling FK left over from
+  // the taxonomy migrations — guard so a broken chain degrades to an empty legacy view instead
+  // of 500ing the whole entry fetch.
+  const industryName = entry.domain?.industry?.name;
+  const clusterName = entry.domain?.industry?.cluster?.name;
+
   const [relatedInstitutions, relatedCourses, relatedEntranceExams] = await Promise.all([
-    prisma.ugInstitution.findMany({
-      where: { industry: entry.domain.industry.name },
-      orderBy: { name: "asc" },
-    }),
-    prisma.ugCourse.findMany({
-      where: { careerCluster: entry.domain.industry.cluster.name },
-      orderBy: { courseName: "asc" },
-    }),
+    industryName
+      ? prisma.ugInstitution.findMany({
+          where: { industry: industryName },
+          orderBy: { name: "asc" },
+        })
+      : Promise.resolve([]),
+    clusterName
+      ? prisma.ugCourse.findMany({
+          where: { careerCluster: clusterName },
+          orderBy: { courseName: "asc" },
+        })
+      : Promise.resolve([]),
     entry.entranceExams.length > 0
       ? prisma.ugEntranceExam.findMany({
           where: { examName: { in: entry.entranceExams } },
