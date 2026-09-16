@@ -221,6 +221,14 @@ const entryLinkInclude = {
     },
     orderBy: { educationEntry: { programme: "asc" } },
   },
+  courseLinks: {
+    select: { course: { select: courseDetailSelect } },
+    orderBy: { course: { name: "asc" } },
+  },
+  institutionLinks: {
+    select: { institution: { select: institutionDetailSelect } },
+    orderBy: { institution: { name: "asc" } },
+  },
 } satisfies Prisma.CareerLibraryEntryInclude;
 
 export async function getCareerLibraryEntryById(id: string) {
@@ -231,25 +239,9 @@ export async function getCareerLibraryEntryById(id: string) {
   if (!entry) {
     throw new NotFoundError("Career library entry not found");
   }
-  const { entranceExamLinks, educationLinks, ...rest } = entry;
-  const clusterId = entry.domain.industry.cluster.id;
-  const industryId = entry.domain.industry.id;
+  const { entranceExamLinks, educationLinks, courseLinks, institutionLinks, ...rest } = entry;
 
-  const [courseLinks, institutionLinks, relatedInstitutions, relatedCourses, relatedEntranceExams] = await Promise.all([
-    // Courses are shared at the cluster level — every job role under this cluster sees the
-    // same list (see CareerCourse's schema comment).
-    prisma.careerCourse.findMany({
-      where: { clusterId },
-      select: { course: { select: courseDetailSelect } },
-      orderBy: { course: { name: "asc" } },
-    }),
-    // Institutions are shared at the industry level — every job role under this industry
-    // sees the same list.
-    prisma.careerInstitution.findMany({
-      where: { industryId },
-      select: { institution: { select: institutionDetailSelect } },
-      orderBy: { institution: { name: "asc" } },
-    }),
+  const [relatedInstitutions, relatedCourses, relatedEntranceExams] = await Promise.all([
     prisma.ugInstitution.findMany({
       where: { industry: entry.domain.industry.name },
       orderBy: { name: "asc" },
@@ -435,13 +427,40 @@ async function resolveEducationEntries(
   return [...resolved.values()];
 }
 
-// A domain's cluster/industry ids, for scoping the shared course/institution join tables.
-async function getClusterAndIndustryId(domainId: string): Promise<{ clusterId: string; industryId: string }> {
-  const domain = await prisma.careerDomain.findUniqueOrThrow({
-    where: { id: domainId },
-    select: { industryId: true, industry: { select: { clusterId: true } } },
-  });
-  return { clusterId: domain.industry.clusterId, industryId: domain.industryId };
+// Link-count + delete pair for each master lookup table, shared by the review flow
+// (`reviewables` below) and the auto-cleanup helper (`cleanupOrphanedLookups`).
+const lookupOps = {
+  entranceExam: {
+    countLinks: (id: string) => prisma.careerEntranceExam.count({ where: { entranceExamId: id } }),
+    remove: (id: string) => prisma.entranceExam.delete({ where: { id } }),
+  },
+  course: {
+    countLinks: (id: string) => prisma.careerCourse.count({ where: { courseId: id } }),
+    remove: (id: string) => prisma.course.delete({ where: { id } }),
+  },
+  institution: {
+    countLinks: (id: string) => prisma.careerInstitution.count({ where: { institutionId: id } }),
+    remove: (id: string) => prisma.institution.delete({ where: { id } }),
+  },
+  educationEntry: {
+    countLinks: (id: string) => prisma.careerEducationEntry.count({ where: { educationEntryId: id } }),
+    remove: (id: string) => prisma.educationEntry.delete({ where: { id } }),
+  },
+} satisfies Record<string, { countLinks: (id: string) => Promise<number>; remove: (id: string) => Promise<unknown> }>;
+
+// A master lookup row (EntranceExam/Course/Institution/EducationEntry) is shared reference
+// data: deleting it outright when unlinked from one job role would be safe only once no job
+// role anywhere still uses it. Called after replacing a link array with the ids that were
+// linked before but aren't anymore; each is deleted iff it now has zero remaining links.
+// Best-effort — a concurrent link elsewhere losing the race just leaves the row in place.
+async function cleanupOrphanedLookups(kind: keyof typeof lookupOps, removedIds: string[]): Promise<void> {
+  const { countLinks, remove } = lookupOps[kind];
+  for (const id of removedIds) {
+    const linked = await countLinks(id);
+    if (linked === 0) {
+      await remove(id).catch(() => undefined);
+    }
+  }
 }
 
 // An admin's submission goes straight into the real table (as before); a counsellor's is
@@ -485,7 +504,6 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
   }
 
   try {
-    const { clusterId, industryId } = await getClusterAndIndustryId(scalar.domainId);
     const created = await prisma.$transaction(async (tx) => {
       const entry = await tx.careerLibraryEntry.create({
         data: {
@@ -499,24 +517,11 @@ export async function createCareerEntry(input: CreateCareerEntryInput, actor: Ac
           topCourses: crs.map((c) => c.name),
           entranceExamLinks: { create: exams.map((e) => ({ entranceExamId: e.id })) },
           educationLinks: { create: edu.map((e) => ({ educationEntryId: e.id })) },
+          courseLinks: { create: crs.map((c) => ({ courseId: c.id })) },
+          institutionLinks: { create: insts.map((i) => ({ institutionId: i.id })) },
         },
         select: { id: true },
       });
-      // Courses/institutions are shared at the cluster/industry level (see CareerCourse's
-      // schema comment) — a new job role's picks are added to that shared list, never
-      // removing what sibling roles under the same cluster/industry already linked.
-      if (crs.length) {
-        await tx.careerCourse.createMany({
-          data: crs.map((c) => ({ clusterId, courseId: c.id })),
-          skipDuplicates: true,
-        });
-      }
-      if (insts.length) {
-        await tx.careerInstitution.createMany({
-          data: insts.map((i) => ({ industryId, institutionId: i.id })),
-          skipDuplicates: true,
-        });
-      }
       return entry;
     });
     return getCareerLibraryEntryById(created.id);
@@ -539,13 +544,6 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
     educationEntries !== undefined
       ? await resolveEducationEntries(educationEntries, actor)
       : undefined;
-  // Courses/institutions are shared at the cluster/industry level — resolve against the
-  // domain this update leaves the entry in (the new one when it also re-parents), same rule
-  // as education entries above. A provided array here REPLACES the whole cluster's/industry's
-  // list, so an add or remove made from this job role's screen is visible on every sibling
-  // role under the same cluster/industry.
-  const { clusterId, industryId } =
-    crs || insts ? await getClusterAndIndustryId(scalar.domainId ?? current.domain.id) : {};
   try {
     await prisma.$transaction(async (tx) => {
       await tx.careerLibraryEntry.update({
@@ -568,19 +566,50 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
         await tx.careerEntranceExam.deleteMany({ where: { careerEntryId: id } });
         await tx.careerEntranceExam.createMany({ data: exams.map((e) => ({ careerEntryId: id, entranceExamId: e.id })), skipDuplicates: true });
       }
+      // Courses/institutions are curated per job role — a provided array REPLACES only this
+      // job role's own list, never touching a sibling role's, even under the same
+      // cluster/industry (see the schema comment on CareerLibraryEntry).
       if (crs) {
-        await tx.careerCourse.deleteMany({ where: { clusterId } });
-        await tx.careerCourse.createMany({ data: crs.map((c) => ({ clusterId: clusterId!, courseId: c.id })), skipDuplicates: true });
+        await tx.careerCourse.deleteMany({ where: { careerEntryId: id } });
+        await tx.careerCourse.createMany({ data: crs.map((c) => ({ careerEntryId: id, courseId: c.id })), skipDuplicates: true });
       }
       if (insts) {
-        await tx.careerInstitution.deleteMany({ where: { industryId } });
-        await tx.careerInstitution.createMany({ data: insts.map((i) => ({ industryId: industryId!, institutionId: i.id })), skipDuplicates: true });
+        await tx.careerInstitution.deleteMany({ where: { careerEntryId: id } });
+        await tx.careerInstitution.createMany({ data: insts.map((i) => ({ careerEntryId: id, institutionId: i.id })), skipDuplicates: true });
       }
       if (edu) {
         await tx.careerEducationEntry.deleteMany({ where: { careerEntryId: id } });
         await tx.careerEducationEntry.createMany({ data: edu.map((e) => ({ careerEntryId: id, educationEntryId: e.id })), skipDuplicates: true });
       }
     });
+    // A link array that dropped an id may have made that master row orphaned (no job role
+    // anywhere still uses it) — clean those up now that the transaction has committed.
+    await Promise.all([
+      exams
+        ? cleanupOrphanedLookups(
+            "entranceExam",
+            current.linkedEntranceExams.map((e) => e.id).filter((id) => !exams.some((e) => e.id === id))
+          )
+        : Promise.resolve(),
+      crs
+        ? cleanupOrphanedLookups(
+            "course",
+            current.linkedCourses.map((c) => c.id).filter((id) => !crs.some((c) => c.id === id))
+          )
+        : Promise.resolve(),
+      insts
+        ? cleanupOrphanedLookups(
+            "institution",
+            current.linkedInstitutions.map((i) => i.id).filter((id) => !insts.some((i) => i.id === id))
+          )
+        : Promise.resolve(),
+      edu
+        ? cleanupOrphanedLookups(
+            "educationEntry",
+            current.linkedEducationEntries.map((e) => e.id).filter((id) => !edu.some((e) => e.id === id))
+          )
+        : Promise.resolve(),
+    ]);
   } catch (err) {
     handlePrismaError(err);
   }
@@ -591,13 +620,11 @@ export async function updateCareerEntry(id: string, input: UpdateCareerEntryInpu
 
 // Optional domain scoping: "what does this Domain already have?" — i.e. the lookup rows
 // already linked to job roles whose leaf domain is `domainId`. Entry status is deliberately
-// ignored (a draft role's exams are still the domain's data, and every canonical row is
+// ignored (a draft role's links are still the domain's data, and every canonical row is
 // listable globally anyway, so this exposes nothing new). Omitting `domainId` keeps the
-// global list. Entrance exams stay curated per job role, so they scope through the join
-// table's careerEntry; courses/institutions are shared at the cluster/industry level, so
-// "what this domain has" means "what its cluster/industry has" (see the schema comments on
-// CareerCourse/CareerInstitution).
-function examDomainScope(domainId?: string) {
+// global list. Every lookup (exams/courses/institutions/education entries) is curated per
+// job role, so this scopes through the join table's careerEntry the same way for all of them.
+function careerLinkDomainScope(domainId?: string) {
   return domainId ? { careerLinks: { some: { careerEntry: { domainId } } } } : {};
 }
 
@@ -608,7 +635,7 @@ export async function listEntranceExams(query: ListEntranceExamsQuery) {
       level: query.level,
       status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...examDomainScope(query.domainId),
+      ...careerLinkDomainScope(query.domainId),
     },
     orderBy: { name: "asc" },
     take: query.limit,
@@ -632,12 +659,11 @@ export async function listEntranceExams(query: ListEntranceExamsQuery) {
 
 export async function listInstitutions(query: ListInstitutionsQuery) {
   if (query.domainId) await assertLiveDomain(query.domainId);
-  const { industryId } = query.domainId ? await getClusterAndIndustryId(query.domainId) : { industryId: undefined };
   return prisma.institution.findMany({
     where: {
       status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...(industryId ? { careerLinks: { some: { industryId } } } : {}),
+      ...careerLinkDomainScope(query.domainId),
     },
     orderBy: { name: "asc" },
     take: query.limit,
@@ -659,13 +685,12 @@ export async function listInstitutions(query: ListInstitutionsQuery) {
 
 export async function listCourses(query: ListCoursesQuery) {
   if (query.domainId) await assertLiveDomain(query.domainId);
-  const { clusterId } = query.domainId ? await getClusterAndIndustryId(query.domainId) : { clusterId: undefined };
   return prisma.course.findMany({
     where: {
       level: query.level,
       status: query.status,
       name: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...(clusterId ? { careerLinks: { some: { clusterId } } } : {}),
+      ...careerLinkDomainScope(query.domainId),
     },
     orderBy: { name: "asc" },
     take: query.limit,
@@ -676,7 +701,7 @@ export async function listCourses(query: ListCoursesQuery) {
 // --- Education Path entries (global canonical lookup) ---------------------------
 // A global row like an exam/course/institution, attached to job roles through
 // CareerEducationEntry. Domain scoping survives only as a *usage* filter on the picker,
-// via examDomainScope() above (education entries stay curated per job role, like exams). No
+// via careerLinkDomainScope() above (education entries stay curated per job role, like exams). No
 // review workflow and no soft delete: `status` is the same
 // DRAFT/ACTIVE publish flag a CareerLibraryEntry carries, and delete is a real delete.
 
@@ -691,7 +716,7 @@ export async function listEducationEntries(query: ListEducationEntriesQuery) {
       level: query.level,
       status: query.status,
       programme: query.search ? { contains: query.search, mode: "insensitive" } : undefined,
-      ...examDomainScope(query.domainId),
+      ...careerLinkDomainScope(query.domainId),
     },
     orderBy: [...educationOrder],
     take: query.limit,
@@ -828,22 +853,19 @@ const reviewables = {
     label: "Entrance exam",
     find: (id) => prisma.entranceExam.findUnique({ where: { id }, select: { id: true, status: true } }),
     publish: (id) => prisma.entranceExam.update({ where: { id }, data: { status: "ACTIVE" } }),
-    countLinks: (id) => prisma.careerEntranceExam.count({ where: { entranceExamId: id } }),
-    remove: (id) => prisma.entranceExam.delete({ where: { id } }),
+    ...lookupOps.entranceExam,
   },
   course: {
     label: "Course",
     find: (id) => prisma.course.findUnique({ where: { id }, select: { id: true, status: true } }),
     publish: (id) => prisma.course.update({ where: { id }, data: { status: "ACTIVE" } }),
-    countLinks: (id) => prisma.careerCourse.count({ where: { courseId: id } }),
-    remove: (id) => prisma.course.delete({ where: { id } }),
+    ...lookupOps.course,
   },
   institution: {
     label: "Institution",
     find: (id) => prisma.institution.findUnique({ where: { id }, select: { id: true, status: true } }),
     publish: (id) => prisma.institution.update({ where: { id }, data: { status: "ACTIVE" } }),
-    countLinks: (id) => prisma.careerInstitution.count({ where: { institutionId: id } }),
-    remove: (id) => prisma.institution.delete({ where: { id } }),
+    ...lookupOps.institution,
   },
 } satisfies Record<string, Reviewable>;
 
@@ -911,11 +933,26 @@ export async function updateInstitution(id: string, input: UpdateInstitutionInpu
 }
 
 export async function deleteCareerEntry(id: string) {
-  const entry = await prisma.careerLibraryEntry.findUnique({ where: { id } });
+  const entry = await prisma.careerLibraryEntry.findUnique({
+    where: { id },
+    select: {
+      entranceExamLinks: { select: { entranceExamId: true } },
+      courseLinks: { select: { courseId: true } },
+      institutionLinks: { select: { institutionId: true } },
+      educationLinks: { select: { educationEntryId: true } },
+    },
+  });
   if (!entry) {
     throw new NotFoundError("Career library entry not found");
   }
-  await prisma.careerLibraryEntry.delete({ where: { id } });
+  await prisma.careerLibraryEntry.delete({ where: { id } }); // cascades this entry's own links
+  // Deleting the entry may have orphaned some of its linked master rows — clean those up.
+  await Promise.all([
+    cleanupOrphanedLookups("entranceExam", entry.entranceExamLinks.map((l) => l.entranceExamId)),
+    cleanupOrphanedLookups("course", entry.courseLinks.map((l) => l.courseId)),
+    cleanupOrphanedLookups("institution", entry.institutionLinks.map((l) => l.institutionId)),
+    cleanupOrphanedLookups("educationEntry", entry.educationLinks.map((l) => l.educationEntryId)),
+  ]);
 }
 
 // --- Job role proposals (counsellor submits, admin decides) --------------------
@@ -1041,7 +1078,6 @@ export async function approveCareerEntryProposal(id: string, actor: Actor) {
       : Promise.resolve([]),
   ]);
 
-  const { clusterId, industryId } = await getClusterAndIndustryId(domainId);
   try {
     const created = await prisma.$transaction(async (tx) => {
       const entry = await tx.careerLibraryEntry.create({
@@ -1055,23 +1091,11 @@ export async function approveCareerEntryProposal(id: string, actor: Actor) {
           topCourses: courses.map((c) => c.name),
           entranceExamLinks: { create: examIds.map((entranceExamId) => ({ entranceExamId })) },
           educationLinks: { create: educationEntryIds.map((educationEntryId) => ({ educationEntryId })) },
+          courseLinks: { create: courseIds.map((courseId) => ({ courseId })) },
+          institutionLinks: { create: institutionIds.map((institutionId) => ({ institutionId })) },
         },
         select: { id: true },
       });
-      // Courses/institutions are shared at the cluster/industry level — add this proposal's
-      // picks to that shared list rather than overwriting it.
-      if (courseIds.length) {
-        await tx.careerCourse.createMany({
-          data: courseIds.map((courseId) => ({ clusterId, courseId })),
-          skipDuplicates: true,
-        });
-      }
-      if (institutionIds.length) {
-        await tx.careerInstitution.createMany({
-          data: institutionIds.map((institutionId) => ({ industryId, institutionId })),
-          skipDuplicates: true,
-        });
-      }
       await tx.careerLibraryEntryProposal.delete({ where: { id } });
       return entry;
     });

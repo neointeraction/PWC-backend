@@ -130,6 +130,29 @@ you can exercise the whole lifecycle without a provider account. Switch to
 startup fails fast if the provider is `mailgun` and those are missing. See
 [src/modules/email/README.md](src/modules/email/README.md).
 
+## Database migrations
+
+After changing `prisma/schema.prisma`, create and apply a migration against the dev
+database (`pwc_counselling`):
+
+```bash
+pnpm prisma:migrate
+```
+
+This prompts for a migration name, writes it under `prisma/migrations/`, applies it to
+the dev database, and regenerates the Prisma client. Commit the generated migration
+folder along with your schema change.
+
+`pnpm prisma:migrate` only touches the dev database — it does **not** update
+`pwc_counselling_test` (see [Testing](#testing) below) or any deployed environment. For
+those, apply the already-committed migrations without authoring new ones:
+
+```bash
+pnpm prisma:deploy
+```
+
+(swap in the target `DATABASE_URL` as needed — see the test DB command below).
+
 ## Testing
 
 ```bash

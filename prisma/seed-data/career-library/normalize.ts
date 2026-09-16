@@ -284,6 +284,11 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
   }
 
   // --- Backfill join rows ---
+  // Courses and institutions are curated per job role (careerEntryId), same as entrance
+  // exams — each entry starts with its cluster's/industry's current course/institution list
+  // (the seed-time mapping the user gave us), independently editable afterward. So a
+  // cluster's/industry's course/institution set is expanded onto every entry under it here,
+  // rather than written once to a shared cluster/industry-keyed row.
   const examJoins: Prisma.CareerEntranceExamCreateManyInput[] = [];
   const courseJoins: Prisma.CareerCourseCreateManyInput[] = [];
   const instJoins: Prisma.CareerInstitutionCreateManyInput[] = [];
@@ -296,26 +301,17 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       const id = examId.get(`${clean(n)}||PG`);
       if (id) examJoins.push({ careerEntryId: e.id, entranceExamId: id });
     }
-    for (const n of e.topCourses) {
-      const id = courseId.get(`${clean(n)}||UG`);
-      // Courses are shared at the cluster level now — this pushes into the cluster's list,
-      // not a per-entry one, and createMany below dedupes with skipDuplicates.
-      if (id) courseJoins.push({ clusterId: e.clusterId, courseId: id });
+    // This entry's own topCourses (legacy per-entry source, empty post-2609-import) plus its
+    // cluster's course list — both land on this entry alone, never on a sibling entry.
+    const clusterCourseNames = clusterCourses.get(e.clusterId) ?? new Set<string>();
+    for (const n of new Set([...e.topCourses.map(clean), ...clusterCourseNames])) {
+      const id = courseId.get(`${n}||UG`);
+      if (id) courseJoins.push({ careerEntryId: e.id, courseId: id });
     }
     const names = industryInst.get(clean(e.industry));
     if (names) for (const nm of names) {
       const id = instId.get(nm);
-      // Institutions are shared at the industry level — same as courses above.
-      if (id) instJoins.push({ industryId: e.industryId, institutionId: id });
-    }
-  }
-  // Course-cluster backfill is cluster-scoped, not per-entry — mirrors the industry-based
-  // college backfill above but iterates clusters directly since there's no per-entry field
-  // to walk (entries' topCourses is the legacy per-entry source and is empty post-2609-import).
-  for (const [cId, names] of clusterCourses) {
-    for (const nm of names) {
-      const id = courseId.get(`${nm}||UG`);
-      if (id) courseJoins.push({ clusterId: cId, courseId: id });
+      if (id) instJoins.push({ careerEntryId: e.id, institutionId: id });
     }
   }
 

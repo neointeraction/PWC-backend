@@ -62,9 +62,17 @@ export type ListProjectsQuery = z.infer<typeof listProjectsQuerySchema>;
 // --- Combined wizard (one atomic "Finish" call for the create-project UI) ---
 //
 // A single admin action that creates the project, onboards its student roster, and
-// imports its counsellor-availability sheet in one transaction — all-or-nothing, so a
-// failure partway through (a bad row, a duplicate email) never leaves a half-onboarded
-// project behind. Each piece mirrors the shape of its own standalone endpoint:
+// imports its counsellor-availability sheet in one transaction. The project itself
+// (code/name/contactNumber/primaryEmail) is still all-or-nothing — there's no sensible
+// way to "skip" the institute being created, so a conflict there rejects the whole call
+// (409). `students[]` and `counsellorSlots[]` are each validated per-row *inside* the
+// transaction (existence checks against Users/Students/CounsellorSlots, batched, before
+// any insert): a row that conflicts is skipped rather than failing the others, and the
+// response reports what landed vs. what was skipped and why. The only remaining hard
+// failure for those two arrays is zero valid students (`students.min(1)` below still
+// requires at least one row in the *payload*; the service additionally 400s if literally
+// every row conflicts and nothing is left to create). Each piece mirrors the shape of its
+// own standalone endpoint:
 //   - `project` is exactly the POST /projects body.
 //   - `students[]` is the POST /students body minus `projectId` (implied by the project
 //     being created alongside it).

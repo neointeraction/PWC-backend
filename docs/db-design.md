@@ -434,20 +434,23 @@ or add new** exams/courses/colleges per job role (full design:
 arrays. Careers link to entrance exams many-to-many via `CareerEntranceExam`
 (`careerEntryId` + `entranceExamId`, composite PK, cascade) — curated **per job role**.
 
-Courses and institutions are **not** curated per job role: `CareerCourse` is keyed by
-`clusterId` + `courseId` (every job role under the same `CareerCluster` shares one course
-list) and `CareerInstitution` is keyed by `industryId` + `institutionId` (every job role
-under the same `CareerIndustry` shares one institution list) — both composite PK, cascade
-from the cluster/industry side. Adding or removing a course/institution from any one job
-role's screen is visible on every sibling job role in the same cluster/industry; a create
-adds to that shared list (never deletes what siblings already linked), a PATCH with a
-`courses`/`institutions` array replaces the whole cluster's/industry's list. Backfill
+Courses and institutions are curated **per job role**, the same as entrance exams:
+`CareerCourse` is `careerEntryId` + `courseId` and `CareerInstitution` is `careerEntryId` +
+`institutionId` (both composite PK, cascade from the `CareerLibraryEntry` side). Editing one
+job role's course/institution list never affects a sibling role's, even under the same
+cluster/industry — a PATCH with a `courses`/`institutions` array replaces only that entry's
+own links. (An earlier design briefly made these shared per-cluster/industry instead — see
+`docs/career-library-normalization-spec.md` §9–10 for why that was reverted, and migration
+`20260916064514_career_course_institution_per_job_role` for how the shared rows were expanded
+back onto every job role that was reading them.) Backfill
 (`prisma/seed-data/career-library/normalize.ts`, run after the import in `prisma/seed.ts`):
-exams from each entry's `String[]` columns, courses/colleges resolved to the entry's
-domain → cluster/industry. The old `String[]` columns (`entranceExams`, `entranceExamsPG`,
-`topCourses`) are kept and **dual-written** during the transition (per-entry, so
-`topCourses` on one entry does not reflect what a sibling role added to the shared list),
-to be dropped in a later migration.
+exams from each entry's `String[]` columns; courses/institutions are resolved from the
+entry's domain → cluster/industry against the source workbook's cluster→courses and
+industry→institutions mapping, then linked onto that entry alone — this is the *only* place
+cluster/industry membership decides what gets linked; after seeding, each entry's list is
+independently editable. The old `String[]` columns (`entranceExams`, `entranceExamsPG`,
+`topCourses`) are kept and **dual-written** during the transition, to be dropped in a later
+migration.
 
 Each canonical lookup also carries the detail an admin's "add new" form collects, so a
 hand-added row is as complete as an imported one (columns mirror the raw `Ug*` tables):

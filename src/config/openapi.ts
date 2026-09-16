@@ -1057,10 +1057,10 @@ registry.registerPath({
   method: "post",
   path: "/api/v1/projects/wizard",
   tags: ["Projects"],
-  summary: "Combined 'Finish' call for the create-project wizard: creates the project, onboards its student roster, and imports its counsellor-availability sheet (matching/creating counsellors by counsellorCode) in one transaction. Admin only.",
+  summary: "Combined 'Finish' call for the create-project wizard: creates the project, onboards its student roster, and imports its counsellor-availability sheet (matching/creating counsellors by counsellorCode) in one transaction. The project's own fields are still all-or-nothing (409 on conflict); a conflicting student row or counsellor slot is skipped rather than failing the call — see docs/api-list.md. Admin only.",
   request: { body: { content: { "application/json": { schema: createProjectWizardSchema } } } },
   responses: {
-    201: { description: "Project created with students onboarded and slots imported", content: { "application/json": { schema: genericObjectSchema } } },
+    201: { description: "{ project, studentsCreated, studentsSkipped, counsellorsAssigned, slotsImported, slotsSkipped }", content: { "application/json": { schema: genericObjectSchema } } },
     ...errorResponses,
   },
 });

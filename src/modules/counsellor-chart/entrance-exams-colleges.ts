@@ -53,11 +53,6 @@ export async function computeEntranceExamsAndColleges(
       name: true,
       clusterId: true,
       cluster: { select: { name: true } },
-      institutionLinks: {
-        where: { institution: { status: "ACTIVE" } },
-        select: { institution: true },
-        orderBy: { institution: { name: "asc" } },
-      },
       domains: {
         where: { deletedAt: null },
         select: { id: true },
@@ -68,8 +63,6 @@ export async function computeEntranceExamsAndColleges(
     return { entranceExamsTable: [], collegesTable: [] };
   }
 
-  const industryIds = industryRows.map((r) => r.id);
-  const clusterIds = [...new Set(industryRows.map((r) => r.clusterId))];
   const domainIds = industryRows.flatMap((r) => r.domains.map((d) => d.id));
 
   // Priority = position in the (fitScore-sorted) top3Industries list — used only to break
@@ -82,9 +75,9 @@ export async function computeEntranceExamsAndColleges(
     industryRows.flatMap((r) => r.domains.map((d) => [d.id, priorityByIndustryId.get(r.id) ?? topIndustries.length]))
   );
 
-  const [entryLinks, courseLinks] = await Promise.all([
+  const entryLinks =
     domainIds.length > 0
-      ? prisma.careerLibraryEntry.findMany({
+      ? await prisma.careerLibraryEntry.findMany({
           where: { domainId: { in: domainIds }, status: "ACTIVE" },
           select: {
             domainId: true,
@@ -92,21 +85,19 @@ export async function computeEntranceExamsAndColleges(
               where: { entranceExam: { status: "ACTIVE" } },
               select: { entranceExam: true },
             },
+            courseLinks: {
+              where: { course: { status: "ACTIVE" } },
+              select: { course: { select: { name: true } } },
+              orderBy: { course: { name: "asc" } },
+            },
+            institutionLinks: {
+              where: { institution: { status: "ACTIVE" } },
+              select: { institution: true },
+              orderBy: { institution: { name: "asc" } },
+            },
           },
         })
-      : Promise.resolve([]),
-    prisma.careerCourse.findMany({
-      where: { clusterId: { in: clusterIds }, course: { status: "ACTIVE" } },
-      select: { clusterId: true, course: { select: { name: true } } },
-    }),
-  ]);
-
-  const coursesByCluster = new Map<string, string[]>();
-  for (const link of courseLinks) {
-    const list = coursesByCluster.get(link.clusterId) ?? [];
-    list.push(link.course.name);
-    coursesByCluster.set(link.clusterId, list);
-  }
+      : [];
 
   const examsById = new Map<string, (typeof entryLinks)[number]["entranceExamLinks"][number]["entranceExam"]>();
   const examPriority = new Map<string, number>();
@@ -139,18 +130,20 @@ export async function computeEntranceExamsAndColleges(
       urlLink: exam.officialWebsite ?? "",
     }));
 
-  // Iterate industries best-fit-first so a college shared across industries is recorded
-  // under its highest-priority one (only affects which `course` string it displays).
-  const orderedIndustryRows = [...industryRows].sort(
-    (a, b) => (priorityByIndustryId.get(a.id) ?? topIndustries.length) - (priorityByIndustryId.get(b.id) ?? topIndustries.length)
+  // Iterate job roles best-fit-first (by their domain's industry priority) so a college
+  // shared across roles is recorded under its highest-priority one (only affects which
+  // `course` string it displays). Courses/institutions are curated per job role now, so
+  // each college's course names come from the same role's own course list.
+  const orderedEntries = [...entryLinks].sort(
+    (a, b) => (priorityByDomainId.get(a.domainId) ?? topIndustries.length) - (priorityByDomainId.get(b.domainId) ?? topIndustries.length)
   );
 
   const collegesById = new Map<string, CollegesAfterItem>();
   const collegePriority = new Map<string, number>();
-  for (const industryRow of orderedIndustryRows) {
-    const priority = priorityByIndustryId.get(industryRow.id) ?? topIndustries.length;
-    const courseNames = (coursesByCluster.get(industryRow.clusterId) ?? []).slice(0, 3).join(", ");
-    for (const { institution } of industryRow.institutionLinks) {
+  for (const entry of orderedEntries) {
+    const priority = priorityByDomainId.get(entry.domainId) ?? topIndustries.length;
+    const courseNames = entry.courseLinks.slice(0, 3).map((l) => l.course.name).join(", ");
+    for (const { institution } of entry.institutionLinks) {
       if (collegesById.has(institution.id)) continue;
       collegePriority.set(institution.id, priority);
       collegesById.set(institution.id, {
