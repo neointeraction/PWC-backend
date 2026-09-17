@@ -142,12 +142,14 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       select: {
         name: true, city: true, state: true, type: true, website: true,
         shortName: true, programmesOffered: true, primaryEntranceExams: true, nirfRanking: true,
+        approxPlacementCtc: true,
       },
     }),
     prisma.ugInstitutionUniversity.findMany({
       select: {
         name: true, city: true, state: true, type: true, website: true,
         shortName: true, keyProgrammesOffered: true, primaryEntranceExams: true, nirfRanking: true,
+        approxPlacementCtc: true,
       },
     }),
     prisma.pgInstitution.findMany({ select: { institution: true, city: true, state: true } }),
@@ -165,6 +167,7 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       programmesOffered: i.programmesOffered,
       entranceExamsRequired: i.primaryEntranceExams,
       ranking: i.nirfRanking,
+      approxPlacementCtc: i.approxPlacementCtc,
     });
   }
   for (const i of ugUniv) {
@@ -174,6 +177,7 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
       programmesOffered: i.keyProgrammesOffered,
       entranceExamsRequired: i.primaryEntranceExams,
       ranking: i.nirfRanking,
+      approxPlacementCtc: i.approxPlacementCtc,
     });
   }
   for (const i of pgInst) addInst(i.institution, { city: i.city, state: i.state });

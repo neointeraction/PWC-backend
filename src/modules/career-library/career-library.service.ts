@@ -205,6 +205,7 @@ const institutionDetailSelect = {
   entranceExamsRequired: true,
   programmesOffered: true,
   ranking: true,
+  approxPlacementCtc: true,
   status: true,
   submittedBy: true,
 } satisfies Prisma.InstitutionSelect;
@@ -688,6 +689,7 @@ export async function listInstitutions(query: ListInstitutionsQuery) {
       entranceExamsRequired: true,
       programmesOffered: true,
       ranking: true,
+      approxPlacementCtc: true,
       status: true,
       submittedBy: true,
     },

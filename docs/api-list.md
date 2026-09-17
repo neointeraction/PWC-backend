@@ -131,7 +131,7 @@ writes/management = admin.
 | Method | Path | Description |
 |---|---|---|
 | POST | `/api/v1/projects` | Create a project. Body: `code, name, address?, contactNumber, primaryEmail, fromDate, toDate, status?` (`ACTIVE`\|`CLOSED`, default `ACTIVE`), `languageId?` (from `GET /languages`; **omitted → defaults to English**). `code` is a human-readable id (e.g. `P0001`) the admin assigns — **not auto-generated**. `address` optional, stored as `""` when omitted. `name`/`contactNumber`/`primaryEmail` are globally unique. 400 if `languageId` is unknown or `fromDate > toDate`; 409 on a duplicate `name`/`contactNumber`/`primaryEmail`/`code`. Responses include `code` and `language: { id, code, name }`. |
-| GET | `/api/v1/projects` | List projects (with `_count` of students/counsellors/counsellorSlots). Query: `status?`. **No `status` → excludes soft-deleted** (returns `ACTIVE` + `CLOSED`); `status=DELETED` lists only soft-deleted; `status=ACTIVE`/`CLOSED` filter exactly. |
+| GET | `/api/v1/projects` | List projects (with `_count` of students/counsellors/counsellorSlots, plus `hasFlaggedStudent` — true if any of the project's students is currently 🚩 flagged, same ageing/missed-session rule as a student's own `stageInfo.flagged`; see `docs/api-list.md` "Student stage & ageing"). Query: `status?`. **No `status` → excludes soft-deleted** (returns `ACTIVE` + `CLOSED`); `status=DELETED` lists only soft-deleted; `status=ACTIVE`/`CLOSED` filter exactly. |
 | GET | `/api/v1/projects/{id}` | Get one project (any status, incl. `DELETED`). 404 if unknown. |
 | PATCH | `/api/v1/projects/{id}` | Update (partial): `name?, fromDate?, toDate?, status?, languageId?` (`status` writable values are `ACTIVE`/`CLOSED` only — use DELETE/restore for `DELETED`). Re-validates the effective date window (400 if merged `fromDate > toDate`); 400 if `languageId` is unknown. `status:CLOSED` is the soft-close — the project-window gate then rejects student/parent submissions. |
 | DELETE | `/api/v1/projects/{id}` | **Soft-delete** — sets `status:DELETED` (reversible; **data is preserved**, no cascade). Returns the updated project (`200`). Hidden from the default list; its student/parent submissions are blocked (`reason:PROJECT_DELETED`). 404 if unknown. |
@@ -332,7 +332,7 @@ canonical field set — exams take `fullForm, conductingBody, officialWebsite, e
 frequency, applicableFor, subjectRequirements12th, applicationWindow`; courses take
 `fullForm, durationYears, stream12thRequirements, relevantEntranceExams, programmesOffered,
 topColleges, furtherStudyOptions`; institutions take `shortName, city, state, type, website,
-entranceExamsRequired, programmesOffered, ranking`. On a name that **already exists** those
+entranceExamsRequired, programmesOffered, ranking, approxPlacementCtc`. On a name that **already exists** those
 fields fill only columns that are still blank — an inline add while editing one job role never
 overwrites reference data another role shares. (Editing a canonical row outright isn't exposed
 yet; see the note in `docs/career-library-normalization-spec.md`.) (`topCompanies` and `certifications*`

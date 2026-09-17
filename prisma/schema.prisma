@@ -796,6 +796,7 @@ model Institution {
   entranceExamsRequired String?
   programmesOffered     String?
   ranking               String?
+  approxPlacementCtc    String?
   // DRAFT/ACTIVE publish flag (see the enum comment above). `submittedBy` is the proposing
   // user; there's no reviewer/rejection audit trail since a rejected row is deleted, not kept.
   status                CareerLibraryStatus @default(ACTIVE)
