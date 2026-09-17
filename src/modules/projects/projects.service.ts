@@ -5,6 +5,7 @@ import { env } from "../../config/env.js";
 import { BadRequestError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { sendTemplateEmail } from "../email/email.service.js";
+import { computeStageInfo, stageRelationsInclude, type StudentForStage } from "../students/studentStage.js";
 import type {
   CreateProjectInput,
   CreateProjectWizardInput,
@@ -17,6 +18,27 @@ const projectInclude = {
   language: { select: { id: true, code: true, name: true } },
   _count: { select: { students: true, counsellors: true, counsellorSlots: true } },
 } as const;
+
+// Just enough of each project's students to run computeStageInfo (see studentStage.ts) and
+// derive whether *any* of them is currently 🚩 flagged (idle too long / missed session) —
+// the list only needs the aggregate boolean, not each student's full stage.
+const flaggedStudentsInclude = {
+  students: {
+    select: {
+      workflowStatus: true,
+      createdAt: true,
+      updatedAt: true,
+      isDiscontinued: true,
+      discontinuedAt: true,
+      user: { select: { passwordChangedAt: true } },
+      ...stageRelationsInclude,
+    },
+  },
+} as const;
+
+function hasFlaggedStudent(students: StudentForStage[], now: Date): boolean {
+  return students.some((s) => computeStageInfo(s, now).flagged);
+}
 
 // Resolves the language for a project. An explicit (active) languageId wins; otherwise we
 // fall back to the seeded default (English today). Throws if the id is unknown/inactive, or
@@ -60,15 +82,20 @@ export async function createProject(input: CreateProjectInput) {
 }
 
 export async function listProjects(query: ListProjectsQuery) {
-  return prisma.project.findMany({
+  const projects = await prisma.project.findMany({
     where: {
       // No status filter → exclude soft-deleted (active + closed). An explicit status
       // (incl. DELETED) filters to exactly that.
       status: query.status ?? { not: "DELETED" },
     },
-    include: projectInclude,
+    include: { ...projectInclude, ...flaggedStudentsInclude },
     orderBy: { createdAt: "desc" },
   });
+  const now = new Date();
+  return projects.map(({ students, ...project }) => ({
+    ...project,
+    hasFlaggedStudent: hasFlaggedStudent(students, now),
+  }));
 }
 
 export async function getProjectById(id: string) {

@@ -11,6 +11,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
     questionText: "Fill in your marks or grade for the last three years.",
     helpText: "This is not to evaluate you based on marks, but to know what you may like or dislike.",
     questionType: "MATRIX",
+    isRequired: false,
     options: {
       rows: [
         { key: "english", label: "English" },

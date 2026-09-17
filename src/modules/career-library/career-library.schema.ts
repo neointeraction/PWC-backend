@@ -116,6 +116,7 @@ export const institutionLinkItemSchema = z
     entranceExamsRequired: detail,
     programmesOffered: detail,
     ranking: detail,
+    approxPlacementCtc: detail,
   })
   .refine((v) => Boolean(v.id) !== Boolean(v.name), { message: "Provide exactly one of id or name" });
 
@@ -322,6 +323,7 @@ export const submitInstitutionSchema = z.object({
   entranceExamsRequired: detail,
   programmesOffered: detail,
   ranking: detail,
+  approxPlacementCtc: detail,
 });
 export type SubmitInstitutionInput = z.infer<typeof submitInstitutionSchema>;
 
@@ -373,6 +375,7 @@ export const updateInstitutionSchema = z.object({
   entranceExamsRequired: detail,
   programmesOffered: detail,
   ranking: detail,
+  approxPlacementCtc: detail,
   status: z.enum(CAREER_LIBRARY_STATUSES).optional(),
 });
 export type UpdateInstitutionInput = z.infer<typeof updateInstitutionSchema>;
