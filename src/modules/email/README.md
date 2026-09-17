@@ -87,7 +87,7 @@ own email copy, implemented close to verbatim.
 | `WELCOME_STUDENT` | `studentName` | Step 1 — Welcome: Student |
 | `WELCOME_PARENT` | `parentName`, `studentName` | Step 1 — Welcome: Parent |
 | `LOGIN_CREDENTIALS_STUDENT` | `studentName`, `loginId`, `defaultPassword`, `loginLink` | Step 2 — Login Credentials: Student |
-| `LOGIN_CREDENTIALS_COUNSELLOR` | `loginId`, `defaultPassword` | Not in source sheet — sent to a counsellor when an admin creates their account via `POST /counsellors`. Deliberately bare-bones (just username/password in the common header/footer), unlike the richer `LOGIN_CREDENTIALS_STUDENT`. |
+| `LOGIN_CREDENTIALS_COUNSELLOR` | `counsellorName`, `loginId`, `defaultPassword`, `loginLink` | Not in source sheet — sent to a counsellor when an admin creates their account via `POST /counsellors`. Same layout as `LOGIN_CREDENTIALS_STUDENT`, minus the "activates your account" line (no equivalent workflow gate for counsellors). |
 | `PRE_COUNSELLING_PARENT` | `parentName`, `formLink` | Step 5 — Pre-counselling Form: Parent |
 | `SESSION_DETAILS_PARENT` | `parentName`, `studentName`, `session1Date`, `session1Time`, `session1Link`, `session2Date`, `session2Time`, `session2Link` | Step 9 — Session Details: Parent |
 | `FEEDBACK_REQUEST_PARENT` | `parentName`, `studentName`, `feedbackFormLink` | Step 16 — Feedback Report: Parent |

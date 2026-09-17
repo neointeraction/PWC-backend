@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import argon2 from "argon2";
 import { prisma } from "../../config/prisma.js";
+import { env } from "../../config/env.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
 import { sendTemplateEmail } from "../email/email.service.js";
@@ -77,8 +78,10 @@ export async function createCounsellor(input: CreateCounsellorInput) {
     });
 
     sendEmailBestEffort(counsellor.user.email, "LOGIN_CREDENTIALS_COUNSELLOR", {
+      counsellorName: `${counsellor.user.firstName} ${counsellor.user.lastName}`,
       loginId: counsellor.user.email,
       defaultPassword: tempPassword,
+      loginLink: env.APP_WEB_URL,
     });
 
     return { counsellor, tempPassword };
