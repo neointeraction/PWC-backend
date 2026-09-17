@@ -69,6 +69,10 @@ function diffCalendarDays(dateA: string, dateB: string): number {
   return Math.round((toDate(dateB).getTime() - toDate(dateA).getTime()) / 86_400_000);
 }
 
+function todayDateStr(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 // `time` ("HH:mm") is IST wall-clock, matching how slots are created/displayed (see
 // dateFormat.ts) — IST is UTC+5:30, so the offset (not "Z") gives the correct instant.
 function combineDateTime(date: Date, time: string): Date {
@@ -252,7 +256,9 @@ export async function getSession1BookingOptions(studentId: string, rescheduleSes
     orderBy: [{ slotDate: "asc" }, { startTime: "asc" }],
     select: { slotDate: true, startTime: true, endTime: true },
   });
-  return slots;
+  // A fresh Session 1 booking can't be made for today — earliest is tomorrow.
+  const today = todayDateStr();
+  return slots.filter((s) => diffCalendarDays(today, s.slotDate.toISOString().slice(0, 10)) >= 1);
 }
 
 async function resolveCounsellorForSlot(
@@ -352,6 +358,9 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
   const existingSession1 = existing.find((s) => s.sessionNumber === "SESSION_1");
   const existingSession2 = existing.find((s) => s.sessionNumber === "SESSION_2");
 
+  if (diffCalendarDays(todayDateStr(), input.session1.date) < 1) {
+    throw new BadRequestError("Session 1 must be booked for tomorrow or later");
+  }
   if (diffCalendarDays(input.session1.date, input.session2.date) < MIN_SESSION_GAP_DAYS) {
     throw new BadRequestError(`Session 2 must be at least ${MIN_SESSION_GAP_DAYS} calendar days after Session 1`);
   }
