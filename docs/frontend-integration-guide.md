@@ -571,6 +571,12 @@ student through them — this is an unrestricted admin/ops override (not forward
 like the automatic triggers), meant for manual ops use, not something to wire into a
 normal student/parent-facing UI.
 
+**Counsellor scoping**: when the caller is a `COUNSELLOR`, `GET /students` only returns
+students they have a booked `Session` with (not every student in a project they're
+assigned to), and `GET /students/{id}` 404s for a student they have no session with. Admin
+roles are unaffected. Build the counsellor's student list/dashboard against this endpoint
+as-is — no client-side filtering needed.
+
 ### 6.2 Stage, ageing & the 🚩 follow-up flag (`stageInfo`)
 
 `GET /students` (and `GET /students/{id}`, `GET /students/me`) attaches a computed

@@ -5,6 +5,7 @@ import { prisma } from "../../config/prisma.js";
 import { env } from "../../config/env.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
+import type { AccessTokenPayload } from "../../common/middlewares/auth.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import { sendTemplateEmail } from "../email/email.service.js";
 import { buildFormLink } from "../../common/utils/links.js";
@@ -33,6 +34,20 @@ const studentInclude = {
 
 function generateTempPassword(): string {
   return crypto.randomBytes(12).toString("base64url");
+}
+
+// A counsellor only ever sees students they've had a session booked with — not every
+// student in a project they're assigned to. Resolves the caller's Counsellor.id from the
+// access token's User.id; null means the token belongs to no Counsellor row (shouldn't
+// happen for a COUNSELLOR-role token, but scopes to "nothing" rather than "everything" if
+// it ever does).
+async function resolveCounsellorScope(requestingUser?: AccessTokenPayload): Promise<string | null | undefined> {
+  if (requestingUser?.role !== "COUNSELLOR") return undefined;
+  const counsellor = await prisma.counsellor.findUnique({
+    where: { userId: requestingUser.sub },
+    select: { id: true },
+  });
+  return counsellor?.id ?? null;
 }
 
 // Fire-and-forget: email failures never fail student creation (same pattern as
@@ -133,7 +148,9 @@ export async function createStudent(input: CreateStudentInput) {
   }
 }
 
-export async function listStudents(query: ListStudentsQuery) {
+export async function listStudents(query: ListStudentsQuery, requestingUser?: AccessTokenPayload) {
+  const counsellorScope = await resolveCounsellorScope(requestingUser);
+
   const students = await prisma.student.findMany({
     where: {
       projectId: query.projectId,
@@ -141,6 +158,7 @@ export async function listStudents(query: ListStudentsQuery) {
       divisionName: query.divisionName,
       workflowStatus: query.workflowStatus,
       isDiscontinued: query.discontinued,
+      sessions: counsellorScope !== undefined ? { some: { counsellorId: counsellorScope ?? "" } } : undefined,
     },
     include: { ...studentInclude, ...stageRelationsInclude },
     orderBy: { createdAt: "desc" },
@@ -222,7 +240,7 @@ export async function checkDuplicateStudents(input: CheckDuplicateStudentsBody) 
   });
 }
 
-export async function getStudentById(id: string) {
+export async function getStudentById(id: string, requestingUser?: AccessTokenPayload) {
   const student = await prisma.student.findUnique({
     where: { id },
     include: { ...studentInclude, ...stageRelationsInclude },
@@ -230,6 +248,20 @@ export async function getStudentById(id: string) {
   if (!student) {
     throw new NotFoundError("Student not found");
   }
+
+  const counsellorScope = await resolveCounsellorScope(requestingUser);
+  if (counsellorScope !== undefined) {
+    const hasSession = await prisma.session.findFirst({
+      where: { studentId: id, counsellorId: counsellorScope ?? "" },
+      select: { id: true },
+    });
+    // 404 rather than 403 — a counsellor shouldn't learn a student exists in a project
+    // they're not booked with.
+    if (!hasSession) {
+      throw new NotFoundError("Student not found");
+    }
+  }
+
   return attachStageInfo(student, new Date());
 }
 

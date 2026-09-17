@@ -17,7 +17,7 @@ export async function checkDuplicateStudents(req: Request, res: Response): Promi
 }
 
 export async function listStudents(req: Request, res: Response): Promise<void> {
-  const students = await studentsService.listStudents(req.query as never);
+  const students = await studentsService.listStudents(req.query as never, req.user);
   res.status(200).json(students);
 }
 
@@ -32,7 +32,7 @@ export async function updateMyStudent(req: Request, res: Response): Promise<void
 }
 
 export async function getStudent(req: Request, res: Response): Promise<void> {
-  const student = await studentsService.getStudentById(req.params.id as string);
+  const student = await studentsService.getStudentById(req.params.id as string, req.user);
   res.status(200).json(student);
 }
 
