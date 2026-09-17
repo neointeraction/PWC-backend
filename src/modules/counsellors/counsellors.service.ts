@@ -3,6 +3,7 @@ import argon2 from "argon2";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
+import { sendTemplateEmail } from "../email/email.service.js";
 import type {
   AssignProjectBody,
   CreateCounsellorInput,
@@ -19,6 +20,14 @@ const counsellorInclude = {
 
 function generateTempPassword(): string {
   return crypto.randomBytes(12).toString("base64url");
+}
+
+// Fire-and-forget: email failures never fail counsellor creation (same pattern as
+// students.service.ts's sendEmailBestEffort — no persisted notification log).
+function sendEmailBestEffort(to: string, templateKey: Parameters<typeof sendTemplateEmail>[1], data: unknown): void {
+  sendTemplateEmail(to, templateKey, data).catch((err) => {
+    console.error(`[counsellors] failed to send ${templateKey} to ${to}:`, err);
+  });
 }
 
 // Ensures every project in `projectIds` exists. Counsellors are a flat, tenant-wide
@@ -65,6 +74,11 @@ export async function createCounsellor(input: CreateCounsellorInput) {
         },
         include: counsellorInclude,
       });
+    });
+
+    sendEmailBestEffort(counsellor.user.email, "LOGIN_CREDENTIALS_COUNSELLOR", {
+      loginId: counsellor.user.email,
+      defaultPassword: tempPassword,
     });
 
     return { counsellor, tempPassword };

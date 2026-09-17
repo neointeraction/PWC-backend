@@ -1,6 +1,10 @@
 import type { z } from "zod";
 import type { InlineImage } from "../providers/email-provider.js";
 import { feedbackRequestParentDataSchema, renderFeedbackRequestParentEmail } from "./feedback-request-parent.js";
+import {
+  loginCredentialsCounsellorDataSchema,
+  renderLoginCredentialsCounsellorEmail,
+} from "./login-credentials-counsellor.js";
 import { loginCredentialsStudentDataSchema, renderLoginCredentialsStudentEmail } from "./login-credentials-student.js";
 import { KREATE_LOGO_BASE64, KREATE_LOGO_CID, KREATE_LOGO_CONTENT_TYPE } from "./logo.js";
 import { passwordResetDataSchema, renderPasswordResetEmail } from "./password-reset.js";
@@ -42,6 +46,10 @@ export const emailTemplateRegistry = {
   WELCOME_STUDENT: { schema: welcomeStudentDataSchema, render: renderWelcomeStudentEmail },
   WELCOME_PARENT: { schema: welcomeParentDataSchema, render: renderWelcomeParentEmail },
   LOGIN_CREDENTIALS_STUDENT: { schema: loginCredentialsStudentDataSchema, render: renderLoginCredentialsStudentEmail },
+  LOGIN_CREDENTIALS_COUNSELLOR: {
+    schema: loginCredentialsCounsellorDataSchema,
+    render: renderLoginCredentialsCounsellorEmail,
+  },
   PASSWORD_RESET: { schema: passwordResetDataSchema, render: renderPasswordResetEmail },
   PRE_COUNSELLING_PARENT: { schema: preCounsellingParentDataSchema, render: renderPreCounsellingParentEmail },
   SESSION_DETAILS_PARENT: { schema: sessionDetailsParentDataSchema, render: renderSessionDetailsParentEmail },
