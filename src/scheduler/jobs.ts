@@ -195,8 +195,8 @@ export async function runFollowUpNudges(
       loginLink: env.APP_WEB_URL,
     };
     // Deep-link straight to the specific pending form, not just the bare app URL —
-    // buildFormLink mirrors the API's `/forms/:formType/students/:studentId` path.
-    // Parent form types are public (no login), so this is the parent's only way in.
+    // see buildFormLink for the per-formType frontend path mapping. Parent form types
+    // are public (no login), so this is the parent's only way in.
     const studentData = {
       ...base,
       formLink: plan.studentFormType ? buildFormLink(plan.studentFormType, s.id) : env.APP_WEB_URL,
