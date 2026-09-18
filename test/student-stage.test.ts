@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AGEING_FLAG_THRESHOLD_DAYS,
   computeStageInfo,
+  reportStageLabel,
   type StudentForStage,
 } from "../src/modules/students/studentStage.js";
 
@@ -208,5 +209,19 @@ describe("computeStageInfo — ageing & flags", () => {
     );
     expect(info.stage).toBe("CLOSED");
     expect(info.flagged).toBe(false);
+  });
+});
+
+describe("reportStageLabel — display fold for the frontend stage report", () => {
+  it("passes through stages that already have a dedicated report row", () => {
+    expect(reportStageLabel("INVITED")).toBe("Invited");
+    expect(reportStageLabel("PRE_COUNSELLING_STUDENT")).toBe("Pre-Counselling — Student");
+  });
+
+  it("folds the 5 stages with no dedicated report row onto a neighbor's label", () => {
+    expect(reportStageLabel("ASSESSMENT_PENDING")).toBe("Pre-Counselling — Parent");
+    expect(reportStageLabel("COUNSELLOR_FEEDBACK")).toBe("Counsellor Feedback Report");
+    expect(reportStageLabel("FEEDBACK_PENDING")).toBe("Session 2 Completed");
+    expect(reportStageLabel("CLOSED")).toBe("Feedback — Parent");
   });
 });

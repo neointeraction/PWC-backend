@@ -76,22 +76,21 @@ exists **and** the weight row exists for its industry/domain. See the
 ## Re-import from the source workbook
 
 ```bash
-python3 scripts/export-career-library.py   # CL tab (from the 2609 sheet) + reference tabs (from 1808) → *.json
+python3 scripts/export-career-library.py   # all 7 tabs (CL + 6 UG/PG reference tabs) → *.json
 pnpm db:seed                                # loads the JSON via prisma/seed.ts
 ```
 
-The reference tabs (UG/PG institutions, courses, entrance exams) are exported from
-`docs/Career Library_Updated_1808.xlsx`; note its `UG Institutions_IND` tab dropped two
-columns vs. the older 0508 workbook, so `UgInstitution.programmesOfferedAfterClass12` /
-`keyProgrammesOffered` are exported as null. The `CL` tab is exported separately from
-`docs/Career Library_CL_2609.xlsx` (2026-09-10), a CL-only sheet with a narrower 20-column
-layout — no plain (non-"DEFINED") Graduation/PG qualification columns, no UG entrance-exam
-description column, no "Top Courses" column. Each combined
-`"<degree list>, Focus Electives: <electives>"` cell is split at export time
-(`split_qualification()` in the script) into the plain qualification field and its paired
-"Defined" field — see the script's module docstring and `docs/db-design.md`'s
-`CareerLibraryEntry` section for the exact mapping. Each exporter's column indices match
-its current source sheet; re-check them if a workbook layout changes again.
+All tabs are now exported from a single workbook, `docs/Career Library_Updated_1809.xlsx`
+(2026-09-18), replacing the previous two-workbook setup (`Career Library_Updated_1808.xlsx`
+for the reference tabs, `Career Library_CL_2609.xlsx` for CL). Columns are looked up **by
+header name**, not position, since this workbook reordered and dropped several columns vs.
+both predecessors — e.g. `UgInstitution.category` / `approxAnnualFee` and
+`UgEntranceExam.level` / `applicationWindow` are exported as null because those columns no
+longer exist. See the script's module docstring and `docs/db-design.md`'s
+`CareerLibraryEntry` / "Career Library workbook import" sections for the exact per-column
+mapping and full list of what's null. Re-check the mapping if a future workbook layout
+changes again — a missing header now raises a `KeyError` rather than silently
+misaligning columns, so a layout change fails loudly.
 
 Unlike the assessment reference data (`.ts`), the library is seeded **into the
 database** as JSON, so a re-import needs a re-seed, not just a rebuild.

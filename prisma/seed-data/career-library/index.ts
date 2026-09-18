@@ -5,9 +5,8 @@ import type { PrismaClient } from "@prisma/client";
 
 const DIR = dirname(fileURLToPath(import.meta.url));
 
-// Data source: career-library.json (CareerLibraryEntry rows) from
-// "docs/Career Library_CL_2609.xlsx"; the reference tabs (ug-*/pg-* below) from
-// "docs/Career Library_Updated_1808.xlsx". Exported to JSON by
+// Data source: "docs/Career Library_Updated_1809.xlsx" (all tabs, incl. career-library.json
+// / CareerLibraryEntry rows and the reference tabs ug-*/pg-* below). Exported to JSON by
 // scripts/export-career-library.py (rerun that script if a source workbook changes).
 const IMPORT_LABEL = "seed:career-library-import";
 

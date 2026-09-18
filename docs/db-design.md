@@ -304,18 +304,19 @@ workbook's distinct values (13 clusters / 43 industries / 571 domains) and edita
   migration via `gen_random_uuid()`).
 
 ### `CareerLibraryEntry`
-Central, PWC-owned career database. The "CL" tab is now imported from
-`docs/Career Library_CL_2609.xlsx` (2026-09-10) — 1,317 rows via
-`scripts/export-career-library.py` + `prisma/seed-data/career-library/`. That sheet's CL
-tab is narrower than the earlier 1808 workbook's: it has no plain (non-"DEFINED")
-Graduation/PG qualification columns, no UG entrance-exam description column, and no "Top
-Courses" column — each combined `"<degree list>, Focus Electives: <electives>"` cell is
-split at export time (`split_qualification()`) into the plain qualification field and its
-paired "Defined" field; `entranceExamsUGDescription` and `topCourses` are exported as
-null/empty for every row. The reference tabs (UG/PG institutions, exams, courses) are
-still imported from `docs/Career Library_Updated_1808.xlsx` and were left untouched by
-the 2609 CL reimport. See "Career Library workbook import" below for the full import
-design and cross-table mapping.
+Central, PWC-owned career database. All tabs (CL + the 6 UG/PG reference tabs) are now
+imported from a single workbook, `docs/Career Library_Updated_1809.xlsx` (2026-09-18) —
+1,317 rows via `scripts/export-career-library.py` + `prisma/seed-data/career-library/`,
+replacing the previous two-workbook setup (1808 for reference tabs, CL_2609 for the CL
+tab). Same row counts as that combo throughout (same underlying data, reorganized), but
+this workbook's CL tab has its own column layout: Graduation/PG qualification are plain
+columns again (not the 2609 sheet's combined "<degrees>, Focus Electives: <electives>"
+format, so no `split_qualification()` step), `entranceExamsUGDescription` is populated
+again, PG entrance exams now has an "Extracted" short-list column alongside the
+description (mirroring UG), and there is still no "Top Courses" column (`topCourses`
+exported as `[]` for every row, as with 2609). See "Career Library workbook import"
+below for the full import design, cross-table mapping, and what's null in the reference
+tables due to this workbook's dropped columns.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -333,13 +334,13 @@ design and cross-table mapping.
 | salaryGlobalMinUSD, salaryGlobalMaxUSD | Float? | best-effort parse (in USD, not $k); null when unparseable |
 | qualification10th12th | String? | optional — a role need not state a 10+2 entry requirement (every workbook-imported row happens to have one, but the API doesn't demand it) |
 | qualification10th12thExplanation | String? | the "10+2 Explanation" note accompanying the 10th/12th qualification |
-| qualificationGraduation, qualificationPG | String? | the degree-list half of the 2609 sheet's combined "\<degrees\>, Focus Electives: \<electives\>" column for that level, split at export time |
-| qualificationGraduationDefined, qualificationPGDefined | String? | despite the name, now holds only the electives half of that same combined column (descriptive prose, not a programme list) — read that way by `prisma/seed-education-path.ts` |
-| entranceExamsUGDescription | String? | always null since the 2609 sheet — that description column doesn't exist in it |
+| qualificationGraduation, qualificationPG | String? | plain degree-list column for that level ("Minimum Qualification (Grad)"/"(PG)") |
+| qualificationGraduationDefined, qualificationPGDefined | String? | despite the name, holds only the paired electives column ("Grad Focus Electives"/"Focus Electives - PG") — descriptive prose, not a programme list — read that way by `prisma/seed-education-path.ts` |
+| entranceExamsUGDescription | String? | full free-text "Entrance Exams (UG Level)" column |
 | entranceExams | String[] | UG level, cleaned/short exam names — join key against `UgEntranceExam.examName` |
-| entranceExamsPG | String[] | PG level |
+| entranceExamsPG | String[] | PG level, cleaned/short exam names ("Entrance Exams (PG Level) Extracted") |
 | certificationsStudent, certificationsUG | String[] | source distinguishes pre-UG vs. during-UG certification recommendations |
-| topCourses | String[] | always `[]` since the 2609 sheet — that column doesn't exist in it |
+| topCourses | String[] | always `[]` — this workbook has no "Top Courses" column |
 | status | `CareerLibraryStatus` enum | DRAFT / ACTIVE — the publish flag. A counsellor never writes this table directly (see `CareerLibraryEntryProposal` below), so every row here was either admin-authored or copied in on proposal approval — there's no separate review state to track |
 | createdBy, updatedBy | String | User id, or `"seed:career-library-import"` for bulk-imported rows. On a proposal-approved row, `createdBy` is the counsellor who submitted it, not the admin who approved it |
 | studentId | String? (FK → `Student`, `onDelete: SetNull`) | the student's Counsellor Chart this job role was added from; null when added outside a chart (e.g. the standalone Career Library admin screen). Carried over unchanged from `CareerLibraryEntryProposal.studentId` on approve, so the chart keeps listing the role after it's published |
@@ -373,19 +374,28 @@ fixed at submission and not editable.
 
 ### Career Library workbook import — UG/PG reference tables
 
-`docs/Career Library_Updated_1808.xlsx` has 8 tabs; the last (`Post-12_Entrance_Exams__India__`)
-is out of scope per instruction and was not imported. The other 7 tabs each map to
-exactly one table — no FK relations to `CareerLibraryEntry` or to each other; they're
-matched **by value** at query time, not by foreign key. The 6 UG/PG reference tabs are
-still sourced from this 1808 workbook (note its `UG Institutions_IND` tab dropped the
-"Programmes Offered After Class 12" and "Key Programmes Offered" columns, so
-`UgInstitution.programmesOfferedAfterClass12` / `keyProgrammesOffered` are null). The `CL`
-tab itself was reimported from a separate, CL-only sheet, `docs/Career Library_CL_2609.xlsx`
-(2026-09-10) — see `CareerLibraryEntry` above for what changed in that sheet's layout.
+`docs/Career Library_Updated_1809.xlsx` (2026-09-18) has 7 tabs, all imported — CL plus
+the 6 UG/PG reference tabs, all in one workbook now (previously CL came from a separate
+`Career Library_CL_2609.xlsx` sheet and the reference tabs from `Career Library_Updated_
+1808.xlsx`; the 1808 workbook's out-of-scope 8th tab, `Post-12_Entrance_Exams__India__`,
+has no equivalent here). The 7 tabs each map to exactly one table — no FK relations to
+`CareerLibraryEntry` or to each other; they're matched **by value** at query time, not by
+foreign key. This workbook trimmed several columns off the reference tabs vs. 1808, so
+the corresponding model fields are exported as null for every row: `UgInstitution.category`
+/ `programmesOfferedAfterClass12` / `keyProgrammesOffered` / `approxAnnualFee` (its
+"NIRF Ranking" + "Other Rankings" also collapsed into one "Ranking" column → `nirfRanking`,
+`otherRankings` left null); `UgEntranceExam.level` / `applicationWindow` / `examMonth` /
+`resultMonth` / `approxAttemptsAllowed`; `UgCourse.durationYears` / `minimumEligibility` /
+`approxAnnualFeeRange` (its "Entrance Exams (Primary/Alternate)" collapsed into one
+"Entrance Exams" column → `entranceExamsPrimary`, `entranceExamsAlternate` left null; its
+"Top Govt/Private Colleges" collapsed into one "Top Colleges" column → `topGovtColleges`,
+`topPrivateColleges` left null). `UgInstitutionUniversity`, `PgInstitution`, and
+`PgEntranceExam` are unchanged. See `scripts/export-career-library.py`'s module docstring
+for the exact per-column mapping.
 
 | Workbook tab | Table | Rows | Join key → `CareerLibraryEntry` |
 |---|---|---|---|
-| CL (from `Career Library_CL_2609.xlsx`) | `CareerLibraryEntry` | 1,317 | (the hub table) |
+| CL | `CareerLibraryEntry` | 1,317 | (the hub table) |
 | UG Institutions_IND | `UgInstitution` | 702 | `industry` ↔ entry's `domain.industry.name` |
 | UG Inst+Uty_IND | `UgInstitutionUniversity` | 34 | none (general directory, not industry-mapped) |
 | UG Entrance_IND | `UgEntranceExam` | 109 | `examName` ↔ `CareerLibraryEntry.entranceExams` (UG, extracted) |
@@ -530,16 +540,17 @@ once per domain.
   also run as the last step of `pnpm db:seed`) derives entries and role links from the flat
   columns: `qualification10th12th` verbatim (26 distinct values across the library),
   `qualificationGraduation` and `qualificationPG` split on `/` and `,` (both already just a
-  plain degree list — the export step splits the 2609 sheet's combined
-  `"<degrees>, Focus Electives: <electives>"` cell before this script ever sees it, so no
-  marker-hunting happens here), and both `certifications*` arrays. `description` comes from
-  the matching explanation column per level — `qualification10th12thExplanation`,
-  `qualificationGraduationDefined`, `qualificationPGDefined` — the electives half of that
-  same combined cell: unusable as a programme *name*, fine as prose. Certification entries
-  have no such column and carry no description. A programme shared by many roles takes the
-  first non-empty explanation; `--dry-run` reports how many alternatives were discarded. As
-  of the 2609 CL reimport it yields **445 programmes and 15,259 role links** over 1,317 job
-  roles. Idempotent, and it never touches the flat columns.
+  plain degree list straight from the workbook's own "Minimum Qualification (Grad)"/"(PG)"
+  columns, so no marker-hunting happens here), and both `certifications*` arrays.
+  `description` comes from the matching explanation column per level —
+  `qualification10th12thExplanation`, `qualificationGraduationDefined`,
+  `qualificationPGDefined` — its paired "Focus Electives" column: unusable as a programme
+  *name*, fine as prose. Certification entries have no such column and carry no
+  description. A programme shared by many roles takes the first non-empty explanation;
+  `--dry-run` reports how many alternatives were discarded. As of the 1809 reimport it
+  yields **445 programmes and 15,259 role links** over 1,317 job roles (unchanged from the
+  2609/1808 combo — same underlying data). Idempotent, and it never touches the flat
+  columns.
 - **Domain-scoped pickers still work**, via usage rather than ownership:
   `GET /career-library/education?domainId=` returns entries already linked to job roles in
   that domain — the same `domainScope()` filter the exam/course/institution lookups use.

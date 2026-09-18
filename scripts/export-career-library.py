@@ -1,22 +1,32 @@
 #!/usr/bin/env python3
 """
-One-off export: reads the "Career Library" workbook(s) and writes clean JSON per tab into
+One-off export: reads the "Career Library" workbook and writes clean JSON per tab into
 prisma/seed-data/career-library/, for prisma/seed.ts to load.
 
-The reference tabs (UG/PG institutions, courses, entrance exams) are sourced from
-"docs/Career Library_Updated_1808.xlsx" and unchanged since that workbook. The "CL" tab
-(CareerLibraryEntry rows) is now sourced separately from "docs/Career Library_CL_2609.xlsx"
-(2026-09-10), a CL-only sheet with a narrower 20-column layout than 1808's 24 — it merged
-the separate plain/"DEFINED" Graduation and PG qualification columns into one combined
-column each ("<degree list>, Focus Electives: <electives>", consistent across all rows),
-dropped the UG entrance-exam description column, and dropped "Top Courses" entirely. Per
-product decision on that re-import: each combined column is split on the "Focus Electives:"
-marker (split_qualification()) — the degree-list half feeds the plain
-qualificationGraduation/qualificationPG columns, the electives half feeds the paired
-"Defined" columns (which prisma/seed-education-path.ts reads only as descriptive prose, not
-mined for programme names — see its updated header comment). entranceExamsUGDescription is
-exported as null and topCourses as [] for every row, since this sheet has no such columns.
-If a future sheet restores those columns, add them back here.
+Source: "docs/Career Library_Updated_1809.xlsx" (2026-09-18) — a single workbook with
+all seven tabs (CL + the six UG/PG reference tabs), replacing the previous two-workbook
+setup (1808 for reference tabs, CL_2609 for the CL tab). Columns are looked up by header
+name (row 1 of each tab), not position, since this workbook reordered and dropped several
+columns relative to 1808/2609 — see HEADER-NAME NOTES below for what's missing and how
+it's handled.
+
+HEADER-NAME NOTES (workbook columns dropped or merged vs. the previous imports):
+- CL tab: Grad/PG qualification are separate columns again (not the 2609 combined
+  "<degrees>, Focus Electives: <electives>" format) — no split_qualification() needed.
+  No "Top Courses" column (as with 2609) -> topCourses is always []. PG entrance exams
+  now has both a full description and an "Extracted" short-list column, like UG.
+- UG Institutions_IND: "NIRF Ranking" + "Other Rankings" collapsed into one "Ranking"
+  column (-> nirfRanking; otherRankings left null) and "Approx Annual Fee" was dropped
+  (-> null). "Category" was also dropped (-> null).
+- UG Entrance_IND: dropped Level, Application Window, Exam Month, Result Month, Approx
+  Attempts Allowed columns entirely -> those model fields are left null for every row.
+- UG Courses_IND: dropped Duration and Minimum Eligibility (-> null). "Entrance Exams
+  (Primary)" / "(Alternate)" collapsed into one "Entrance Exams" column (->
+  entranceExamsPrimary; entranceExamsAlternate left null). "Top Govt Colleges" / "Top
+  Private Colleges" collapsed into one "Top Colleges" column (-> topGovtColleges; keep
+  topPrivateColleges null rather than guess the govt/private split). Dropped Approx
+  Annual Fee Range (-> null).
+- UG Inst+Uty_IND, PG Institutions_IND, PG Entrance_IND: unchanged from 1808.
 
 Ignores the "Post-12_Entrance_Exams__India__" tab per instruction (out of scope).
 Not part of the app's runtime — rerun manually if a source workbook changes.
@@ -28,8 +38,7 @@ from pathlib import Path
 import openpyxl
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "docs" / "Career Library_Updated_1808.xlsx"
-SRC_CL = ROOT / "docs" / "Career Library_CL_2609.xlsx"
+SRC = ROOT / "docs" / "Career Library_Updated_1809.xlsx"
 OUT_DIR = ROOT / "prisma" / "seed-data" / "career-library"
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -42,33 +51,19 @@ def s(v):
     return v if v else None
 
 
+def rows_by_header(ws):
+    """Yield each data row (from row 2) as a dict keyed by row 1's header text."""
+    headers = [s(h) for h in next(ws.iter_rows(min_row=1, max_row=1, values_only=True))]
+    for r in ws.iter_rows(min_row=2, values_only=True):
+        yield dict(zip(headers, r))
+
+
 # Known source-data spelling/naming variants that would otherwise silently break the
 # join between tables (verified against the actual workbook content — see
 # docs/db-design.md "Cross-table mapping"). CL is treated as the authoritative
 # vocabulary; the other tabs' values are normalized to match it.
 INDUSTRY_ALIASES = {"Defense": "Defence"}  # UG Institutions_IND -> CL spelling
 EXAM_ALIASES = {"CUET": "CUET UG"}  # CL's extracted list -> UG Entrance_IND's exam name
-
-FOCUS_ELECTIVES_RE = re.compile(r",?\s*Focus Electives:\s*", re.I)
-
-
-def split_qualification(value):
-    """'BTech / BSc, Focus Electives: CS/IT.' -> ('BTech / BSc', 'CS/IT.').
-
-    Every row's combined Grad/PG column follows "<degree list>, Focus Electives:
-    <electives>" (verified across all 1317 rows of the 2609 CL sheet). The degree-list half
-    becomes the plain qualification field; the electives half becomes the paired "Defined"
-    field, which downstream (prisma/seed-education-path.ts) is read as descriptive prose,
-    not mined for programme names.
-    """
-    v = s(value)
-    if not v:
-        return None, None
-    parts = FOCUS_ELECTIVES_RE.split(v, maxsplit=1)
-    if len(parts) != 2:
-        return v, None
-    qualification, electives = s(parts[0]), s(parts[1])
-    return qualification, electives
 
 
 def split_list(v, sep=","):
@@ -121,26 +116,24 @@ AI_GRADE_MAP = {"low": "LOW", "medium": "MEDIUM", "high": "HIGH", "very high": "
 
 
 def export_career_library(wb):
-    # Column layout of the 2609 CL-only sheet (0-based, 20 columns). Narrower than the old
-    # 1808 workbook's CL tab: no plain Graduation/PG qualification columns (only the
-    # "DEFINED" combined ones), no UG entrance-exam description column, no Top Courses
-    # column at all — see the module docstring for how those are exported here.
     ws = wb["CL"]
     out = []
     skipped = 0
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        cluster, industry, domain, job_role = s(r[0]), s(r[1]), s(r[2]), s(r[3])
-        ai_grade_raw = s(r[4])
-        qual_10_12 = s(r[10])
+    for row in rows_by_header(ws):
+        cluster, industry, domain, job_role = (
+            s(row["Career Cluster"]),
+            s(row["Industry"]),
+            s(row["Domain"]),
+            s(row["Job Role"]),
+        )
+        ai_grade_raw = s(row["AI Resilience Grading"])
+        qual_10_12 = s(row["Minimum Qualification (10+2)"])
         if not (cluster and industry and domain and job_role and ai_grade_raw and qual_10_12):
             skipped += 1
             continue
 
-        india_min, india_max = parse_india_salary(r[8])
-        global_min, global_max = parse_global_salary(r[9])
-
-        grad_qualification, grad_electives = split_qualification(r[12])
-        pg_qualification, pg_electives = split_qualification(r[14])
+        india_min, india_max = parse_india_salary(row["Approx Salary Range (India)"])
+        global_min, global_max = parse_global_salary(row["Global Salary Range"])
 
         out.append(
             {
@@ -149,32 +142,31 @@ def export_career_library(wb):
                 "domain": domain,
                 "jobRole": job_role,
                 "aiResilienceGrade": AI_GRADE_MAP.get(ai_grade_raw.lower(), "MEDIUM"),
-                "aiResilienceComment": s(r[5]) or "",
-                "oneLineDescription": s(r[6]) or "",
-                "roleOverview": s(r[18]),  # Role Overview & Scope
-                "keySkills": split_list(r[19]),  # Key Skill Requirements (comma-separated)
-                "topCompanies": split_list(r[7]),
-                "salaryIndiaRangeText": s(r[8]),
+                "aiResilienceComment": s(row["AI Resilience Comment"]) or "",
+                "oneLineDescription": s(row["One-line Description"]) or "",
+                "roleOverview": s(row["Role Overview & Scope"]),
+                "keySkills": split_list(row["Key Skill Requirements"]),
+                "topCompanies": split_list(row["Top Companies Recruiting"]),
+                "salaryIndiaRangeText": s(row["Approx Salary Range (India)"]),
                 "salaryIndiaMinLPA": india_min,
                 "salaryIndiaMaxLPA": india_max,
-                "salaryGlobalRangeText": s(r[9]),
+                "salaryGlobalRangeText": s(row["Global Salary Range"]),
                 "salaryGlobalMinUSD": global_min,
                 "salaryGlobalMaxUSD": global_max,
                 "qualification10th12th": qual_10_12,
-                "qualification10th12thExplanation": s(r[11]),  # 10+2 Explanation - Electives
-                # Grad + Focus Subjects DEFINED (col 12) split on "Focus Electives:" —
-                # degree list before, electives after (see split_qualification()).
-                "qualificationGraduation": grad_qualification,
-                "qualificationGraduationDefined": grad_electives,
-                "entranceExamsUGDescription": None,  # dropped from this sheet
-                "entranceExams": [EXAM_ALIASES.get(t, t) for t in split_list(r[13])],  # UG extracted
-                # PG + Focus Subjects (col 14), same split.
-                "qualificationPG": pg_qualification,
-                "qualificationPGDefined": pg_electives,
-                "entranceExamsPG": split_list(r[15]),
-                "certificationsStudent": split_list(r[16], ";"),
-                "certificationsUG": split_list(r[17], ";"),
-                "topCourses": [],  # dropped from this sheet
+                "qualification10th12thExplanation": s(row["10+2 Explanation - Electives"]),
+                "qualificationGraduation": s(row["Minimum Qualification (Grad)"]),
+                "qualificationGraduationDefined": s(row["Grad Focus Electives"]),
+                "entranceExamsUGDescription": s(row["Entrance Exams (UG Level)"]),
+                "entranceExams": [
+                    EXAM_ALIASES.get(t, t) for t in split_list(row["Entrance Exams (UG Level) Extracted"])
+                ],
+                "qualificationPG": s(row["Minimum Qualification (PG)"]),
+                "qualificationPGDefined": s(row["Focus Electives - PG"]),
+                "entranceExamsPG": split_list(row["Entrance Exams (PG Level) Extracted"]),
+                "certificationsStudent": split_list(row["Certifications - Students"], ";"),
+                "certificationsUG": split_list(row["Certifications - UG"], ";"),
+                "topCourses": [],  # no "Top Courses" column in this workbook
             }
         )
     print(f"CL: {len(out)} rows exported, {skipped} skipped (missing required field)")
@@ -182,34 +174,33 @@ def export_career_library(wb):
 
 
 def export_ug_institutions(wb):
-    # 1808 layout (14 cols). The 0508 columns "Programmes Offered After Class 12" and
-    # "Key Programmes Offered" were removed, shifting the tail left; those two model
-    # fields are now left null.
+    # "NIRF Ranking" / "Other Rankings" collapsed into one "Ranking" column here, and
+    # "Approx Annual Fee" / "Category" were dropped entirely -> left null.
     ws = wb["UG Institutions_IND"]
     out = []
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        industry, name = s(r[0]), s(r[2])
+    for row in rows_by_header(ws):
+        industry, name = s(row["Industry"]), s(row["College / Institution / University Name"])
         if not (industry and name):
             continue
         industry = INDUSTRY_ALIASES.get(industry, industry)
         out.append(
             {
                 "industry": industry,
-                "shortName": s(r[1]),
+                "shortName": s(row["Short Name / Abbreviation"]),
                 "name": name,
-                "city": s(r[3]),
-                "state": s(r[4]),
-                "type": s(r[5]),
-                "category": s(r[6]),
-                "programmesOffered": s(r[7]),
-                "programmesOfferedAfterClass12": None,  # column removed in 1808 workbook
-                "keyProgrammesOffered": None,  # column removed in 1808 workbook
-                "primaryEntranceExams": s(r[8]),
-                "nirfRanking": s(r[9]),
-                "otherRankings": s(r[10]),
-                "approxAnnualFee": s(r[11]),
-                "approxPlacementCtc": s(r[12]),
-                "website": s(r[13]),
+                "city": s(row["City"]),
+                "state": s(row["State"]),
+                "type": s(row["Type\n(Govt/Private/Deemed/Autonomous)"]),
+                "category": None,  # dropped from this workbook
+                "programmesOffered": s(row["Programmes Offered"]),
+                "programmesOfferedAfterClass12": None,  # dropped from this workbook
+                "keyProgrammesOffered": None,  # dropped from this workbook
+                "primaryEntranceExams": s(row["Primary Entrance Exam(s)"]),
+                "nirfRanking": s(row["Ranking"]),
+                "otherRankings": None,  # merged into "Ranking" in this workbook
+                "approxAnnualFee": None,  # dropped from this workbook
+                "approxPlacementCtc": s(row["Approx Placement CTC\n(Median / Top, LPA)"]),
+                "website": s(row["Website"]),
             }
         )
     print(f"UG Institutions_IND: {len(out)} rows exported")
@@ -219,25 +210,25 @@ def export_ug_institutions(wb):
 def export_ug_inst_uty(wb):
     ws = wb["UG Inst+Uty_IND"]
     out = []
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        name = s(r[1])
+    for row in rows_by_header(ws):
+        name = s(row["College / University Name"])
         if not name:
             continue
         out.append(
             {
-                "shortName": s(r[0]),
+                "shortName": s(row["Short Name / Abbreviation"]),
                 "name": name,
-                "city": s(r[2]),
-                "state": s(r[3]),
-                "type": s(r[4]),
-                "category": s(r[5]),
-                "keyProgrammesOffered": s(r[6]),
-                "primaryEntranceExams": s(r[7]),
-                "nirfRanking": s(r[8]),
-                "otherRankings": s(r[9]),
-                "approxAnnualFee": s(r[10]),
-                "approxPlacementCtc": s(r[11]),
-                "website": s(r[12]),
+                "city": s(row["City"]),
+                "state": s(row["State"]),
+                "type": s(row["Type\n(Govt/Private/Deemed/Autonomous)"]),
+                "category": s(row["Category\n(IIT/NIT/IIM/NLU/Central Univ/Deemed/Private)"]),
+                "keyProgrammesOffered": s(row["Key Programmes Offered"]),
+                "primaryEntranceExams": s(row["Primary Entrance Exam(s)"]),
+                "nirfRanking": s(row["NIRF Ranking\n(Overall / Domain)"]),
+                "otherRankings": s(row["Other Rankings\n(QS / THE / Outlook etc.)"]),
+                "approxAnnualFee": s(row["Approx Annual Fee\n(₹)"]),
+                "approxPlacementCtc": s(row["Approx Placement CTC\n(Median / Top, LPA)"]),
+                "website": s(row["Contact / Admission Website"]),
             }
         )
     print(f"UG Inst+Uty_IND: {len(out)} rows exported")
@@ -245,27 +236,29 @@ def export_ug_inst_uty(wb):
 
 
 def export_ug_entrance(wb):
+    # Level, Application Window, Exam Month, Result Month, Approx Attempts Allowed were
+    # dropped from this workbook entirely -> left null.
     ws = wb["UG Entrance_IND"]
     out = []
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        exam_name = s(r[0])
+    for row in rows_by_header(ws):
+        exam_name = s(row["Exam Name"])
         if not exam_name:
             continue
         out.append(
             {
                 "examName": exam_name,
-                "fullForm": s(r[1]),
-                "conductingBody": s(r[2]),
-                "level": s(r[3]),
-                "applicableFor": s(r[4]),
-                "subjectRequirements12th": s(r[5]),
-                "applicationWindow": s(r[6]),
-                "examMonth": s(r[7]),
-                "resultMonth": s(r[8]),
-                "examMode": s(r[9]),
-                "frequency": s(r[10]),
-                "approxAttemptsAllowed": s(r[11]),
-                "officialWebsite": s(r[12]),
+                "fullForm": s(row["Full Form"]),
+                "conductingBody": s(row["Conducting Body"]),
+                "level": None,  # dropped from this workbook
+                "applicableFor": s(row["Applicable For\n(Degree/Programme)"]),
+                "subjectRequirements12th": s(row["Subject Requirements\n(12th)"]),
+                "applicationWindow": None,  # dropped from this workbook
+                "examMonth": None,  # dropped from this workbook
+                "resultMonth": None,  # dropped from this workbook
+                "examMode": s(row["Exam Mode\n(Online/Offline)"]),
+                "frequency": s(row["Frequency\n(Annual/Twice)"]),
+                "approxAttemptsAllowed": None,  # dropped from this workbook
+                "officialWebsite": s(row["Official Website"]),
             }
         )
     print(f"UG Entrance_IND: {len(out)} rows exported")
@@ -273,28 +266,34 @@ def export_ug_entrance(wb):
 
 
 def export_ug_courses(wb):
+    # Duration and Minimum Eligibility were dropped entirely -> null. "Entrance Exams
+    # (Primary)"/"(Alternate)" collapsed into one "Entrance Exams" column -> mapped to
+    # entranceExamsPrimary, entranceExamsAlternate left null. "Top Govt Colleges"/"Top
+    # Private Colleges" collapsed into one "Top Colleges" column -> mapped to
+    # topGovtColleges, topPrivateColleges left null (no reliable way to re-split).
+    # Approx Annual Fee Range was dropped entirely -> null.
     ws = wb["UG Courses_IND"]
     out = []
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        course_name, cluster = s(r[0]), s(r[4])
+    for row in rows_by_header(ws):
+        course_name, cluster = s(row["Course Name\n(Short)"]), s(row["Career Cluster"])
         if not (course_name and cluster):
             continue
         out.append(
             {
                 "courseName": course_name,
-                "fullForm": s(r[1]),
-                "level": s(r[2]),
-                "durationYears": s(r[3]) if r[3] is None or isinstance(r[3], str) else str(r[3]),
+                "fullForm": s(row["Full Form"]),
+                "level": s(row["Level\n(UG/PG/Diploma/Certificate)"]),
+                "durationYears": None,  # dropped from this workbook
                 "careerCluster": cluster,
-                "stream12thRequirements": s(r[5]),
-                "minimumEligibility": s(r[6]),
-                "entranceExamsPrimary": s(r[7]),
-                "entranceExamsAlternate": s(r[8]),
-                "topSpecialisations": s(r[9]),
-                "topGovtColleges": s(r[10]),
-                "topPrivateColleges": s(r[11]),
-                "approxAnnualFeeRange": s(r[12]),
-                "furtherStudyOptions": s(r[13]),
+                "stream12thRequirements": s(row["12th  Stream with Subject Requirements"]),
+                "minimumEligibility": None,  # dropped from this workbook
+                "entranceExamsPrimary": s(row["Entrance Exams"]),
+                "entranceExamsAlternate": None,  # merged into "Entrance Exams" in this workbook
+                "topSpecialisations": s(row["Top Specialisations / Branches"]),
+                "topGovtColleges": s(row["Top Colleges"]),
+                "topPrivateColleges": None,  # merged into "Top Colleges" in this workbook
+                "approxAnnualFeeRange": None,  # dropped from this workbook
+                "furtherStudyOptions": s(row["Further Study Options\n(PG / PhD)"]),
             }
         )
     print(f"UG Courses_IND: {len(out)} rows exported")
@@ -304,18 +303,18 @@ def export_ug_courses(wb):
 def export_pg_institutions(wb):
     ws = wb["PG Institutions_IND"]
     out = []
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        institution = s(r[1])
+    for row in rows_by_header(ws):
+        institution = s(row["Institution"])
         if not institution:
             continue
         out.append(
             {
-                "industry": s(r[0]),
+                "industry": s(row["Industry"]),
                 "institution": institution,
-                "state": s(r[2]),
-                "city": s(r[3]),
-                "programTypes": s(r[4]),
-                "website": s(r[5]),
+                "state": s(row["State"]),
+                "city": s(row["City"]),
+                "programTypes": s(row["Program Types (after Graduation)"]),
+                "website": s(row["Website"]),
             }
         )
     print(f"PG Institutions_IND: {len(out)} rows exported")
@@ -325,23 +324,32 @@ def export_pg_institutions(wb):
 def export_pg_entrance(wb):
     ws = wb["PG Entrance_IND"]
     out = []
-    for r in ws.iter_rows(min_row=2, values_only=True):
-        exam_name = s(r[0])
+    for row in rows_by_header(ws):
+        exam_name = s(row["Entrance Exam"])
         if not exam_name:
             continue
-        out.append({"examName": exam_name, "coursesForExam": s(r[1]), "officialWebsite": s(r[2])})
+        out.append(
+            {
+                "examName": exam_name,
+                "coursesForExam": s(row["Courses for which the exam is meant (PG)"]),
+                "officialWebsite": s(row["Official Website"]),
+            }
+        )
     print(f"PG Entrance_IND: {len(out)} rows exported")
     return out
 
 
 def main():
-    # Only the CL tab is re-exported here, from the 2609 CL-only sheet — the reference
-    # tabs (UG/PG institutions, courses, entrance exams) are unchanged since the 1808
-    # workbook, so their JSON files are left as-is rather than regenerated from SRC.
-    wb_cl = openpyxl.load_workbook(SRC_CL, data_only=True)
+    wb = openpyxl.load_workbook(SRC, data_only=True)
 
     exports = {
-        "career-library.json": export_career_library(wb_cl),
+        "career-library.json": export_career_library(wb),
+        "ug-institutions.json": export_ug_institutions(wb),
+        "ug-institutions-universities.json": export_ug_inst_uty(wb),
+        "ug-entrance-exams.json": export_ug_entrance(wb),
+        "ug-courses.json": export_ug_courses(wb),
+        "pg-institutions.json": export_pg_institutions(wb),
+        "pg-entrance-exams.json": export_pg_entrance(wb),
     }
 
     for filename, data in exports.items():

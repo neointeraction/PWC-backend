@@ -41,6 +41,7 @@ missing. Set at least:
 | Var | Value |
 |---|---|
 | `DATABASE_URL` | the **pooled** connection string from step 1 |
+| `DIRECT_DATABASE_URL` | the **direct** (non-pooled) connection string — `prisma migrate`/`db push` always use this instead of `DATABASE_URL` (see `prisma/schema.prisma`'s `directUrl`), since PgBouncer's transaction pooling can't reliably hold the advisory lock migrate needs and will fail with a P1002 timeout otherwise |
 | `JWT_ACCESS_SECRET` | a long random string |
 | `JWT_REFRESH_SECRET` | a different long random string |
 | `CORS_ORIGIN` | your frontend's URL (e.g. `https://app.example.com`) |
@@ -53,17 +54,25 @@ tester).
 
 ### 3. Run migrations against the production DB (from your machine, once per schema change)
 
-Migrations can't run inside a serverless function. Use the **direct** (non-pooled) URL:
+Migrations can't run inside a serverless function. With `DIRECT_DATABASE_URL` set (step 2),
+`prisma migrate deploy` picks it up automatically via `directUrl` in `prisma/schema.prisma` —
+no need to swap `DATABASE_URL` by hand:
 
 ```bash
-DATABASE_URL="<DIRECT non-pooled url>" pnpm prisma migrate deploy
+pnpm prisma migrate deploy
 ```
+
+If `DIRECT_DATABASE_URL` isn't set in your shell (e.g. running from a machine without the
+full `.env`), pass it inline instead: `DIRECT_DATABASE_URL="<direct url>" DATABASE_URL="<pooled url>" pnpm prisma migrate deploy`.
 
 ### 4. Seed the production DB (once)
 
 ```bash
 DATABASE_URL="<DIRECT non-pooled url>" pnpm db:seed
 ```
+
+(Seeding goes through Prisma Client, not Migrate, so it still needs the direct URL passed
+as `DATABASE_URL` explicitly.)
 
 This seeds the super admin, the `CLASS_9_10` cohort, the 4 form templates, the 73
 assessment questions, and the career library (+ normalized lookups/links).
@@ -85,3 +94,8 @@ Push to the branch connected to Vercel, or `vercel --prod`. The build runs
 - **All routes 404**: confirm the `vercel.json` rewrite is present (it routes `/(.*)` →
   the function). Test `GET /health` first.
 - **DB connection errors under load**: you're not using the pooled URL / `connection_limit=1`.
+- **`P1002` / advisory lock timeout during `migrate deploy`**: you ran it against the pooled
+  (`-pooler`) URL instead of the direct one. Set `DIRECT_DATABASE_URL` (step 2) so
+  `directUrl` in `prisma/schema.prisma` routes Migrate to the direct connection
+  automatically — don't run `migrate deploy` as part of an automated build step against
+  `DATABASE_URL` if that's the pooled string.
