@@ -23,6 +23,10 @@ import type {
 const MIN_SESSION_GAP_DAYS = 2;
 const JOIN_WINDOW_MINUTES_BEFORE = 10;
 const RESCHEDULE_CUTOFF_HOURS = 24;
+// Strict gap between the student's assessment submission and a fresh Session 1 booking —
+// not a calendar-day rule like MIN_SESSION_GAP_DAYS, but a real 48-hour instant-to-instant
+// gap, since a slot "tomorrow morning" could still be under 48 hours from a late-night submit.
+const MIN_SESSION1_GAP_HOURS = 48;
 
 const sessionInclude = {
   student: {
@@ -69,10 +73,6 @@ function diffCalendarDays(dateA: string, dateB: string): number {
   return Math.round((toDate(dateB).getTime() - toDate(dateA).getTime()) / 86_400_000);
 }
 
-function todayDateStr(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 // `time` ("HH:mm") is IST wall-clock, matching how slots are created/displayed (see
 // dateFormat.ts) — IST is UTC+5:30, so the offset (not "Z") gives the correct instant.
 function combineDateTime(date: Date, time: string): Date {
@@ -94,6 +94,20 @@ function sendEmailBestEffort(to: string, templateKey: Parameters<typeof sendTemp
   sendTemplateEmail(to, templateKey, data).catch((err) => {
     console.error(`[sessions] failed to send ${templateKey} to ${to}:`, err);
   });
+}
+
+// The instant the 48-hour Session 1 gap counts from. Falls back to `updatedAt` in the
+// (defensive-only) case a student reached ASSESSMENT_COMPLETED without a submitted
+// attempt row — mirrors the same fallback in studentStage.ts's stage-clock resolver.
+async function getAssessmentCompletedAt(studentId: string): Promise<Date> {
+  const latestAttempt = await prisma.assessmentAttempt.findFirst({
+    where: { studentId, status: "SUBMITTED" },
+    orderBy: { submittedAt: "desc" },
+    select: { submittedAt: true },
+  });
+  if (latestAttempt?.submittedAt) return latestAttempt.submittedAt;
+  const student = await prisma.student.findUnique({ where: { id: studentId }, select: { updatedAt: true } });
+  return student?.updatedAt ?? new Date();
 }
 
 async function getStudentOrThrow(studentId: string) {
@@ -256,9 +270,12 @@ export async function getSession1BookingOptions(studentId: string, rescheduleSes
     orderBy: [{ slotDate: "asc" }, { startTime: "asc" }],
     select: { slotDate: true, startTime: true, endTime: true },
   });
-  // A fresh Session 1 booking can't be made for today — earliest is tomorrow.
-  const today = todayDateStr();
-  return slots.filter((s) => diffCalendarDays(today, s.slotDate.toISOString().slice(0, 10)) >= 1);
+  // A fresh Session 1 booking must sit at least MIN_SESSION1_GAP_HOURS after the
+  // student's own assessment submission — a real instant-to-instant gap, not just
+  // "tomorrow or later" (a slot the morning after a late-night submit is still <48h away).
+  const assessmentCompletedAt = await getAssessmentCompletedAt(studentId);
+  const cutoff = assessmentCompletedAt.getTime() + MIN_SESSION1_GAP_HOURS * 3_600_000;
+  return slots.filter((s) => combineDateTime(s.slotDate, s.startTime).getTime() >= cutoff);
 }
 
 async function resolveCounsellorForSlot(
@@ -358,8 +375,10 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
   const existingSession1 = existing.find((s) => s.sessionNumber === "SESSION_1");
   const existingSession2 = existing.find((s) => s.sessionNumber === "SESSION_2");
 
-  if (diffCalendarDays(todayDateStr(), input.session1.date) < 1) {
-    throw new BadRequestError("Session 1 must be booked for tomorrow or later");
+  const assessmentCompletedAt = await getAssessmentCompletedAt(studentId);
+  const session1CutoffMs = assessmentCompletedAt.getTime() + MIN_SESSION1_GAP_HOURS * 3_600_000;
+  if (combineDateTime(toDate(input.session1.date), input.session1.startTime).getTime() < session1CutoffMs) {
+    throw new BadRequestError(`Session 1 must be booked at least ${MIN_SESSION1_GAP_HOURS} hours after your assessment was submitted`);
   }
   if (diffCalendarDays(input.session1.date, input.session2.date) < MIN_SESSION_GAP_DAYS) {
     throw new BadRequestError(`Session 2 must be at least ${MIN_SESSION_GAP_DAYS} calendar days after Session 1`);

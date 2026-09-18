@@ -58,13 +58,24 @@ async function cleanupProjectTree(namePrefix: string): Promise<void> {
 const now = new Date();
 now.setUTCSeconds(0, 0);
 
-const session1Start = addMinutes(now, 5); // within the T-10min join window shortly
+// Session 1's real booking must clear the 48-hour post-assessment-submission gate
+// (MIN_SESSION1_GAP_HOURS in sessions.service.ts) — a near-"now" date 400s there, so this
+// sits a few days out. Tests that need a near-"now" session (join window, no-show) get
+// that time via a direct prisma write instead of the public booking endpoint — see
+// `joinWindowStart`/`joinWindowEnd` below.
+const session1Start = addDays(addMinutes(now, 5), 3);
 const session1End = addMinutes(session1Start, 45);
 const session1Date = session1Start;
 
 const session2Date = addDays(session1Date, 3);
-const session2Start = addMinutes(now, 5);
+const session2Start = addDays(addMinutes(now, 5), 3);
 const session2End = addMinutes(session2Start, 45);
+
+// Near-"now" start/end for the T-10-minute join window test — applied directly via
+// prisma.session.update after the real booking flow, since /book enforces the 48-hour gap
+// this window intentionally violates.
+const joinWindowStart = addMinutes(now, 5);
+const joinWindowEnd = addMinutes(joinWindowStart, 45);
 
 describe("Sessions API", () => {
   beforeAll(async () => {
@@ -226,8 +237,7 @@ describe("Sessions API", () => {
   });
 
   it("rejects joining before the T-10-minute window opens", async () => {
-    // A separate, far-future admin-created session — session1 (booked above) starts in
-    // ~5 minutes, already inside the 10-minute window, so it can't exercise this case.
+    // A separate admin-created session at `farFuture`, well outside the join window.
     const passwordHash = await argon2.hash("temp-password");
     const otherUser = await prisma.user.create({
       data: { email: "student-sessions-2@test.example", passwordHash, role: "STUDENT", firstName: "Priya", lastName: "Nair" },
@@ -276,7 +286,13 @@ describe("Sessions API", () => {
       .send({ meetingLink: "https://meet.example.com/abc" });
     expect(linkRes.status).toBe(200);
 
-    // session1Start is ~5 minutes out, inside the 10-minute join window.
+    // session1 was booked days out (to clear the 48-hour post-assessment gate) — move it
+    // directly via prisma, bypassing /reschedule, to land inside the T-10min join window.
+    await prisma.session.update({
+      where: { id: session1.id },
+      data: { scheduledDate: now, startTime: hm(joinWindowStart), endTime: hm(joinWindowEnd) },
+    });
+
     const joinRes = await authRequest(app).post(`/api/v1/sessions/${session1.id}/join`).send({ role: "STUDENT" });
     expect(joinRes.status).toBe(200);
     expect(joinRes.body.meetingLink).toBe("https://meet.example.com/abc");

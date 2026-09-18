@@ -88,19 +88,64 @@ function splitTopLevel(value: string, separators: RegExp): string[] {
   return parts;
 }
 
+// Degree abbreviations that are meaningless as a *standalone* programme name - "BA" alone
+// says nothing about the subject, so when the workbook writes "BA / BSc Economics" it means
+// both are Economics degrees, not that plain "BA" (any subject) is also acceptable.
+const DEGREE_ABBR =
+  "(?:B\\.?A|B\\.?Sc|B\\.?Com|B\\.?Tech|B\\.?E(?!d)|B\\.?BA|B\\.?Arch|B\\.?Des|B\\.?Pharm|B\\.?VSc|LL\\.?B|BCA|" +
+  "M\\.?A|M\\.?Sc|M\\.?Com|M\\.?Tech|M\\.?E(?!d)|M\\.?BA|M\\.?Arch|MCA|PGDM)";
+const BARE_ABBR = new RegExp(`^${DEGREE_ABBR}\\.?$`, "i");
+const ABBR_PREFIX = new RegExp(`^(${DEGREE_ABBR}\\.?)\\s*(.*)$`, "i");
+
+// "BA / BSc Economics" -> "BA Economics / BSc Economics": a shared trailing subject after
+// the LAST "/"-alternative is propagated back onto any EARLIER alternative that is itself
+// just a bare abbreviation, so every alternative ends up naming the same subject instead of
+// splitting into a subject-less "BA" that then collides (in the shared EducationEntry table)
+// with every other role's unrelated "BA" mention. Leaves genuine independent-alternative
+// lists alone (e.g. "BTech / BSc / BCA / Statistics / Maths", where the last item isn't a
+// degree abbreviation at all, so there's no shared subject to propagate).
+export function expandSharedSuffix(raw: string): string {
+  const groups = splitTopLevel(raw, /\//)
+    .map((g) => g.trim())
+    .filter(Boolean);
+  if (groups.length < 2) return raw;
+  const last = groups[groups.length - 1] ?? "";
+  const earlier = groups.slice(0, -1);
+  if (!earlier.every((g) => BARE_ABBR.test(g))) return raw;
+
+  const m = last.match(ABBR_PREFIX);
+  const extra = (m?.[2] ?? "").trim();
+  let suffix: string;
+  if (m && extra) {
+    // Last alternative is "<ABBR> <extra text>" - propagate just the extra text, e.g.
+    // "BSc Economics" -> "Economics".
+    suffix = splitTopLevel(extra, /,/)[0]?.trim() ?? "";
+  } else if (!m) {
+    // Last alternative has no degree-abbreviation prefix at all (e.g. "Economics" in
+    // "BCom / BBA / Economics") - the whole thing (up to the first top-level comma) is
+    // the shared subject.
+    suffix = splitTopLevel(last, /,/)[0]?.trim() ?? "";
+  } else {
+    return raw; // Last alternative is itself bare - nothing to propagate.
+  }
+  if (!suffix) return raw;
+
+  return [...earlier.map((g) => `${g} ${suffix}`), last].join(" / ");
+}
+
 export function graduationProgrammes(value: string | null): string[] {
   // clean() would strip the hedge before the split, so work off the raw text here and
   // clean each part afterwards. The source column is already just the degree list (the
   // "Focus Electives:" half was split off at export time), so no marker-stripping needed.
   const raw = (value ?? "").trim().replace(/\s+/g, " ");
   if (!raw || JUNK.test(raw)) return [];
-  return splitTopLevel(raw, /[/,]/).map(clean).filter(usable);
+  return splitTopLevel(expandSharedSuffix(raw), /[/,]/).map(clean).filter(usable);
 }
 
 export function postGraduateProgrammes(value: string | null): string[] {
   const raw = (value ?? "").trim().replace(/\s+/g, " ");
   if (!raw || JUNK.test(raw)) return [];
-  return splitTopLevel(raw, /[/,]/).map(clean).filter(usable);
+  return splitTopLevel(expandSharedSuffix(raw), /[/,]/).map(clean).filter(usable);
 }
 
 interface Derived {
