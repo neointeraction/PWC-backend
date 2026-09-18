@@ -155,10 +155,25 @@ export async function seedCareerLibraryNormalization(prisma: PrismaClient): Prom
     prisma.pgInstitution.findMany({ select: { institution: true, city: true, state: true } }),
   ]);
   const instMap = new Map<string, Prisma.InstitutionCreateManyInput>();
+  // Same institution name can appear multiple times across ugInst (once per industry),
+  // ugUniv and pgInst, with a given detail column blank on some rows and filled on
+  // others (e.g. IIT Delhi's "Data Science & AI" row has no approxPlacementCtc but its
+  // "Engineering" row does) — merge field-by-field instead of first-row-wins, so a
+  // blank on the first-seen row doesn't shadow a value seen later for the same name.
   const addInst = (name: unknown, extra: Partial<Prisma.InstitutionCreateManyInput> = {}) => {
     const n = clean(name);
     if (!n) return;
-    if (!instMap.has(n)) instMap.set(n, { name: n, ...extra });
+    const existing = instMap.get(n);
+    if (!existing) {
+      instMap.set(n, { name: n, ...extra });
+      return;
+    }
+    for (const [key, value] of Object.entries(extra)) {
+      const v = typeof value === "string" ? clean(value) : value;
+      if (v && (existing as Record<string, unknown>)[key] == null) {
+        (existing as Record<string, unknown>)[key] = v;
+      }
+    }
   };
   for (const i of ugInst) {
     addInst(i.name, {

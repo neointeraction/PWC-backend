@@ -9,7 +9,12 @@ import type { AccessTokenPayload } from "../../common/middlewares/auth.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import { sendTemplateEmail } from "../email/email.service.js";
 import { buildFormLink } from "../../common/utils/links.js";
-import { computeStageInfo, stageRelationsInclude, type StudentForStage } from "./studentStage.js";
+import {
+  computeStageInfo,
+  reportStageLabel,
+  stageRelationsInclude,
+  type StudentForStage,
+} from "./studentStage.js";
 import type {
   CheckDuplicateStudentsBody,
   CreateStudentInput,
@@ -61,12 +66,17 @@ function sendEmailBestEffort(to: string, templateKey: Parameters<typeof sendTemp
 // Attaches the derived stage + ageing/flag (computeStageInfo) to a student loaded with
 // `stageRelationsInclude`, and strips the raw child rows the resolver read — the response
 // carries the display relations (user/project/division) plus `stageInfo`, nothing heavier.
+// `stageInfo.stage` stays the full, precise derived-stage key (used for `?stage=`
+// filtering); `stageInfo.stageLabel` is overridden to the folded display label
+// (`reportStageLabel`) so it matches the frontend's 12-row stage report exactly — see
+// `REPORT_LABEL_FOLD` in studentStage.ts for which 5 stages fold onto a neighbor's label.
 function attachStageInfo<T extends StudentForStage>(student: T, now: Date) {
   const { formSubmissions, assessmentAttempts, sessions, ...rest } = student;
   void formSubmissions;
   void assessmentAttempts;
   void sessions;
-  return { ...rest, stageInfo: computeStageInfo(student, now) };
+  const stageInfo = computeStageInfo(student, now);
+  return { ...rest, stageInfo: { ...stageInfo, stageLabel: reportStageLabel(stageInfo.stage) } };
 }
 
 async function assertProjectExists(projectId: string) {

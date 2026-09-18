@@ -23,7 +23,15 @@ import { calendarDaysBetween, istDayNumber } from "../../common/utils/istDate.js
 export const AGEING_FLAG_THRESHOLD_DAYS = 2;
 
 // Derived stage keys the UI's "All Stages" dropdown filters on. Finer-grained than
-// WorkflowStatus (the "— Student/— Parent" halves), matching the mock.
+// WorkflowStatus (the "— Student/— Parent" halves), matching the mock. This set stays the
+// full, precise 17 values — it's what `?stage=` filtering and the idle-nudge scheduler
+// (`src/scheduler/jobs.ts`) key off, and both need every real state distinguished (e.g. the
+// scheduler routes a different reminder email to "hasn't started the assessment yet" than
+// to "hasn't submitted a pre-counselling form yet" — collapsing them would misroute copy).
+// For the *display* label folding the frontend's 12-row stage report wants (no dedicated
+// row for Assessment Pending / Counsellor Feedback / Feedback Pending / Closed /
+// Discontinued), see `REPORT_STAGE_LABELS` below — that folds only the label shown, not
+// this key.
 export const DERIVED_STAGES = [
   "INVITED",
   "LOGIN_ACTIVATED",
@@ -65,6 +73,24 @@ export const STAGE_LABELS: Record<DerivedStage, string> = {
   CLOSED: "Closed",
   DISCONTINUED: "Discontinued",
 };
+
+// Display-only fold for the frontend's PROJECT_STAGES_OPTIONS report/dropdown, which has
+// no dedicated row for these 5 stages. Maps each to the label of its nearest neighbor in
+// the workflow sequence; `stageInfo.stage` (the filter/scheduler key) is untouched — only
+// the label shown to the report changes. Apply via `reportStageLabel()` at the API
+// response boundary (see `attachStageInfo` in students.service.ts), never inside
+// `computeStageInfo` itself.
+const REPORT_LABEL_FOLD: Partial<Record<DerivedStage, DerivedStage>> = {
+  ASSESSMENT_PENDING: "PRE_COUNSELLING_PARENT",
+  COUNSELLOR_FEEDBACK: "COUNSELLOR_FEEDBACK_REPORT",
+  FEEDBACK_PENDING: "SESSION_2_COMPLETED",
+  CLOSED: "FEEDBACK_PARENT",
+};
+
+export function reportStageLabel(stage: DerivedStage): string {
+  const folded = REPORT_LABEL_FOLD[stage];
+  return STAGE_LABELS[folded ?? stage];
+}
 
 export type FlagReason = "IDLE" | "MISSED_SESSION";
 

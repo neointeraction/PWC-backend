@@ -7,8 +7,13 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // DATABASE_URL is the pooled (PgBouncer) connection Prisma Client uses at runtime.
+  // DIRECT_DATABASE_URL is the non-pooled connection `prisma migrate`/`db push` use —
+  // PgBouncer's transaction-mode pooling doesn't reliably hold the session-level
+  // advisory lock migrate needs, which surfaces as a P1002 timeout mid-deploy.
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_DATABASE_URL")
 }
 
 enum UserRole {
