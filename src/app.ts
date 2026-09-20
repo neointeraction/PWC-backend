@@ -44,7 +44,8 @@ export function createApp(): Express {
       credentials: true,
     })
   );
-  app.use(express.json());
+  // Project wizard posts the whole student roster + counsellor slots in one body; the 100kb default rejects ~400+ students.
+  app.use(express.json({ limit: "10mb" }));
   app.use(cookieParser());
 
   // Render user-facing date/time fields in a generic display format ("01 Aug 2026",
