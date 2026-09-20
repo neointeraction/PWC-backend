@@ -241,6 +241,16 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
     else rowsByCode.set(row.counsellorCode, [row]);
   }
 
+  // argon2 is deliberately slow — hashing per student inside the transaction blew past
+  // Prisma's 5s interactive-transaction limit on real rosters. Hash up front, in parallel;
+  // rows the transaction later skips just have their hash discarded.
+  const studentCreds = await Promise.all(
+    input.students.map(async (s) => {
+      const tempPassword = s.password ?? generateTempPassword();
+      return { tempPassword, passwordHash: await argon2.hash(tempPassword) };
+    })
+  );
+
   try {
     const { project, pendingEmails, studentsSkipped, counsellorsAssigned, slotsImported, slotsSkipped } =
       await prisma.$transaction(async (tx) => {
@@ -310,9 +320,8 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
         }
 
         const pendingEmails: PendingStudentEmail[] = [];
-        for (const { row: s } of validStudents) {
-          const tempPassword = s.password ?? generateTempPassword();
-          const passwordHash = await argon2.hash(tempPassword);
+        for (const { row: s, index } of validStudents) {
+          const { tempPassword, passwordHash } = studentCreds[index]!;
           const user = await tx.user.create({
             data: { email: s.email, passwordHash, role: "STUDENT", firstName: s.firstName, lastName: s.lastName },
           });
@@ -358,8 +367,9 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
         const existingCounsellorEmails = new Set(
           (
             await tx.user.findMany({
+              // Any role — User.email is globally unique, so an existing student/admin with
+              // this email blocks creating the counsellor just as much as another counsellor.
               where: {
-                role: "COUNSELLOR",
                 email: { in: [...new Set(input.counsellorSlots.map((r) => r.email).filter((v): v is string => !!v))] },
               },
               select: { email: true },
@@ -392,7 +402,11 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
             let skipReason: string | undefined;
             if (!identityRow) {
               skipReason = `counsellorCode "${code}" doesn't exist yet and no row for it supplies firstName/lastName/email/mobile to create one`;
-            } else if (existingCounsellorEmails.has(identityRow.email!) || seenNewCounsellorEmails.has(identityRow.email!)) {
+            } else if (
+              existingCounsellorEmails.has(identityRow.email!) ||
+              seenNewCounsellorEmails.has(identityRow.email!) ||
+              seenEmails.has(identityRow.email!) // a student created earlier in this same call
+            ) {
               skipReason = `counsellorCode "${code}" can't be created — email already in use`;
             } else if (
               existingCounsellorMobiles.has(identityRow.mobile!) ||
@@ -507,7 +521,7 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
           slotsImported: cleanSlots.length,
           slotsSkipped,
         };
-      });
+      }, { maxWait: 10_000, timeout: 120_000 });
 
     // Fire-and-forget, same as the standalone student-create endpoint — only sent once the
     // transaction has actually committed, so a rolled-back wizard never emails anyone.

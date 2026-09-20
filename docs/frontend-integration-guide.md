@@ -164,6 +164,13 @@ Every non-2xx response has this shape:
 - **409 — conflict**: duplicate unique field, or an already-locked
   submission/attempt being written to again. `details` may include which field
   conflicted, e.g. `{ "fields": ["primaryEmail"] }`.
+- **400 — malformed body**: invalid JSON (`"Request body is not valid JSON"`) or a
+  string containing a NUL (`\u0000`) character anywhere in the body. Impossible calendar
+  dates (`2026-02-31`, `2026-13-45`) and project dates outside years 1900–2999 fail Zod
+  validation as well — none of these reach the database.
+- **413**: body over the 10 MB limit (`"Request body is too large"`).
+- **503**: transient database failure (transaction timeout, deadlock, connection pool
+  exhausted) — safe to retry; `{ "error": { "message": "The database is busy or the request took too long — please retry" } }`.
 - **500**: `{ "error": { "message": "Internal server error" } }` (plus a `stack` field
   outside production, for debugging — never present in prod).
 

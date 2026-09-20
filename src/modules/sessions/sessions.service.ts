@@ -887,7 +887,11 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
     }
   }
 
-  await assertSessionGap(session.studentId, session.sessionNumber, input.date);
+  // Admin reschedules are deliberate overrides, same as createSessionManually — only
+  // student-initiated moves are held to the S1/S2 gap.
+  if (input.initiatedBy !== "ADMIN") {
+    await assertSessionGap(session.studentId, session.sessionNumber, input.date);
+  }
 
   // Reactivating a cancelled session is a fresh start regardless of initiator — checked
   // first so a STUDENT-initiated rebook doesn't burn their one-time SCHEDULED-session

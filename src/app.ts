@@ -13,6 +13,7 @@ import { env } from "./config/env.js";
 const helmet = helmetImport as unknown as (options?: Readonly<Record<string, unknown>>) => RequestHandler;
 import { errorHandler, notFoundHandler } from "./common/middlewares/errorHandler.js";
 import { blockViewOnlyWrites } from "./common/middlewares/auth.js";
+import { rejectNullBytes } from "./common/middlewares/rejectNullBytes.js";
 import { healthRouter } from "./modules/health/health.routes.js";
 import { authRouter } from "./modules/auth/auth.routes.js";
 import { studentsRouter } from "./modules/students/students.routes.js";
@@ -44,7 +45,9 @@ export function createApp(): Express {
       credentials: true,
     })
   );
-  app.use(express.json());
+  // Project wizard posts the whole student roster + counsellor slots in one body; the 100kb default rejects ~400+ students.
+  app.use(express.json({ limit: "10mb" }));
+  app.use(rejectNullBytes);
   app.use(cookieParser());
 
   // Render user-facing date/time fields in a generic display format ("01 Aug 2026",
