@@ -5,6 +5,12 @@ import { dateSchema, timeSchema } from "../sessions/sessions.schema.js";
 
 // Writable statuses (create/update). DELETED is set/cleared only via the DELETE + restore
 // endpoints, never by an arbitrary PATCH, so it's intentionally excluded here.
+// Coerced date kept inside a sane range — Postgres rejects timestamps outside its supported
+// range (e.g. year 275760) with an opaque driver error, which would surface as a 500.
+const projectDateSchema = z.coerce
+  .date()
+  .refine((d) => d.getUTCFullYear() >= 1900 && d.getUTCFullYear() <= 2999, "Date must be between years 1900 and 2999");
+
 export const projectStatusSchema = z.enum(["ACTIVE", "CLOSED"]);
 
 // Filter statuses for listing — includes DELETED so the UI can list soft-deleted projects.
@@ -22,8 +28,8 @@ export const createProjectSchema = z
     address: z.string().trim().min(1).optional(),
     contactNumber: phoneSchema,
     primaryEmail: emailSchema,
-    fromDate: z.coerce.date(),
-    toDate: z.coerce.date(),
+    fromDate: projectDateSchema,
+    toDate: projectDateSchema,
     status: projectStatusSchema.optional(),
     // Delivery language. Optional for now — omitting it defaults to English (the seeded
     // default). Wired ahead of the UI that will let admins pick another language.
@@ -42,8 +48,8 @@ export const updateProjectSchema = z.object({
   address: z.string().trim().min(1).optional(),
   contactNumber: phoneSchema.optional(),
   primaryEmail: emailSchema.optional(),
-  fromDate: z.coerce.date().optional(),
-  toDate: z.coerce.date().optional(),
+  fromDate: projectDateSchema.optional(),
+  toDate: projectDateSchema.optional(),
   status: projectStatusSchema.optional(),
   languageId: z.string().cuid().optional(),
 });

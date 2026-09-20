@@ -367,8 +367,9 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
         const existingCounsellorEmails = new Set(
           (
             await tx.user.findMany({
+              // Any role — User.email is globally unique, so an existing student/admin with
+              // this email blocks creating the counsellor just as much as another counsellor.
               where: {
-                role: "COUNSELLOR",
                 email: { in: [...new Set(input.counsellorSlots.map((r) => r.email).filter((v): v is string => !!v))] },
               },
               select: { email: true },
@@ -401,7 +402,11 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
             let skipReason: string | undefined;
             if (!identityRow) {
               skipReason = `counsellorCode "${code}" doesn't exist yet and no row for it supplies firstName/lastName/email/mobile to create one`;
-            } else if (existingCounsellorEmails.has(identityRow.email!) || seenNewCounsellorEmails.has(identityRow.email!)) {
+            } else if (
+              existingCounsellorEmails.has(identityRow.email!) ||
+              seenNewCounsellorEmails.has(identityRow.email!) ||
+              seenEmails.has(identityRow.email!) // a student created earlier in this same call
+            ) {
               skipReason = `counsellorCode "${code}" can't be created — email already in use`;
             } else if (
               existingCounsellorMobiles.has(identityRow.mobile!) ||

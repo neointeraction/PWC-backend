@@ -389,4 +389,96 @@ describe("Project wizard API", () => {
     await prisma.project.delete({ where: { id: priorProject.id } });
     await prisma.user.delete({ where: { id: existingCounsellorUser.id } });
   });
+
+  // --- Inputs that used to escape as "500 Internal server error" ---
+
+  function wizardBody(n: number, over: Record<string, unknown> = {}) {
+    return {
+      project: {
+        code: `PWIZE${n}`,
+        name: `Test Project Wizard Edge ${n}`,
+        address: "1 Edge St",
+        contactNumber: `+9198765907${String(n).padStart(2, "0")}`,
+        primaryEmail: `wizedge${n}@test-wizard.example`,
+        fromDate: "2026-01-01",
+        toDate: "2026-12-31",
+      },
+      students: [
+        {
+          firstName: "Edge",
+          lastName: "Student",
+          email: `wiz-edge-student-${n}@test-wizard.example`,
+          mobile: `+9198765908${String(n).padStart(2, "0")}`,
+          studentCode: `SWIZE${n}`,
+          className: "Grade 9",
+          divisionName: "A",
+        },
+      ],
+      counsellorSlots: [],
+      ...over,
+    };
+  }
+
+  const edgeSlot = (n: number, over: Record<string, unknown> = {}) => ({
+    counsellorCode: `CWIZE${n}`,
+    firstName: "Edge",
+    lastName: "Counsellor",
+    email: `wiz-edge-counsellor-${n}@test-wizard.example`,
+    mobile: `+9198765909${String(n).padStart(2, "0")}`,
+    date: "2026-03-01",
+    startTime: "10:00",
+    endTime: "10:30",
+    ...over,
+  });
+
+  it.each([
+    ["an out-of-range slot date", "2026-13-45"],
+    ["an impossible calendar day", "2026-02-31"],
+    ["an impossible 'DD Mon YYYY' day", "31 Feb 2026"],
+  ])("rejects %s with a 400 instead of a 500", async (_label, date) => {
+    const res = await authRequest(app)
+      .post("/api/v1/projects/wizard")
+      .send(wizardBody(1, { counsellorSlots: [edgeSlot(1, { date })] }));
+    expect(res.status).toBe(400);
+    expect(await prisma.project.findUnique({ where: { code: "PWIZE1" } })).toBeNull();
+  });
+
+  it("rejects project dates outside Postgres' timestamp range with a 400", async () => {
+    const body = wizardBody(2);
+    const res = await authRequest(app)
+      .post("/api/v1/projects/wizard")
+      .send({ ...body, project: { ...body.project, fromDate: "+275760-09-13", toDate: "+275760-09-13" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects a NUL byte in any string with a 400 (Postgres can't store it)", async () => {
+    const body = wizardBody(3);
+    const res = await authRequest(app)
+      .post("/api/v1/projects/wizard")
+      .send({ ...body, students: [{ ...body.students[0], firstName: "Ed" + String.fromCharCode(0) + "ge" }] });
+    expect(res.status).toBe(400);
+    expect(await prisma.project.findUnique({ where: { code: "PWIZE3" } })).toBeNull();
+  });
+
+  it("answers malformed JSON with a 400, not a 500", async () => {
+    const res = await authRequest(app)
+      .post("/api/v1/projects/wizard")
+      .set("Content-Type", "application/json")
+      .send("{not json");
+    expect(res.status).toBe(400);
+    expect(res.body.error.message).toBe("Request body is not valid JSON");
+  });
+
+  it("skips a new counsellor whose email is already a student's, instead of failing the whole call", async () => {
+    const body = wizardBody(4);
+    const res = await authRequest(app)
+      .post("/api/v1/projects/wizard")
+      .send({ ...body, counsellorSlots: [edgeSlot(4, { email: body.students[0].email })] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.studentsCreated).toBe(1);
+    expect(res.body.slotsImported).toBe(0);
+    expect(res.body.slotsSkipped).toHaveLength(1);
+    expect(res.body.slotsSkipped[0].reason).toContain("email already in use");
+  });
 });

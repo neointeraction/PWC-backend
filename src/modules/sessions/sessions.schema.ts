@@ -11,19 +11,37 @@ const MONTHS: Record<string, string> = {
   jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
   jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
 };
+// A real calendar day — the regex alone lets "2026-13-45" through (Prisma then throws on the
+// Invalid Date → 500) and "2026-02-31" (JS rolls it over to March). Round-tripping through
+// Date.UTC catches both.
+function isRealCalendarDate(iso: string): boolean {
+  const [y, m, d] = iso.split("-").map(Number) as [number, number, number];
+  if (y < 1900 || y > 2999) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
 export const dateSchema = z
   .string()
   .trim()
   .transform((val, ctx) => {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
-    const m = /^(\d{2}) ([A-Za-z]{3}) (\d{4})$/.exec(val);
-    if (m) {
-      const [, day, mon, year] = m;
-      const month = MONTHS[mon!.toLowerCase()];
-      if (month) return `${year}-${month}-${day}`;
+    let iso: string | undefined;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(val)) {
+      iso = val;
+    } else {
+      const m = /^(\d{2}) ([A-Za-z]{3}) (\d{4})$/.exec(val);
+      const month = m ? MONTHS[m[2]!.toLowerCase()] : undefined;
+      if (m && month) iso = `${m[3]}-${month}-${m[1]}`;
     }
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Date must be in YYYY-MM-DD or DD Mon YYYY format" });
-    return z.NEVER;
+    if (iso === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Date must be in YYYY-MM-DD or DD Mon YYYY format" });
+      return z.NEVER;
+    }
+    if (!isRealCalendarDate(iso)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Date is not a valid calendar date" });
+      return z.NEVER;
+    }
+    return iso;
   });
 
 const sessionNumberSchema = z.enum(["SESSION_1", "SESSION_2"]);
