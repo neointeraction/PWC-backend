@@ -129,9 +129,9 @@ automatically by `sessions.service.ts` (`bookSessions`, `sendDayReminder`), same
 | `ASSESSMENT_REMINDER_PARENT` | `parentName`, `studentName` | 7 |
 | `SESSION_SCHEDULING_REMINDER_STUDENT` | `studentName`, `schedulingLink?` | 8 — Session Scheduling Reminder |
 | `SESSION_SCHEDULING_REMINDER_PARENT` | `parentName`, `studentName` | 8 |
-| `SESSION_SCHEDULED_CONFIRMATION_STUDENT` | `studentName`, `sessionDateTime`, `portalLink?` | 9 — Session Scheduling Confirmation |
-| `SESSION_SCHEDULED_CONFIRMATION_PARENT` | `parentName`, `studentName`, `sessionDateTime` | 9 |
-| `SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR` | `counsellorName`, `studentName`, `sessionDateTime`, `portalLink?` | 9 (not in source sheet — see note above) |
+| `SESSION_SCHEDULED_CONFIRMATION_STUDENT` | `studentName`, `sessionDateTime`, `sessionNumber?` (`"1"`\|`"2"`, default `"1"`), `portalLink?` | 9 — Session Scheduling Confirmation |
+| `SESSION_SCHEDULED_CONFIRMATION_PARENT` | `parentName`, `studentName`, `sessionDateTime`, `sessionNumber?` | 9 |
+| `SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR` | `counsellorName`, `studentName`, `sessionDateTime`, `sessionNumber?`, `portalLink?` | 9 (not in source sheet — see note above) |
 | `SESSION_1_DAY_REMINDER_STUDENT` | `studentName`, `sessionTime`, `portalLink?` | 10 — Session 1 Day Reminder |
 | `SESSION_1_DAY_REMINDER_PARENT` | `parentName`, `studentName`, `sessionTime` | 10 |
 | `SESSION_1_DAY_REMINDER_COUNSELLOR` | `counsellorName`, `studentName`, `sessionTime`, `portalLink?` | 10 (not in source sheet — see note above) |

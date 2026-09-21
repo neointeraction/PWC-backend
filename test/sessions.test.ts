@@ -1,10 +1,24 @@
 import argon2 from "argon2";
 import request from "supertest";
 import { authRequest, bearer } from "./helpers/http.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import { formatDisplayDate } from "../src/common/utils/dateFormat.js";
+
+// Capture outgoing template emails instead of hitting the console provider, so tests can
+// assert who was (and wasn't) emailed. Only sendTemplateEmail is replaced.
+const { sendTemplateEmailMock } = vi.hoisted(() => ({ sendTemplateEmailMock: vi.fn() }));
+vi.mock("../src/modules/email/email.service.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/modules/email/email.service.js")>()),
+  sendTemplateEmail: sendTemplateEmailMock,
+}));
+
+// Reset before every test so a rejection set in one test can't leak into the next.
+beforeEach(() => {
+  sendTemplateEmailMock.mockReset();
+  sendTemplateEmailMock.mockResolvedValue({});
+});
 
 const app = createApp();
 
@@ -904,6 +918,143 @@ describe("Sessions API", () => {
       const afterDelete = await prisma.counsellorSlot.findUnique({ where: { id: slot.id } });
       expect(afterDelete?.status).toBe("OPEN");
       expect(afterDelete?.sessionId).toBeNull();
+    });
+  });
+
+  describe("Admin manual creation — confirmation emails", () => {
+    let fixtureCounter = 0;
+
+    async function createStudent(parentEmail: string | null) {
+      fixtureCounter += 1;
+      const passwordHash = await argon2.hash("temp-password");
+      const user = await prisma.user.create({
+        data: { email: `manual-student-${fixtureCounter}@test.example`, passwordHash, role: "STUDENT", firstName: "Manu", lastName: "Al" },
+      });
+      const student = await prisma.student.create({
+        data: {
+          userId: user.id,
+          studentCode: `SESS-MANUAL-${fixtureCounter}`,
+          projectId,
+          className: "Grade 9",
+          divisionName: "A",
+          mobile: `+91987661${(1000 + fixtureCounter).toString().padStart(4, "0")}`,
+          parentMobile: `+91987662${(1000 + fixtureCounter).toString().padStart(4, "0")}`,
+          parentEmail,
+          fatherName: "Father",
+          fatherOccupation: "Engineer",
+          motherName: "Mother",
+          motherOccupation: "Doctor",
+          workflowStatus: "ASSESSMENT_COMPLETED",
+        },
+      });
+      // Each fixture gets its own date — (counsellorId, date, startTime) is unique.
+      const date = addDays(now, 400 + fixtureCounter * 20);
+      return { id: student.id, email: user.email, date };
+    }
+
+    function manualBody(student: { id: string; date: Date }, overrides: Record<string, unknown> = {}) {
+      return {
+        studentId: student.id,
+        counsellorId: counsellorAId,
+        sessionNumber: "SESSION_1",
+        date: ymd(student.date),
+        startTime: "10:00",
+        endTime: "10:45",
+        ...overrides,
+      };
+    }
+
+    const sentTo = () => sendTemplateEmailMock.mock.calls.map(([to, key]) => [to, key]);
+
+    it("sends the student, parent and counsellor confirmation emails", async () => {
+      const student = await createStudent("parent-manual-a@test.example");
+      const res = await authRequest(app).post("/api/v1/sessions").send(manualBody(student));
+      expect(res.status).toBe(201);
+
+      expect(sentTo()).toEqual([
+        [student.email, "SESSION_SCHEDULED_CONFIRMATION_STUDENT"],
+        ["parent-manual-a@test.example", "SESSION_SCHEDULED_CONFIRMATION_PARENT"],
+        ["counsellor-a@test.example", "SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR"],
+      ]);
+      const expectedWhen = `${formatDisplayDate(student.date)} 10:00`;
+      for (const [, , data] of sendTemplateEmailMock.mock.calls) {
+        expect(data).toMatchObject({ sessionNumber: "1", sessionDateTime: expectedWhen });
+      }
+    });
+
+    it("skips the parent email when no parentEmail is on file", async () => {
+      const student = await createStudent(null);
+      const res = await authRequest(app).post("/api/v1/sessions").send(manualBody(student));
+      expect(res.status).toBe(201);
+
+      expect(sentTo()).toEqual([
+        [student.email, "SESSION_SCHEDULED_CONFIRMATION_STUDENT"],
+        ["counsellor-a@test.example", "SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR"],
+      ]);
+    });
+
+    it("labels a Session 2 booking as Session 2", async () => {
+      const student = await createStudent("parent-manual-s2@test.example");
+      const res = await authRequest(app).post("/api/v1/sessions").send(manualBody(student, { sessionNumber: "SESSION_2" }));
+      expect(res.status).toBe(201);
+
+      expect(sendTemplateEmailMock).toHaveBeenCalledTimes(3);
+      for (const [, , data] of sendTemplateEmailMock.mock.calls) {
+        expect(data).toMatchObject({ sessionNumber: "2" });
+      }
+    });
+
+    it("sends nothing when the request is rejected (409 and 400)", async () => {
+      const student = await createStudent("parent-manual-b@test.example");
+      const first = await authRequest(app).post("/api/v1/sessions").send(manualBody(student));
+      expect(first.status).toBe(201);
+      sendTemplateEmailMock.mockClear();
+
+      const conflict = await authRequest(app).post("/api/v1/sessions").send(manualBody(student, { startTime: "12:00", endTime: "12:45" }));
+      expect(conflict.status).toBe(409);
+
+      const badCounsellor = await authRequest(app)
+        .post("/api/v1/sessions")
+        .send(manualBody(student, { sessionNumber: "SESSION_2", counsellorId: "00000000-0000-0000-0000-000000000000" }));
+      expect(badCounsellor.status).toBe(400);
+
+      expect(sendTemplateEmailMock).not.toHaveBeenCalled();
+    });
+
+    it("still returns 201 when every email send fails", async () => {
+      sendTemplateEmailMock.mockRejectedValue(new Error("mail provider down"));
+      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      const student = await createStudent("parent-manual-c@test.example");
+
+      const res = await authRequest(app).post("/api/v1/sessions").send(manualBody(student));
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe("SCHEDULED");
+      expect(sendTemplateEmailMock).toHaveBeenCalledTimes(3);
+
+      errorSpy.mockRestore();
+    });
+
+    it("sends the emails when reactivating a CANCELLED row", async () => {
+      const student = await createStudent("parent-manual-d@test.example");
+      const created = await authRequest(app).post("/api/v1/sessions").send(manualBody(student));
+      expect(created.status).toBe(201);
+      const cancel = await authRequest(app)
+        .post(`/api/v1/sessions/${created.body.id}/cancel`)
+        .send({ reason: "COUNSELLOR_UNAVAILABLE", initiatedBy: "ADMIN" });
+      expect(cancel.status).toBe(200);
+      sendTemplateEmailMock.mockClear();
+
+      const res = await authRequest(app)
+        .post("/api/v1/sessions")
+        .send(manualBody(student, { counsellorId: counsellorBId, date: ymd(addDays(student.date, 10)) }));
+      expect(res.status).toBe(201);
+      expect(res.body.id).toBe(created.body.id); // reactivated in place, not a new row
+
+      expect(sentTo()).toEqual([
+        [student.email, "SESSION_SCHEDULED_CONFIRMATION_STUDENT"],
+        ["parent-manual-d@test.example", "SESSION_SCHEDULED_CONFIRMATION_PARENT"],
+        ["counsellor-b@test.example", "SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR"],
+      ]);
     });
   });
 });

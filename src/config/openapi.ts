@@ -306,7 +306,7 @@ registry.registerPath({
   method: "patch",
   path: "/api/v1/students/me",
   tags: ["Students"],
-  summary: "Student self-service edit: the logged-in student updates their own contact/parent details (whatsappNumber, parentMobile/Email, father/mother name/occupation/employer). Identity/enrolment fields stay admin-only. 404 for a non-student account.",
+  summary: "Student self-service edit: the logged-in student updates their own name and contact/parent details (eleven fields: firstName, lastName, whatsappNumber, parentMobile/Email, father/mother name/occupation/employer). firstName/lastName apply only while workflowStatus is DRAFT (before confirm-profile) — afterwards they are silently ignored (still 200, other fields still saved); empty/whitespace-only → 400. email/mobile/studentCode/division/project/workflowStatus stay admin-only. 404 for a non-student account.",
   request: {
     body: { content: { "application/json": { schema: updateMyStudentSchema } } },
   },
