@@ -7,9 +7,18 @@ export const loginBodySchema = z.object({
 });
 export type LoginBody = z.infer<typeof loginBodySchema>;
 
-// New-password rules, shared by change-password and reset-password. Kept deliberately
-// modest (length only) — tune here if a stronger policy is needed.
-const newPasswordSchema = z.string().min(8, "Password must be at least 8 characters").max(200);
+// New-password policy, shared by change-password and reset-password. Keep in sync with the
+// frontend's src/utils/password.ts, which shows the same rules to the user as they type.
+// Only applies to passwords a user chooses — admin-issued temp passwords bypass it.
+const newPasswordSchema = z
+  .string()
+  .min(10, "Password must be at least 10 characters")
+  .max(200)
+  .regex(/[a-z]/, "Password must include a lowercase letter")
+  .regex(/[A-Z]/, "Password must include an uppercase letter")
+  .regex(/\d/, "Password must include a number")
+  .regex(/[^A-Za-z0-9\s]/, "Password must include a special character")
+  .regex(/^\S+$/, "Password must not contain spaces");
 
 export const changePasswordBodySchema = z.object({
   currentPassword: z.string().min(1),

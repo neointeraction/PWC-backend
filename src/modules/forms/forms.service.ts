@@ -1,7 +1,7 @@
 import type { Prisma, WorkflowStatus } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
-import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
+import { advanceWorkflowStatus, assertWorkflowStageAtLeast } from "../../common/workflow/workflowStatus.js";
 import { assertStudentProjectWindowOpen } from "../../common/utils/projectWindow.js";
 import type { FormTypeParams, GetFormTemplateQuery, SaveFormAnswersBody } from "./forms.schema.js";
 
@@ -24,6 +24,16 @@ const FORM_PAIRS: Partial<Record<FormType, { counterpart: FormType; reaches: Wor
   PRE_COUNSELLING_PARENT: { counterpart: "PRE_COUNSELLING_STUDENT", reaches: "PRE_COUNSELLING_FORMS_SUBMITTED" },
   FEEDBACK_STUDENT: { counterpart: "FEEDBACK_PARENT", reaches: "STUDENT_PARENT_FEEDBACK" },
   FEEDBACK_PARENT: { counterpart: "FEEDBACK_STUDENT", reaches: "STUDENT_PARENT_FEEDBACK" },
+};
+
+// The stage a student must have reached before they can open/save/submit each form — the
+// project window is the only other gate on this (login-less) flow, so without it a form
+// could be filled in out of order (e.g. feedback before the sessions have happened).
+const FORM_MIN_STAGE: Partial<Record<FormType, { stage: WorkflowStatus; message: string }>> = {
+  PRE_COUNSELLING_STUDENT: { stage: "PROFILE_COMPLETED", message: "Confirm your profile before filling in the pre-counselling form" },
+  PRE_COUNSELLING_PARENT: { stage: "PROFILE_COMPLETED", message: "The student's profile hasn't been confirmed yet, so this form isn't open" },
+  FEEDBACK_STUDENT: { stage: "SESSION_2_COMPLETED", message: "The feedback form opens once both counselling sessions are completed" },
+  FEEDBACK_PARENT: { stage: "SESSION_2_COMPLETED", message: "The feedback form opens once both counselling sessions are completed" },
 };
 
 async function isFormSubmitted(
@@ -174,6 +184,8 @@ export async function saveFormAnswers(
   // No login on this flow — the project window is the gate: reject drafts and submits
   // once the student's project has ended (or been closed). Also 404s an unknown student.
   await assertStudentProjectWindowOpen(studentId);
+  const minStage = FORM_MIN_STAGE[formType];
+  if (minStage) await assertWorkflowStageAtLeast(prisma, studentId, minStage.stage, minStage.message);
   const template = await resolveTemplateOrThrow(formType, input.cohort, input.version);
   const submittedByRole = FORM_TYPE_TO_ROLE[formType];
 

@@ -453,6 +453,10 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
       studentNoShow: false,
       counsellorNoShow: false,
       studentRescheduleUsed: false,
+      // A detached Session 1 may already have been completed: don't hand the old
+      // counsellor's notes (or their sent day-reminder) to the next one.
+      notes: null,
+      dayReminderSentAt: null,
     };
 
     const createdSession1 = existingSession1
@@ -546,6 +550,8 @@ export async function createSessionManually(input: CreateSessionBody) {
         counsellorJoinedAt: null,
         studentNoShow: false,
         counsellorNoShow: false,
+        notes: null,
+        dayReminderSentAt: null,
       };
 
       const created = existing
@@ -722,11 +728,26 @@ export async function listSessions(query: ListSessionsQuery) {
 
 // --- Join / complete / notes ---
 
+// Session 2 builds on Session 1, so it can't be joined or completed until Session 1 is
+// COMPLETED — otherwise a student could attend, and staff could close out, Session 2 and
+// jump the workflow past Session 1 entirely.
+async function assertSession1Completed(session: { studentId: string; sessionNumber: SessionNumber }) {
+  if (session.sessionNumber !== "SESSION_2") return;
+  const session1 = await prisma.session.findUnique({
+    where: { studentId_sessionNumber: { studentId: session.studentId, sessionNumber: "SESSION_1" } },
+    select: { status: true },
+  });
+  if (session1?.status !== "COMPLETED") {
+    throw new ConflictError("Session 1 must be completed before Session 2");
+  }
+}
+
 export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
   const session = await getSessionById(id);
   if (session.status !== "SCHEDULED") {
     throw new ConflictError("This session isn't currently scheduled");
   }
+  await assertSession1Completed(session);
 
   const startsAt = combineDateTime(session.scheduledDate, session.startTime);
   const endsAt = combineDateTime(session.scheduledDate, session.endTime);
@@ -763,6 +784,7 @@ export async function completeSession(id: string) {
   if (session.status !== "SCHEDULED") {
     throw new ConflictError("This session isn't currently scheduled");
   }
+  await assertSession1Completed(session);
 
   const target = session.sessionNumber === "SESSION_1" ? "SESSION_1_COMPLETED" : "SESSION_2_COMPLETED";
   const updated = await prisma.$transaction(async (tx) => {
@@ -1002,8 +1024,24 @@ export async function restartStudentSessions(studentId: string) {
     return results;
   });
 
-  const studentName = `${session1.student.user.firstName} ${session1.student.user.lastName}`;
+  sendSessionsCancelledEmails(cancelled);
+
+  return { cancelled };
+}
+
+// The three SESSION_CANCELLED_* emails for each session in a bulk cancel — shared by the
+// student "restart" and the admin "detach" below.
+function sendSessionsCancelledEmails(
+  cancelled: Array<{
+    sessionNumber: SessionNumber;
+    scheduledDate: Date;
+    startTime: string;
+    student: { parentEmail: string | null; user: { email: string; firstName: string; lastName: string } };
+    counsellor: { user: { email: string; firstName: string; lastName: string } };
+  }>
+): void {
   for (const s of cancelled) {
+    const studentName = `${s.student.user.firstName} ${s.student.user.lastName}`;
     const originalDateTime = formatDateTime(s.scheduledDate.toISOString().slice(0, 10), s.startTime);
     const sessionNumberDigit = s.sessionNumber === "SESSION_1" ? "1" : "2";
     const counsellorName = `${s.counsellor.user.firstName} ${s.counsellor.user.lastName}`;
@@ -1013,7 +1051,69 @@ export async function restartStudentSessions(studentId: string) {
     }
     sendEmailBestEffort(s.counsellor.user.email, "SESSION_CANCELLED_COUNSELLOR", { counsellorName, studentName, sessionNumber: sessionNumberDigit, originalDateTime });
   }
+}
 
+// --- Detach (admin) ---
+//
+// Pulls a student off their counsellor entirely so both sessions can be reassigned to
+// someone else. Session 1 and Session 2 must be done by the same counsellor, so both are
+// cancelled together — unlike restart this works even after Session 1 has started or been
+// completed, as long as the student is still between SESSION_SCHEDULED and
+// COUNSELLOR_FEEDBACK_REPORT (i.e. Session 2 isn't done yet). The
+// student is rolled back to ASSESSMENT_COMPLETED, since advanceWorkflowStatus is
+// forward-only and a later rebooking would otherwise leave them stuck at
+// SESSION_1_COMPLETED; from there they (or an admin) book both sessions from scratch.
+export async function detachStudentFromCounsellor(studentId: string) {
+  const student = await getStudentOrThrow(studentId);
+  const sessions = await prisma.session.findMany({ where: { studentId }, include: sessionInclude });
+  const session2 = sessions.find((s) => s.sessionNumber === "SESSION_2");
+  // Only while the student is still in the session phase (Session 1 booked/done, Session 2
+  // not yet done). Once Session 2 is over — or they've moved on to counsellor/student
+  // feedback or beyond — the counselling is finished and can't be reassigned.
+  const stageIdx = WORKFLOW_STATUS_ORDER.indexOf(student.workflowStatus);
+  const inSessionPhase =
+    stageIdx >= WORKFLOW_STATUS_ORDER.indexOf("SESSION_SCHEDULED") &&
+    stageIdx <= WORKFLOW_STATUS_ORDER.indexOf("COUNSELLOR_FEEDBACK_REPORT");
+  if (!inSessionPhase || session2?.status === "COMPLETED") {
+    throw new ConflictError(
+      "This student can only be detached while they're at the Session 1 or Session 2 stage — Session 2 is already over, or they've not reached the sessions yet"
+    );
+  }
+  const activeSessions = sessions.filter((s) => s.status !== "CANCELLED");
+  if (activeSessions.length === 0) {
+    throw new ConflictError("There's nothing to detach — this student has no active sessions");
+  }
+
+  const cancelled = await prisma.$transaction(async (tx) => {
+    const results = [];
+    for (const s of activeSessions) {
+      const slot = await tx.counsellorSlot.findUnique({ where: { sessionId: s.id } });
+      if (slot) {
+        await tx.counsellorSlot.update({ where: { id: slot.id }, data: { status: "OPEN", sessionId: null } });
+      }
+      results.push(
+        withWhatsappFallback(
+          await tx.session.update({
+            where: { id: s.id },
+            data: {
+              status: "CANCELLED",
+              cancellationReason: "OTHER",
+              cancellationNotes: "Student detached from counsellor by admin — both sessions to be reassigned",
+            },
+            include: sessionInclude,
+          })
+        )
+      );
+    }
+
+    const currentIdx = WORKFLOW_STATUS_ORDER.indexOf(student.workflowStatus);
+    if (currentIdx >= WORKFLOW_STATUS_ORDER.indexOf("SESSION_SCHEDULED")) {
+      await tx.student.update({ where: { id: studentId }, data: { workflowStatus: "ASSESSMENT_COMPLETED" } });
+    }
+    return results;
+  });
+
+  sendSessionsCancelledEmails(cancelled);
   return { cancelled };
 }
 

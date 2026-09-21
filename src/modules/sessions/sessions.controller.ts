@@ -134,6 +134,11 @@ export async function restartStudentSessions(req: Request, res: Response): Promi
   res.status(200).json(result);
 }
 
+export async function detachStudentFromCounsellor(req: Request, res: Response): Promise<void> {
+  const result = await sessionsService.detachStudentFromCounsellor(req.params.studentId as string);
+  res.status(200).json(result);
+}
+
 export async function markNoShow(req: Request, res: Response): Promise<void> {
   const { party } = req.body as MarkNoShowBody;
   const session = await sessionsService.markSessionNoShow(req.params.id as string, party);

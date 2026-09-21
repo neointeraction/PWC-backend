@@ -4,6 +4,7 @@ import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
+import { setStage } from "./helpers/stage.js";
 import {
   computeCounsellorOverall,
   computeStudentFeedback,
@@ -112,6 +113,7 @@ describe("Feedback score API", () => {
         parentMobile: `+91955600020${n}`, parentEmail: `parent${n}${SUFFIX}`,
         fatherName: "F", fatherOccupation: "Eng", motherName: "M", motherOccupation: "Dr",
       });
+      await setStage(res.body.student.id, "SESSION_2_COMPLETED");
       return res.body.student.id;
     }
     studentAId = await makeStudent(1);

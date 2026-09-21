@@ -691,6 +691,18 @@ registry.registerPath({
 });
 
 registry.registerPath({
+  method: "post",
+  path: "/api/v1/sessions/students/{studentId}/detach",
+  tags: ["Sessions"],
+  summary: "Admin: detach a student from their counsellor — cancels both sessions (even after Session 1 has started/completed), frees the slots, and rolls the student back to ASSESSMENT_COMPLETED so both can be reassigned. 409 once Session 2 is completed.",
+  request: { params: sessionStudentIdParamsSchema },
+  responses: {
+    200: { description: "Both sessions cancelled", content: { "application/json": { schema: genericObjectSchema } } },
+    ...errorResponses,
+  },
+});
+
+registry.registerPath({
   method: "get",
   path: "/api/v1/sessions/counsellors/{counsellorId}",
   tags: ["Sessions"],

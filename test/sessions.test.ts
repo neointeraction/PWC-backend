@@ -741,6 +741,59 @@ describe("Sessions API", () => {
       const res = await authRequest(app).post(`/api/v1/sessions/students/${freshStudentId}/restart`);
       expect(res.status).toBe(409);
     });
+
+    it("detaches after Session 1 is completed: cancels both, frees slots, rolls the student back to booking", async () => {
+      const { studentId: fresh, session1Id, session2Id } = await bookFreshPairForNewStudent();
+      await prisma.session.update({ where: { id: session1Id }, data: { notes: "old counsellor notes" } });
+      const done = await authRequest(app).post(`/api/v1/sessions/${session1Id}/complete`);
+      expect(done.status).toBe(200);
+      expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("SESSION_1_COMPLETED");
+
+      // The student-facing restart refuses once Session 1 is done; the admin detach doesn't.
+      expect((await authRequest(app).post(`/api/v1/sessions/students/${fresh}/restart`)).status).toBe(409);
+
+      const res = await authRequest(app).post(`/api/v1/sessions/students/${fresh}/detach`);
+      expect(res.status).toBe(200);
+      expect(res.body.cancelled).toHaveLength(2);
+      expect(res.body.cancelled.every((s: { status: string }) => s.status === "CANCELLED")).toBe(true);
+
+      const slots = await prisma.counsellorSlot.findMany({ where: { sessionId: { in: [session1Id, session2Id] } } });
+      expect(slots).toHaveLength(0); // both released back to OPEN, unlinked
+      expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("ASSESSMENT_COMPLETED");
+
+      // Nothing left to detach.
+      expect((await authRequest(app).post(`/api/v1/sessions/students/${fresh}/detach`)).status).toBe(409);
+    });
+
+    it("409s joining or completing Session 2 while Session 1 isn't completed", async () => {
+      const { session2Id } = await bookFreshPairForNewStudent();
+      const join = await authRequest(app).post(`/api/v1/sessions/${session2Id}/join`).send({ role: "COUNSELLOR" });
+      expect(join.status).toBe(409);
+      expect(join.body.error.message).toMatch(/Session 1 must be completed/);
+      const complete = await authRequest(app).post(`/api/v1/sessions/${session2Id}/complete`);
+      expect(complete.status).toBe(409);
+      expect((await prisma.session.findUnique({ where: { id: session2Id } }))?.status).toBe("SCHEDULED");
+    });
+
+    it("409s detaching once the student has moved past the sessions (feedback stage)", async () => {
+      const { studentId: fresh } = await bookFreshPairForNewStudent();
+      await prisma.student.update({ where: { id: fresh }, data: { workflowStatus: "COUNSELLOR_FEEDBACK" } });
+      expect((await authRequest(app).post(`/api/v1/sessions/students/${fresh}/detach`)).status).toBe(409);
+      // Sessions untouched.
+      expect(await prisma.session.count({ where: { studentId: fresh, status: "CANCELLED" } })).toBe(0);
+    });
+
+    it("still detaches between the sessions (report stage, Session 1 done)", async () => {
+      const { studentId: fresh } = await bookFreshPairForNewStudent();
+      await prisma.student.update({ where: { id: fresh }, data: { workflowStatus: "COUNSELLOR_FEEDBACK_REPORT" } });
+      expect((await authRequest(app).post(`/api/v1/sessions/students/${fresh}/detach`)).status).toBe(200);
+    });
+
+    it("409s detaching once Session 2 is completed", async () => {
+      const { studentId: fresh, session2Id } = await bookFreshPairForNewStudent();
+      await prisma.session.update({ where: { id: session2Id }, data: { status: "COMPLETED" } });
+      expect((await authRequest(app).post(`/api/v1/sessions/students/${fresh}/detach`)).status).toBe(409);
+    });
   });
 
   describe("No-show tracking", () => {

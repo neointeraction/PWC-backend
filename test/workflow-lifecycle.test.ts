@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { authRequest, bearer } from "./helpers/http.js";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
+import { setStage } from "./helpers/stage.js";
 
 const app = createApp();
 const COHORT = "CLASS_9_10";
@@ -57,6 +58,7 @@ describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () =>
         fatherName: "F", fatherOccupation: "Eng", motherName: "M", motherOccupation: "Dr",
       });
       const id = res.body.student.id as string;
+      await setStage(id, "PRE_COUNSELLING_FORMS_SUBMITTED");
 
       const attempt = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId: id, cohort: COHORT });
       const questions = await authRequest(app).get("/api/v1/assessment/questions").query({ cohort: COHORT });
@@ -104,7 +106,16 @@ describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () =>
     expect(await statusOf(studentId)).toBe("ASSESSMENT_COMPLETED");
   });
 
+  it("saving real chart content before Session 1 is completed does NOT advance (no skipping)", async () => {
+    const res = await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentId}`)
+      .send({ strengths: ["curiosity"], lastEditedBy: "counsellor-1" });
+    expect(res.status).toBe(200);
+    expect(await statusOf(studentId)).toBe("ASSESSMENT_COMPLETED");
+  });
+
   it("saving real chart content advances to COUNSELLOR_FEEDBACK_REPORT", async () => {
+    await setStage(studentId, "SESSION_1_COMPLETED");
     const res = await authRequest(app)
       .put(`/api/v1/counsellor-chart/students/${studentId}`)
       .send({
@@ -118,6 +129,7 @@ describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () =>
   });
 
   it("finalize stamps finalizedAt, advances to COUNSELLOR_FEEDBACK, and is idempotent", async () => {
+    await setStage(studentId, "SESSION_2_COMPLETED");
     const res = await authRequest(app)
       .post(`/api/v1/counsellor-chart/students/${studentId}/finalize`)
       .send({ finalizedBy: "counsellor-1" });
