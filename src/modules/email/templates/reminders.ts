@@ -11,7 +11,8 @@ import { button, paragraph, renderLayout } from "./layout.js";
 // link), so they're built from one small factory instead of 28 hand-written files.
 
 interface ReminderDefinition<Schema extends z.ZodTypeAny> {
-  subject: string;
+  // A function form lets a subject depend on the data (e.g. which session number).
+  subject: string | ((data: z.infer<Schema>) => string);
   schema: Schema;
   body: (data: z.infer<Schema>) => string;
   text: (data: z.infer<Schema>) => string;
@@ -21,7 +22,7 @@ function reminder<Schema extends z.ZodTypeAny>(def: ReminderDefinition<Schema>) 
   return {
     schema: def.schema,
     render: (data: z.infer<Schema>) => ({
-      subject: def.subject,
+      subject: typeof def.subject === "function" ? def.subject(data) : def.subject,
       html: renderLayout(def.body(data)),
       text: def.text(data),
     }),
@@ -234,38 +235,45 @@ export const SESSION_SCHEDULING_REMINDER_PARENT = reminder({
 
 // --- Row 9: Session Scheduling Confirmation (immediately after booking Session 1) ---
 
+// `sessionNumber` is optional and defaults to "1" — the self-service booking flow only
+// ever announces Session 1, while admin manual creation (POST /sessions) can book
+// either session, so the three confirmation templates below take it as an override.
+const sessionNumberField = z.enum(["1", "2"]).default("1");
+
 const sessionScheduledConfirmationStudentSchema = z.object({
   studentName: z.string().trim().min(1),
+  sessionNumber: sessionNumberField,
   sessionDateTime: z.string().trim().min(1),
   portalLink: z.string().url().optional(),
 });
 export const SESSION_SCHEDULED_CONFIRMATION_STUDENT = reminder({
-  subject: "Your Session 1 is Confirmed",
+  subject: ({ sessionNumber }) => `Your Session ${sessionNumber} is Confirmed`,
   schema: sessionScheduledConfirmationStudentSchema,
-  body: ({ studentName, sessionDateTime, portalLink }) =>
+  body: ({ studentName, sessionNumber, sessionDateTime, portalLink }) =>
     withLink(
-      `Hi ${studentName}, your Session 1 is confirmed for ${sessionDateTime}. Full details have been emailed to you. We look forward to speaking with you!`,
+      `Hello ${studentName}, your Session ${sessionNumber} is confirmed for ${sessionDateTime}. We encourage you to join these sessions alongside your parent. Please join 5 minutes before the scheduled time.`,
       "View My Session",
       portalLink
     ),
-  text: ({ studentName, sessionDateTime }) =>
-    `Hi ${studentName}, your Session 1 is confirmed for ${sessionDateTime}. We look forward to speaking with you!`,
+  text: ({ studentName, sessionNumber, sessionDateTime }) =>
+    `Hello ${studentName}, your Session ${sessionNumber} is confirmed for ${sessionDateTime}. We encourage you to join these sessions alongside your parent. Please join 5 minutes before the scheduled time.`,
 });
 
 const sessionScheduledConfirmationParentSchema = z.object({
   parentName: z.string().trim().min(1),
   studentName: z.string().trim().min(1),
+  sessionNumber: sessionNumberField,
   sessionDateTime: z.string().trim().min(1),
 });
 export const SESSION_SCHEDULED_CONFIRMATION_PARENT = reminder({
-  subject: `Session 1 Confirmed`,
+  subject: ({ sessionNumber }) => `Session ${sessionNumber} Confirmed`,
   schema: sessionScheduledConfirmationParentSchema,
-  body: ({ parentName, studentName, sessionDateTime }) =>
+  body: ({ parentName, studentName, sessionNumber, sessionDateTime }) =>
     paragraph(
-      `Dear ${parentName}, ${studentName} has booked Session 1 for ${sessionDateTime}. Details have been emailed to you as well.`
+      `Hello ${parentName}, ${studentName}'s Session ${sessionNumber} is confirmed for ${sessionDateTime}. We encourage you to join these sessions alongside ${studentName}. Please join 5 minutes before the scheduled time.`
     ),
-  text: ({ parentName, studentName, sessionDateTime }) =>
-    `Dear ${parentName}, ${studentName} has booked Session 1 for ${sessionDateTime}.`,
+  text: ({ parentName, studentName, sessionNumber, sessionDateTime }) =>
+    `Hello ${parentName}, ${studentName}'s Session ${sessionNumber} is confirmed for ${sessionDateTime}. We encourage you to join these sessions alongside ${studentName}. Please join 5 minutes before the scheduled time.`,
 });
 
 // Not from the source WhatsApp sheet (that sheet only covers student/parent copy) —
@@ -274,20 +282,21 @@ export const SESSION_SCHEDULED_CONFIRMATION_PARENT = reminder({
 const sessionScheduledConfirmationCounsellorSchema = z.object({
   counsellorName: z.string().trim().min(1),
   studentName: z.string().trim().min(1),
+  sessionNumber: sessionNumberField,
   sessionDateTime: z.string().trim().min(1),
   portalLink: z.string().url().optional(),
 });
 export const SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR = reminder({
-  subject: "New Session 1 Booking Assigned to You",
+  subject: ({ sessionNumber }) => `New Session ${sessionNumber} Booking Assigned to You`,
   schema: sessionScheduledConfirmationCounsellorSchema,
-  body: ({ counsellorName, studentName, sessionDateTime, portalLink }) =>
+  body: ({ counsellorName, studentName, sessionNumber, sessionDateTime, portalLink }) =>
     withLink(
-      `Hi ${counsellorName}, you've been assigned Session 1 with ${studentName}, confirmed for ${sessionDateTime}. Session 2 will follow with the same student.`,
+      `Hi ${counsellorName}, you've been assigned Session ${sessionNumber} with ${studentName}, confirmed for ${sessionDateTime}.${sessionNumber === "1" ? " Session 2 will follow with the same student." : ""}`,
       "View My Sessions",
       portalLink
     ),
-  text: ({ counsellorName, studentName, sessionDateTime }) =>
-    `Hi ${counsellorName}, you've been assigned Session 1 with ${studentName}, confirmed for ${sessionDateTime}.`,
+  text: ({ counsellorName, studentName, sessionNumber, sessionDateTime }) =>
+    `Hi ${counsellorName}, you've been assigned Session ${sessionNumber} with ${studentName}, confirmed for ${sessionDateTime}.`,
 });
 
 // --- Row 10 / 11: Session 1 / Session 2 — Day Reminder (same-day morning) ---

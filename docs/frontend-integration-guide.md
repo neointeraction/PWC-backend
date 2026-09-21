@@ -396,14 +396,16 @@ non-student account (staff) it returns **404** (staff have no `Student` row).
 
 The student profile edit-and-save screen posts here. Like `GET /me`, it resolves the
 Student row from the caller's token — **no id in the path, no ownership check needed**.
-The body is a **partial** update (send only the changed fields) and is restricted to
-contact/parent details:
+The body is a **partial** update (send only the changed fields) and accepts **eleven**
+fields: the student's name plus their contact/parent details:
 
 ```
 PATCH /api/v1/students/me     Authorization: Bearer <accessToken>
 ```
 ```json
 {
+  "firstName": "Aditi",
+  "lastName": "Rao",
   "whatsappNumber": "+919876500002",
   "parentMobile": "+919876500003",
   "parentEmail": "parent-aditi@example.com",
@@ -416,16 +418,34 @@ PATCH /api/v1/students/me     Authorization: Bearer <accessToken>
 }
 ```
 
-Those nine fields are the **only** ones a student may change. Identity/enrolment fields —
-`firstName`/`lastName`, `email`, primary `mobile`, `studentCode`, `className`/`divisionName`,
-`projectId`, `workflowStatus` — are **not accepted here** (unknown keys are stripped by
-validation); they remain admin-only via `PATCH /students/{id}`. Render those as read-only
-on the student screen. Editing is allowed at **any** workflow stage (it's independent of
-the separate `POST /{id}/confirm-profile` gate).
+Those eleven fields are the **only** ones a student may change. `email`, primary `mobile`,
+`studentCode`, `className`/`divisionName`, `projectId` and `workflowStatus` are **not
+accepted here** (unknown keys are stripped by validation); they remain admin-only via
+`PATCH /students/{id}`. Render those as read-only on the student screen.
+
+**`firstName` / `lastName` are editable only while `workflowStatus` is `DRAFT`** — i.e.
+before `POST /{id}/confirm-profile` moves the student to `PROFILE_COMPLETED`. This is the
+student's one chance to fix their name; afterwards only an admin can change it.
+
+- Both are trimmed, non-empty strings (same rules as the admin `PATCH /students/{id}`).
+  An empty or whitespace-only value is a **400**, and nothing in the request is saved.
+- **After `DRAFT` the name fields are silently ignored — the request is _not_ rejected.**
+  You still get **200**, the other fields in the body are applied, and `user.firstName` /
+  `user.lastName` in the response are simply the unchanged current values. There is no 409
+  or 403 for this, so the "save profile → confirm profile" flow needs no new error
+  handling. If you need to know whether the name took effect, compare the response's
+  `user.firstName`/`user.lastName` with what you sent.
+- A name equal to the current one is also a no-op (no write). Sending only one of the two
+  updates just that one; sending both on every submit, as the profile form does, is fine.
+- Splitting a full name into the two fields is the frontend's job (there is no `fullName`
+  field). Neither field has a maximum length.
 
 The response is the same enriched shape as `GET /students/me` (nested student + `cohort`),
-so the client can refresh its cached copy from the response directly. **404** for a
-non-student account.
+with `user.firstName` / `user.lastName` reflecting the saved name, so the client can refresh
+its cached copy from the response directly. **404** for a non-student account. Contact/parent
+details remain editable at **any** workflow stage. The name is not cached or duplicated
+anywhere else (reports, the counsellor chart, session emails and `GET /students` read it live
+from the same `User` row), and it is not in the access token, so no re-login is needed.
 
 ### 6.0.2 Bulk duplicate pre-check: `POST /students/check-duplicates`
 
@@ -1540,6 +1560,15 @@ and let them pick again).
 Fires `SESSION_SCHEDULED_CONFIRMATION_STUDENT`/`_PARENT`/`_COUNSELLOR` emails
 automatically (the counsellor variant isn't from the source WhatsApp/PDF copy — added
 so the assigned counsellor gets notified too); no frontend action needed for that part.
+
+The admin's manual `POST /sessions` (the Project Sessions page "assign student to a
+slot" action, body `{ studentId, counsellorId, sessionNumber, date, startTime, endTime }`)
+fires the **same three** `SESSION_SCHEDULED_CONFIRMATION_*` emails once the session is
+saved — student, parent (only if the student has a `parentEmail`) and the assigned
+counsellor. It applies to Session 2 as well as Session 1 (the email names the session
+number), and to re-booking over a `CANCELLED` row. Emails are best-effort: a mail failure
+never turns the `201` into an error, and a rejected request (`400`/`409`) sends nothing.
+Again, no frontend action is needed — don't show a "send confirmation" toggle.
 
 ### 10.5 Dashboard listings
 

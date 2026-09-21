@@ -326,19 +326,37 @@ export async function updateStudent(id: string, input: UpdateStudentInput) {
 // Student self-service edit: the logged-in student updates their own parent/guardian
 // details and WhatsApp number. Resolves the Student row from the token's User.id and only
 // touches the whitelisted fields in `updateMyStudentSchema` — identity/enrolment fields
-// stay admin-only. Allowed at any workflow stage (contact details can change over time).
+// stay admin-only. Contact details are allowed at any workflow stage (they can change
+// over time).
+// The name (`User.firstName`/`lastName`) is applied only while the student is still DRAFT,
+// i.e. before `confirmProfile`; from PROFILE_COMPLETED on it is ignored (not a 409), so a
+// PATCH that re-sends the name after confirmation still saves the other fields. A name
+// field equal to the current value is also skipped, so a no-op writes nothing. The stage
+// is read inside the transaction so the check and the User write see the same row.
 export async function updateMyStudent(userId: string, input: UpdateMyStudentInput) {
-  const student = await prisma.student.findUnique({
-    where: { userId },
-    select: { id: true },
-  });
-  if (!student) {
-    throw new NotFoundError("No student profile is linked to this account");
-  }
+  const { firstName, lastName, ...studentFields } = input;
   try {
-    await prisma.student.update({
-      where: { id: student.id },
-      data: input,
+    await prisma.$transaction(async (tx) => {
+      const student = await tx.student.findUnique({
+        where: { userId },
+        select: { id: true, workflowStatus: true, user: { select: { firstName: true, lastName: true } } },
+      });
+      if (!student) {
+        throw new NotFoundError("No student profile is linked to this account");
+      }
+
+      if (student.workflowStatus === "DRAFT") {
+        const nameChanges: { firstName?: string; lastName?: string } = {};
+        if (firstName !== undefined && firstName !== student.user.firstName) nameChanges.firstName = firstName;
+        if (lastName !== undefined && lastName !== student.user.lastName) nameChanges.lastName = lastName;
+        if (Object.keys(nameChanges).length > 0) {
+          await tx.user.update({ where: { id: userId }, data: nameChanges });
+        }
+      }
+
+      if (Object.keys(studentFields).length > 0) {
+        await tx.student.update({ where: { id: student.id }, data: studentFields });
+      }
     });
   } catch (err) {
     handlePrismaError(err);

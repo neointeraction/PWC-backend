@@ -132,7 +132,6 @@ describe("Students API", () => {
       motherName: "New Mother",
       parentEmail: "updated-parent@test-student.example",
       // Locked identity/enrolment fields are stripped by validation, not applied.
-      firstName: "Hacked",
       email: "hacked@test-student.example",
       studentCode: "HACK1",
       workflowStatus: "CLOSED",
@@ -147,6 +146,112 @@ describe("Students API", () => {
     expect(persisted?.fatherName).toBe("New Father");
     expect(persisted?.motherName).toBe("New Mother");
     expect(persisted?.parentEmail).toBe("updated-parent@test-student.example");
+  });
+
+  // Creates a student and returns ids plus a token for their own account.
+  async function createSelfEditStudent(tag: string, mobile: string) {
+    const created = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Old",
+      lastName: "Name",
+      email: `${tag}@test-student.example`,
+      mobile,
+      studentCode: `CB-${tag.toUpperCase()}`,
+      projectId,
+      className: "Grade 9",
+      divisionName: "A",
+      parentMobile: "+919876500199",
+      parentEmail: `parent-${tag}@test-student.example`,
+      fatherName: "Old Father",
+    });
+    expect(created.status).toBe(201);
+    const studentId: string = created.body.student.id;
+    const userId: string = created.body.student.user.id;
+    return { studentId, userId, asStudent: authRequest(app, "STUDENT", { userId }) };
+  }
+
+  it("lets a student change their name via PATCH /students/me while DRAFT, alongside other fields", async () => {
+    const { studentId, userId, asStudent } = await createSelfEditStudent("nameok", "+919876500201");
+
+    const res = await asStudent.patch("/api/v1/students/me").send({
+      firstName: "  New  ",
+      lastName: "Person Name",
+      fatherName: "Changed Father",
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(studentId);
+    expect(res.body.user.firstName).toBe("New"); // trimmed
+    expect(res.body.user.lastName).toBe("Person Name");
+    expect(res.body.fatherName).toBe("Changed Father");
+    expect(res.body).toHaveProperty("cohort");
+    expect(res.body.workflowStatus).toBe("DRAFT");
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user?.firstName).toBe("New");
+    expect(user?.lastName).toBe("Person Name");
+    const me = await asStudent.get("/api/v1/students/me");
+    expect(me.body.user.firstName).toBe("New");
+  });
+
+  it("updates only the name field that was sent, and skips a same-value name entirely", async () => {
+    const { userId, asStudent } = await createSelfEditStudent("namepartial", "+919876500202");
+
+    const partial = await asStudent.patch("/api/v1/students/me").send({ lastName: "Renamed" });
+    expect(partial.status).toBe(200);
+    expect(partial.body.user.firstName).toBe("Old");
+    expect(partial.body.user.lastName).toBe("Renamed");
+
+    // Identical to current values → no write, so User.updatedAt doesn't move.
+    const before = await prisma.user.findUnique({ where: { id: userId } });
+    const noop = await asStudent.patch("/api/v1/students/me").send({ firstName: "Old", lastName: "Renamed" });
+    expect(noop.status).toBe(200);
+    const after = await prisma.user.findUnique({ where: { id: userId } });
+    expect(after?.updatedAt.getTime()).toBe(before?.updatedAt.getTime());
+  });
+
+  it("ignores the name after the profile is confirmed, but still applies the other fields", async () => {
+    const { studentId, userId, asStudent } = await createSelfEditStudent("nameLocked", "+919876500203");
+
+    const confirm = await asStudent.post(`/api/v1/students/${studentId}/confirm-profile`);
+    expect(confirm.status).toBe(200);
+    expect(confirm.body.workflowStatus).toBe("PROFILE_COMPLETED");
+
+    const res = await asStudent.patch("/api/v1/students/me").send({
+      firstName: "Late",
+      lastName: "Change",
+      motherName: "Post Confirm Mother",
+      whatsappNumber: "+919876500198",
+    });
+    expect(res.status).toBe(200); // not a 409/403
+    expect(res.body.user.firstName).toBe("Old");
+    expect(res.body.user.lastName).toBe("Name");
+    expect(res.body.motherName).toBe("Post Confirm Mother");
+    expect(res.body.workflowStatus).toBe("PROFILE_COMPLETED");
+
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user?.firstName).toBe("Old");
+    expect(user?.lastName).toBe("Name");
+    const persisted = await prisma.student.findUnique({ where: { id: studentId } });
+    expect(persisted?.motherName).toBe("Post Confirm Mother");
+    expect(persisted?.whatsappNumber).toBe("9876500198"); // phoneSchema normalises to national digits
+  });
+
+  it("rejects empty or whitespace-only names on PATCH /students/me with 400 and writes nothing", async () => {
+    const { userId, asStudent } = await createSelfEditStudent("nameblank", "+919876500204");
+
+    for (const body of [{ firstName: "" }, { lastName: "   " }, { firstName: "\t\n", fatherName: "Should Not Save" }]) {
+      const res = await asStudent.patch("/api/v1/students/me").send(body);
+      expect(res.status).toBe(400);
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { student: true } });
+    expect(user?.firstName).toBe("Old");
+    expect(user?.student?.fatherName).toBe("Old Father");
+  });
+
+  it("404s PATCH /students/me with a name for a non-student account", async () => {
+    const res = await authRequest(app, "COUNSELLOR", { userId: "staff-no-student-name" })
+      .patch("/api/v1/students/me")
+      .send({ firstName: "X", lastName: "Y" });
+    expect(res.status).toBe(404);
   });
 
   it("404s PATCH /students/me for a non-student account", async () => {

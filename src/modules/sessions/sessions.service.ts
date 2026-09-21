@@ -96,6 +96,44 @@ function sendEmailBestEffort(to: string, templateKey: Parameters<typeof sendTemp
   });
 }
 
+// The three SESSION_SCHEDULED_CONFIRMATION_* emails, sent once a session is booked —
+// shared by the self-service `bookSessions` and admin `createSessionManually` so the two
+// booking paths can't drift apart. Takes the row a `sessionInclude` query returned, so
+// no extra lookups. The parent email is skipped when no parentEmail is on file.
+function sendSessionScheduledEmails(session: {
+  sessionNumber: SessionNumber;
+  scheduledDate: Date;
+  startTime: string;
+  student: { parentEmail: string | null; user: { email: string; firstName: string; lastName: string } };
+  counsellor: { user: { email: string; firstName: string; lastName: string } };
+}): void {
+  const { student, counsellor } = session;
+  const studentName = `${student.user.firstName} ${student.user.lastName}`;
+  const counsellorName = `${counsellor.user.firstName} ${counsellor.user.lastName}`;
+  const sessionNumber = session.sessionNumber === "SESSION_1" ? "1" : "2";
+  const sessionDateTime = formatDateTime(session.scheduledDate.toISOString().slice(0, 10), session.startTime);
+
+  sendEmailBestEffort(student.user.email, "SESSION_SCHEDULED_CONFIRMATION_STUDENT", {
+    studentName,
+    sessionNumber,
+    sessionDateTime,
+  });
+  if (student.parentEmail) {
+    sendEmailBestEffort(student.parentEmail, "SESSION_SCHEDULED_CONFIRMATION_PARENT", {
+      parentName: "Parent",
+      studentName,
+      sessionNumber,
+      sessionDateTime,
+    });
+  }
+  sendEmailBestEffort(counsellor.user.email, "SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR", {
+    counsellorName,
+    studentName,
+    sessionNumber,
+    sessionDateTime,
+  });
+}
+
 // The instant the 48-hour Session 1 gap counts from. Falls back to `updatedAt` in the
 // (defensive-only) case a student reached ASSESSMENT_COMPLETED without a submitted
 // attempt row — mirrors the same fallback in studentStage.ts's stage-clock resolver.
@@ -464,26 +502,7 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
     };
   });
 
-  const studentName = `${session1.student.user.firstName} ${session1.student.user.lastName}`;
-  const counsellorName = `${counsellor.user.firstName} ${counsellor.user.lastName}`;
-  const s1DateTime = formatDateTime(input.session1.date, input.session1.startTime);
-
-  sendEmailBestEffort(session1.student.user.email, "SESSION_SCHEDULED_CONFIRMATION_STUDENT", {
-    studentName,
-    sessionDateTime: s1DateTime,
-  });
-  if (session1.student.parentEmail) {
-    sendEmailBestEffort(session1.student.parentEmail, "SESSION_SCHEDULED_CONFIRMATION_PARENT", {
-      parentName: "Parent",
-      studentName,
-      sessionDateTime: s1DateTime,
-    });
-  }
-  sendEmailBestEffort(counsellor.user.email, "SESSION_SCHEDULED_CONFIRMATION_COUNSELLOR", {
-    counsellorName,
-    studentName,
-    sessionDateTime: s1DateTime,
-  });
+  sendSessionScheduledEmails(session1);
   // SESSION_DETAILS_PARENT (with join links) is still a manual POST /email/send call,
   // not sent here — the counsellor's meetingLink (session.counsellor.meetingLink) is
   // already resolvable the moment the counsellor is assigned, so there's no "populated
@@ -539,6 +558,10 @@ export async function createSessionManually(input: CreateSessionBody) {
       await advanceWorkflowStatus(tx, input.studentId, "SESSION_SCHEDULED");
       return created;
     });
+    // Only reached once the transaction has committed — the 400/409 paths above and any
+    // DB error throw before this, so a rejected request never emails anyone. Sent for
+    // SESSION_2 and for a reactivated CANCELLED row alike: the student needs the new time.
+    sendSessionScheduledEmails(session);
     return withWhatsappFallback(session);
   } catch (err) {
     handlePrismaError(err);
