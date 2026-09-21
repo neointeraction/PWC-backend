@@ -132,6 +132,15 @@ sessionsRouter.post(
   asyncHandler(sessionsController.restartStudentSessions)
 );
 
+// Detach (admin) — cancel both sessions and roll the student back to booking, even after
+// Session 1 has started/completed, so they can be reassigned to a different counsellor.
+sessionsRouter.post(
+  "/students/:studentId/detach",
+  ...requireAdmin,
+  validate({ params: studentIdParamsSchema }),
+  asyncHandler(sessionsController.detachStudentFromCounsellor)
+);
+
 // No-show tracking — a counsellor marks either party from their session screen; the
 // reschedule prompt after a student no-show is Admin-only ("once Admin permits").
 sessionsRouter.post(

@@ -40,7 +40,7 @@ describe("Auth — change password", () => {
   it("401s without a token", async () => {
     const res = await request(app)
       .post("/api/v1/auth/change-password")
-      .send({ currentPassword: ORIGINAL, newPassword: "brand-new-password" });
+      .send({ currentPassword: ORIGINAL, newPassword: "Brand-New-P1!" });
     expect(res.status).toBe(401);
   });
 
@@ -53,12 +53,29 @@ describe("Auth — change password", () => {
     expect(res.status).toBe(400);
   });
 
+  it.each([
+    ["no uppercase letter", "brand-new-p1!", /uppercase/],
+    ["no lowercase letter", "BRAND-NEW-P1!", /lowercase/],
+    ["no number", "Brand-New-P!!!", /number/],
+    ["no special character", "BrandNewPass12", /special character/],
+    ["a space", "Brand New P1!", /spaces/],
+    ["only 9 characters", "Abcdef1!x", /at least 10/],
+  ])("400s a new password with %s", async (_label, newPassword, message) => {
+    const { token } = await accessTokenFor(CHANGE_EMAIL, ORIGINAL);
+    const res = await request(app)
+      .post("/api/v1/auth/change-password")
+      .set("Authorization", `Bearer ${token}`)
+      .send({ currentPassword: ORIGINAL, newPassword });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body.error.details.fieldErrors.newPassword)).toMatch(message);
+  });
+
   it("400s a wrong current password", async () => {
     const { token } = await accessTokenFor(CHANGE_EMAIL, ORIGINAL);
     const res = await request(app)
       .post("/api/v1/auth/change-password")
       .set("Authorization", `Bearer ${token}`)
-      .send({ currentPassword: "not-my-password", newPassword: "brand-new-password" });
+      .send({ currentPassword: "not-my-password", newPassword: "Brand-New-P1!" });
     expect(res.status).toBe(400);
   });
 
@@ -68,13 +85,13 @@ describe("Auth — change password", () => {
     const res = await request(app)
       .post("/api/v1/auth/change-password")
       .set("Authorization", `Bearer ${token}`)
-      .send({ currentPassword: ORIGINAL, newPassword: "brand-new-password" });
+      .send({ currentPassword: ORIGINAL, newPassword: "Brand-New-P1!" });
     expect(res.status).toBe(204);
 
     // Old password no longer works; new one does.
     const oldLogin = await request(app).post("/api/v1/auth/login").send({ email: CHANGE_EMAIL, password: ORIGINAL });
     expect(oldLogin.status).toBe(401);
-    const newLogin = await request(app).post("/api/v1/auth/login").send({ email: CHANGE_EMAIL, password: "brand-new-password" });
+    const newLogin = await request(app).post("/api/v1/auth/login").send({ email: CHANGE_EMAIL, password: "Brand-New-P1!" });
     expect(newLogin.status).toBe(200);
     expect(newLogin.body.user.mustChangePassword).toBe(false);
 
@@ -101,7 +118,7 @@ describe("Auth — forgot/reset password", () => {
   it("400s a reset with an invalid token", async () => {
     const res = await request(app)
       .post("/api/v1/auth/reset-password")
-      .send({ token: "not-a-real-token", newPassword: "reset-password-123" });
+      .send({ token: "not-a-real-token", newPassword: "Reset-Pass-123!" });
     expect(res.status).toBe(400);
   });
 
@@ -113,11 +130,11 @@ describe("Auth — forgot/reset password", () => {
 
     const reset = await request(app)
       .post("/api/v1/auth/reset-password")
-      .send({ token: rawToken, newPassword: "reset-password-123" });
+      .send({ token: rawToken, newPassword: "Reset-Pass-123!" });
     expect(reset.status).toBe(204);
 
     // New password works; old one doesn't.
-    const newLogin = await request(app).post("/api/v1/auth/login").send({ email: RESET_EMAIL, password: "reset-password-123" });
+    const newLogin = await request(app).post("/api/v1/auth/login").send({ email: RESET_EMAIL, password: "Reset-Pass-123!" });
     expect(newLogin.status).toBe(200);
     const oldLogin = await request(app).post("/api/v1/auth/login").send({ email: RESET_EMAIL, password: ORIGINAL });
     expect(oldLogin.status).toBe(401);
@@ -125,7 +142,7 @@ describe("Auth — forgot/reset password", () => {
     // Token is single-use.
     const reuse = await request(app)
       .post("/api/v1/auth/reset-password")
-      .send({ token: rawToken, newPassword: "another-password-123" });
+      .send({ token: rawToken, newPassword: "Another-P-123!" });
     expect(reuse.status).toBe(400);
   });
 });

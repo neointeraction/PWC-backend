@@ -55,7 +55,7 @@ describe("VIEW_ONLY_ADMIN — read everything, write nothing", () => {
     const res = await request(app)
       .post("/api/v1/auth/change-password")
       .set("Authorization", viewOnly)
-      .send({ currentPassword: "x", newPassword: "new-password-123" });
+      .send({ currentPassword: "x", newPassword: "New-Pass-123!" });
     expect(res.status).not.toBe(403);
     expect(res.status).toBe(401);
   });
