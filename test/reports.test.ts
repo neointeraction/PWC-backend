@@ -2,6 +2,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
+import { setStage } from "./helpers/stage.js";
 import { authRequest, bearer } from "./helpers/http.js";
 
 const app = createApp();
@@ -30,6 +31,7 @@ async function makeStudent(suffix: string, mobile: string, parentMobile: string,
     motherName: "M",
     motherOccupation: "Doctor",
   });
+  await setStage(res.body.student.id, "PRE_COUNSELLING_FORMS_SUBMITTED");
   return res.body.student.id as string;
 }
 

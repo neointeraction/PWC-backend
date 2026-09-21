@@ -765,6 +765,16 @@ describe("Sessions API", () => {
       expect((await authRequest(app).post(`/api/v1/sessions/students/${fresh}/detach`)).status).toBe(409);
     });
 
+    it("409s joining or completing Session 2 while Session 1 isn't completed", async () => {
+      const { session2Id } = await bookFreshPairForNewStudent();
+      const join = await authRequest(app).post(`/api/v1/sessions/${session2Id}/join`).send({ role: "COUNSELLOR" });
+      expect(join.status).toBe(409);
+      expect(join.body.error.message).toMatch(/Session 1 must be completed/);
+      const complete = await authRequest(app).post(`/api/v1/sessions/${session2Id}/complete`);
+      expect(complete.status).toBe(409);
+      expect((await prisma.session.findUnique({ where: { id: session2Id } }))?.status).toBe("SCHEDULED");
+    });
+
     it("409s detaching once the student has moved past the sessions (feedback stage)", async () => {
       const { studentId: fresh } = await bookFreshPairForNewStudent();
       await prisma.student.update({ where: { id: fresh }, data: { workflowStatus: "COUNSELLOR_FEEDBACK" } });

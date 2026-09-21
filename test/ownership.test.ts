@@ -2,6 +2,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
+import { setStage } from "./helpers/stage.js";
 import { authRequest, bearer } from "./helpers/http.js";
 
 const app = createApp();
@@ -32,6 +33,8 @@ async function makeStudent(suffix: string, mobile: string, parentMobile: string,
     motherOccupation: "Doctor",
   });
   const id = res.body.student.id as string;
+  // Ownership tests act on forms/assessments; seed a stage where those are open.
+  await setStage(id, "SESSION_2_COMPLETED");
   const row = await prisma.student.findUnique({ where: { id }, select: { userId: true } });
   return { id, token: bearer("STUDENT", { userId: row!.userId }) };
 }

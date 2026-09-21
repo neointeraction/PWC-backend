@@ -3,6 +3,7 @@ import { authRequest, bearer } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
+import { setStage } from "./helpers/stage.js";
 import { computeScri } from "../src/modules/counsellor-chart/scri.js";
 
 const app = createApp();
@@ -71,6 +72,7 @@ describe("Counsellor Chart API", () => {
       motherName: "Nair Jr",
       motherOccupation: "Teacher",
     });
+    await setStage(student.body.student.id, "PRE_COUNSELLING_FORMS_SUBMITTED");
     studentId = student.body.student.id;
 
     // Save pre-counselling student answers so the side-by-side assembly has data,

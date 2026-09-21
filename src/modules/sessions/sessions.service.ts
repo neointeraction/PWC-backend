@@ -728,11 +728,26 @@ export async function listSessions(query: ListSessionsQuery) {
 
 // --- Join / complete / notes ---
 
+// Session 2 builds on Session 1, so it can't be joined or completed until Session 1 is
+// COMPLETED — otherwise a student could attend, and staff could close out, Session 2 and
+// jump the workflow past Session 1 entirely.
+async function assertSession1Completed(session: { studentId: string; sessionNumber: SessionNumber }) {
+  if (session.sessionNumber !== "SESSION_2") return;
+  const session1 = await prisma.session.findUnique({
+    where: { studentId_sessionNumber: { studentId: session.studentId, sessionNumber: "SESSION_1" } },
+    select: { status: true },
+  });
+  if (session1?.status !== "COMPLETED") {
+    throw new ConflictError("Session 1 must be completed before Session 2");
+  }
+}
+
 export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
   const session = await getSessionById(id);
   if (session.status !== "SCHEDULED") {
     throw new ConflictError("This session isn't currently scheduled");
   }
+  await assertSession1Completed(session);
 
   const startsAt = combineDateTime(session.scheduledDate, session.startTime);
   const endsAt = combineDateTime(session.scheduledDate, session.endTime);
@@ -769,6 +784,7 @@ export async function completeSession(id: string) {
   if (session.status !== "SCHEDULED") {
     throw new ConflictError("This session isn't currently scheduled");
   }
+  await assertSession1Completed(session);
 
   const target = session.sessionNumber === "SESSION_1" ? "SESSION_1_COMPLETED" : "SESSION_2_COMPLETED";
   const updated = await prisma.$transaction(async (tx) => {

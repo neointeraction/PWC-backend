@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
-import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
+import { advanceWorkflowStatus, assertWorkflowStageAtLeast } from "../../common/workflow/workflowStatus.js";
 import { assertStudentProjectWindowOpen } from "../../common/utils/projectWindow.js";
 import { scoreAssessment } from "./scoring/index.js";
 import { aiResilienceRank, type DomainUnit, type RepresentativeCareer } from "./scoring/careerFit.js";
@@ -125,6 +125,12 @@ export async function startOrResumeAttempt(input: StartAttemptBody) {
   // No login on this flow — reject once the student's project has ended/closed. Also
   // 404s an unknown student.
   await assertStudentProjectWindowOpen(input.studentId);
+  await assertWorkflowStageAtLeast(
+    prisma,
+    input.studentId,
+    "PRE_COUNSELLING_FORMS_SUBMITTED",
+    "The assessment opens once the student and parent pre-counselling forms are submitted"
+  );
 
   const alreadySubmitted = await prisma.assessmentAttempt.findFirst({
     where: { studentId: input.studentId, cohort: input.cohort, status: "SUBMITTED" },
@@ -207,6 +213,12 @@ export async function submitAttempt(attemptId: string) {
     throw new ConflictError("This attempt has already been submitted and is locked");
   }
   await assertStudentProjectWindowOpen(attempt.studentId);
+  await assertWorkflowStageAtLeast(
+    prisma,
+    attempt.studentId,
+    "PRE_COUNSELLING_FORMS_SUBMITTED",
+    "The assessment can't be submitted until the pre-counselling forms are submitted"
+  );
 
   const questions = await prisma.assessmentQuestion.findMany({ where: { cohort: attempt.cohort } });
   const answeredQuestionIds = new Set(attempt.answers.map((a) => a.questionId));

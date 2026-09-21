@@ -3,6 +3,7 @@ import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
+import { setStage } from "./helpers/stage.js";
 
 const app = createApp();
 const COHORT = "CLASS_9_10";
@@ -54,6 +55,7 @@ describe("Assessment submission API", () => {
       motherName: "Shah Jr",
       motherOccupation: "Doctor",
     });
+    await setStage(student.body.student.id, "PRE_COUNSELLING_FORMS_SUBMITTED");
     studentId = student.body.student.id;
 
     const timingStudent = await authRequest(app).post("/api/v1/students").send({
@@ -72,6 +74,7 @@ describe("Assessment submission API", () => {
       motherName: "Rao Jr",
       motherOccupation: "Architect",
     });
+    await setStage(timingStudent.body.student.id, "PRE_COUNSELLING_FORMS_SUBMITTED");
     timingStudentId = timingStudent.body.student.id;
   });
 

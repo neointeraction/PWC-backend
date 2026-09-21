@@ -3,6 +3,7 @@ import { authRequest } from "./helpers/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
+import { setStage } from "./helpers/stage.js";
 
 const app = createApp();
 const COHORT = "CLASS_9_10";
@@ -99,6 +100,7 @@ describe("Forms submission API", () => {
       motherName: "Menon Jr",
       motherOccupation: "Doctor",
     });
+    await setStage(student.body.student.id, "SESSION_2_COMPLETED");
     studentId = student.body.student.id;
   });
 
@@ -166,6 +168,7 @@ describe("Forms submission API", () => {
       motherName: "Krishnan Jr",
       motherOccupation: "Doctor",
     });
+    await setStage(student.body.student.id, "SESSION_2_COMPLETED");
     const matrixStudentId = student.body.student.id;
 
     // Parent forms are public (no login) — a plain, unauthenticated request must work.
@@ -202,6 +205,7 @@ describe("Forms submission API", () => {
       motherName: "Reason Jr",
       motherOccupation: "Doctor",
     });
+    await setStage(student.body.student.id, "SESSION_2_COMPLETED");
     const subjectReasonStudentId = student.body.student.id;
 
     // Parent forms are public (no login) — plain, unauthenticated requests must work.
@@ -300,6 +304,7 @@ describe("Forms submission API", () => {
       motherName: "Cohort Jr",
       motherOccupation: "Doctor",
     });
+    await setStage(expiredStudent.body.student.id, "SESSION_2_COMPLETED");
     const expiredStudentId = expiredStudent.body.student.id;
 
     // Parent forms are public (no login) — plain, unauthenticated requests must work.
@@ -347,6 +352,7 @@ describe("Forms submission API", () => {
       motherName: "Today Jr",
       motherOccupation: "Doctor",
     });
+    await setStage(student.body.student.id, "SESSION_2_COMPLETED");
 
     const res = await authRequest(app)
       .put(`/api/v1/forms/PRE_COUNSELLING_STUDENT/students/${student.body.student.id}`)
