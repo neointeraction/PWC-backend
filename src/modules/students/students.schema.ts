@@ -14,6 +14,8 @@ export const createStudentSchema = z.object({
   email: emailSchema,
   mobile: phoneSchema,
   whatsappNumber: phoneSchema.optional(),
+  alternateMobile: phoneSchema.optional(),
+  alternateEmail: emailSchema.optional(),
   // Admin-supplied human-readable login id (e.g. "S0001"). Required — no longer generated
   // by the service.
   studentCode: z.string().trim().min(1),
@@ -23,6 +25,7 @@ export const createStudentSchema = z.object({
   divisionName: z.string().trim().min(1),
   parentMobile: phoneSchema.optional(),
   parentEmail: emailSchema.optional(),
+  fatherWhatsapp: phoneSchema.optional(),
   // Parent/guardian breakdown is optional — bulk imports may carry only a single
   // "parent" contact. Stored as "" when omitted (columns are NOT NULL).
   fatherName: z.string().trim().min(1).optional(),
@@ -39,10 +42,13 @@ export const updateStudentSchema = z.object({
   lastName: z.string().trim().min(1).optional(),
   mobile: phoneSchema.optional(),
   whatsappNumber: phoneSchema.optional(),
+  alternateMobile: phoneSchema.optional(),
+  alternateEmail: emailSchema.optional(),
   className: z.string().trim().min(1).optional(),
   divisionName: z.string().trim().min(1).optional(),
   parentMobile: phoneSchema.optional(),
   parentEmail: emailSchema.optional(),
+  fatherWhatsapp: phoneSchema.optional(),
   fatherName: z.string().trim().min(1).optional(),
   fatherOccupation: z.string().trim().min(1).optional(),
   fatherEmployer: z.string().trim().min(1).optional(),
@@ -65,8 +71,11 @@ export const updateMyStudentSchema = z.object({
   firstName: z.string().trim().min(1).optional(),
   lastName: z.string().trim().min(1).optional(),
   whatsappNumber: phoneSchema.optional(),
+  alternateMobile: phoneSchema.optional(),
+  alternateEmail: emailSchema.optional(),
   parentMobile: phoneSchema.optional(),
   parentEmail: emailSchema.optional(),
+  fatherWhatsapp: phoneSchema.optional(),
   fatherName: z.string().trim().min(1).optional(),
   fatherOccupation: z.string().trim().min(1).optional(),
   fatherEmployer: z.string().trim().min(1).optional(),

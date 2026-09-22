@@ -131,6 +131,9 @@ describe("Students API", () => {
       fatherName: "New Father",
       motherName: "New Mother",
       parentEmail: "updated-parent@test-student.example",
+      fatherWhatsapp: "+919876500093",
+      alternateMobile: "+919876500094",
+      alternateEmail: "alt-editme@test-student.example",
       // Locked identity/enrolment fields are stripped by validation, not applied.
       email: "hacked@test-student.example",
       studentCode: "HACK1",
@@ -146,6 +149,9 @@ describe("Students API", () => {
     expect(persisted?.fatherName).toBe("New Father");
     expect(persisted?.motherName).toBe("New Mother");
     expect(persisted?.parentEmail).toBe("updated-parent@test-student.example");
+    expect(persisted?.fatherWhatsapp).toBe("9876500093");
+    expect(persisted?.alternateMobile).toBe("9876500094");
+    expect(persisted?.alternateEmail).toBe("alt-editme@test-student.example");
   });
 
   // Creates a student and returns ids plus a token for their own account.
