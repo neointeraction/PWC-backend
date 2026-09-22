@@ -11,6 +11,7 @@ const COHORT = "CLASS_9_10";
 let studentAId: string;
 let studentAToken: string;
 let studentBId: string;
+let studentBToken: string;
 
 interface Q { fieldKey: string; format: string; options: { value: string }[] | null }
 
@@ -54,6 +55,8 @@ describe("Reports — student assessment report", () => {
 
     const rowA = await prisma.student.findUnique({ where: { id: studentAId }, select: { userId: true } });
     studentAToken = bearer("STUDENT", { userId: rowA!.userId });
+    const rowB = await prisma.student.findUnique({ where: { id: studentBId }, select: { userId: true } });
+    studentBToken = bearer("STUDENT", { userId: rowB!.userId });
 
     // Run the full assessment for student A so a computed result exists.
     const attempt = await authRequest(app).post("/api/v1/assessment/attempts").send({ studentId: studentAId, cohort: COHORT });
@@ -292,7 +295,13 @@ describe("Reports — student assessment report", () => {
     expect(before.body.accepted).toBe(false);
     expect(before.body.acceptedAt).toBeNull();
 
-    const tooEarly = await authRequest(app).post(`/api/v1/reports/students/${studentAId}/accept`);
+    // Accepting is student-only, no staff bypass — staff (the authRequest default) 403s.
+    const staffTried = await authRequest(app).post(`/api/v1/reports/students/${studentAId}/accept`);
+    expect(staffTried.status).toBe(403);
+
+    const tooEarly = await request(app)
+      .post(`/api/v1/reports/students/${studentAId}/accept`)
+      .set("Authorization", studentAToken);
     expect(tooEarly.status).toBe(400);
 
     // Chart needs real content before it can be finalized.
@@ -301,22 +310,34 @@ describe("Reports — student assessment report", () => {
       .send({ strengths: ["Curiosity"] });
     await authRequest(app).post(`/api/v1/counsellor-chart/students/${studentAId}/finalize`).send({});
 
-    const accept = await authRequest(app).post(`/api/v1/reports/students/${studentAId}/accept`);
+    const accept = await request(app)
+      .post(`/api/v1/reports/students/${studentAId}/accept`)
+      .set("Authorization", studentAToken);
     expect(accept.status).toBe(200);
     expect(accept.body.acceptedAt).toBeTruthy();
 
     // Idempotent — re-accepting returns the same timestamp.
-    const again = await authRequest(app).post(`/api/v1/reports/students/${studentAId}/accept`);
+    const again = await request(app)
+      .post(`/api/v1/reports/students/${studentAId}/accept`)
+      .set("Authorization", studentAToken);
     expect(again.status).toBe(200);
     expect(again.body.acceptedAt).toBe(accept.body.acceptedAt);
 
     const after = await authRequest(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
     expect(after.body.accepted).toBe(true);
     expect(after.body.acceptedAt).toBe(accept.body.acceptedAt);
+
+    // Accepted — the chart is now locked, even for staff.
+    const editAfterAccept = await authRequest(app)
+      .put(`/api/v1/counsellor-chart/students/${studentAId}`)
+      .send({ strengths: ["New idea"] });
+    expect(editAfterAccept.status).toBe(409);
   });
 
   it("accept: 404 when the student has no assessment result yet", async () => {
-    const res = await authRequest(app).post(`/api/v1/reports/students/${studentBId}/accept`);
+    const res = await request(app)
+      .post(`/api/v1/reports/students/${studentBId}/accept`)
+      .set("Authorization", studentBToken);
     expect(res.status).toBe(404);
   });
 

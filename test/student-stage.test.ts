@@ -187,6 +187,151 @@ describe("computeStageInfo — ageing & flags", () => {
     expect(info.flagged).toBe(false); // staff-side stage, session was completed
   });
 
+  // Nothing in the product ever calls POST /sessions/{id}/complete, so a genuinely
+  // attended session's real status/workflowStatus stays SCHEDULED forever — the admin
+  // dashboard has to work this out live from who joined and whether it's over, not wait
+  // on a write that never happens (see isSessionLiveCompleted in studentStage.ts).
+  describe("live session completion (both joined + ended), no /complete call needed", () => {
+    it("Session 1 both joined and ended → shows Session 1 Completed, not missed", () => {
+      const info = computeStageInfo(
+        student({
+          workflowStatus: "SESSION_SCHEDULED",
+          sessions: [
+            {
+              sessionNumber: "SESSION_1",
+              status: "SCHEDULED",
+              scheduledDate: daysAgo(1),
+              endTime: "10:00",
+              studentJoinedAt: daysAgo(1),
+              counsellorJoinedAt: daysAgo(1),
+              studentNoShow: false,
+            },
+          ],
+        }),
+        NOW
+      );
+      expect(info.stage).toBe("SESSION_1_COMPLETED");
+      expect(info.flagged).toBe(false);
+    });
+
+    it("Session 1 ended but only the student joined → stays Session Booked and flagged as missed", () => {
+      const info = computeStageInfo(
+        student({
+          workflowStatus: "SESSION_SCHEDULED",
+          sessions: [
+            {
+              sessionNumber: "SESSION_1",
+              status: "SCHEDULED",
+              scheduledDate: daysAgo(1),
+              endTime: "10:00",
+              studentJoinedAt: daysAgo(1),
+              counsellorJoinedAt: null,
+              studentNoShow: false,
+            },
+          ],
+        }),
+        NOW
+      );
+      expect(info.stage).toBe("SESSION_BOOKED");
+      expect(info.flagged).toBe(true);
+      expect(info.flagReason).toBe("MISSED_SESSION");
+    });
+
+    it("Session 1 both joined but not ended yet → stays Session Booked", () => {
+      const info = computeStageInfo(
+        student({
+          workflowStatus: "SESSION_SCHEDULED",
+          sessions: [
+            {
+              sessionNumber: "SESSION_1",
+              status: "SCHEDULED",
+              scheduledDate: daysAhead(1),
+              endTime: "10:00",
+              studentJoinedAt: NOW,
+              counsellorJoinedAt: NOW,
+              studentNoShow: false,
+            },
+          ],
+        }),
+        NOW
+      );
+      expect(info.stage).toBe("SESSION_BOOKED");
+    });
+
+    it("both sessions live-completed while workflowStatus is still SESSION_SCHEDULED → Session 2 Completed", () => {
+      const info = computeStageInfo(
+        student({
+          workflowStatus: "SESSION_SCHEDULED",
+          sessions: [
+            {
+              sessionNumber: "SESSION_1",
+              status: "SCHEDULED",
+              scheduledDate: daysAgo(5),
+              endTime: "10:00",
+              studentJoinedAt: daysAgo(5),
+              counsellorJoinedAt: daysAgo(5),
+              studentNoShow: false,
+            },
+            {
+              sessionNumber: "SESSION_2",
+              status: "SCHEDULED",
+              scheduledDate: daysAgo(1),
+              endTime: "10:00",
+              studentJoinedAt: daysAgo(1),
+              counsellorJoinedAt: daysAgo(1),
+              studentNoShow: false,
+            },
+          ],
+        }),
+        NOW
+      );
+      expect(info.stage).toBe("SESSION_2_COMPLETED");
+      expect(info.flagged).toBe(false);
+    });
+
+    it("workflowStatus already SESSION_1_COMPLETED, Session 2 live-completed → Session 2 Completed", () => {
+      const info = computeStageInfo(
+        student({
+          workflowStatus: "SESSION_1_COMPLETED",
+          sessions: [
+            {
+              sessionNumber: "SESSION_2",
+              status: "SCHEDULED",
+              scheduledDate: daysAgo(1),
+              endTime: "10:00",
+              studentJoinedAt: daysAgo(1),
+              counsellorJoinedAt: daysAgo(1),
+              studentNoShow: false,
+            },
+          ],
+        }),
+        NOW
+      );
+      expect(info.stage).toBe("SESSION_2_COMPLETED");
+    });
+
+    it("a CANCELLED Session 1 row, even with both joins set, isn't picked as the active Session 1", () => {
+      const info = computeStageInfo(
+        student({
+          workflowStatus: "SESSION_SCHEDULED",
+          sessions: [
+            {
+              sessionNumber: "SESSION_1",
+              status: "CANCELLED",
+              scheduledDate: daysAgo(1),
+              endTime: "10:00",
+              studentJoinedAt: daysAgo(1),
+              counsellorJoinedAt: daysAgo(1),
+              studentNoShow: false,
+            },
+          ],
+        }),
+        NOW
+      );
+      expect(info.stage).toBe("SESSION_BOOKED");
+    });
+  });
+
   it("STUDENT_PARENT_FEEDBACK + only student feedback → Feedback — Student", () => {
     const info = computeStageInfo(
       student({

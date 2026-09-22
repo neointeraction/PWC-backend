@@ -765,7 +765,7 @@ describe("Sessions API", () => {
       expect((await authRequest(app).post(`/api/v1/sessions/students/${fresh}/detach`)).status).toBe(409);
     });
 
-    it("409s joining or completing Session 2 while Session 1 isn't completed", async () => {
+    it("409s joining or completing Session 2 while Session 1 hasn't been attended", async () => {
       const { session2Id } = await bookFreshPairForNewStudent();
       const join = await authRequest(app).post(`/api/v1/sessions/${session2Id}/join`).send({ role: "COUNSELLOR" });
       expect(join.status).toBe(409);
@@ -773,6 +773,20 @@ describe("Sessions API", () => {
       const complete = await authRequest(app).post(`/api/v1/sessions/${session2Id}/complete`);
       expect(complete.status).toBe(409);
       expect((await prisma.session.findUnique({ where: { id: session2Id } }))?.status).toBe("SCHEDULED");
+    });
+
+    it("unblocks Session 2 once the student has joined Session 1, even though Session 1's status never becomes COMPLETED", async () => {
+      // Nothing in the product ever calls POST /sessions/{id}/complete — a Session 1 the
+      // student actually attended still sits at status SCHEDULED forever. Attendance
+      // (studentJoinedAt) is what unblocks Session 2, not the status field.
+      const { session1Id, session2Id } = await bookFreshPairForNewStudent();
+      await prisma.session.update({ where: { id: session1Id }, data: { studentJoinedAt: new Date() } });
+      expect((await prisma.session.findUnique({ where: { id: session1Id } }))?.status).toBe("SCHEDULED");
+
+      const join = await authRequest(app).post(`/api/v1/sessions/${session2Id}/join`).send({ role: "COUNSELLOR" });
+      // Session 2's real date is far in the future, so this still 400s on the join
+      // window — the point is it's no longer the "Session 1 must be completed" 409.
+      expect(join.status).not.toBe(409);
     });
 
     it("409s detaching once the student has moved past the sessions (feedback stage)", async () => {
