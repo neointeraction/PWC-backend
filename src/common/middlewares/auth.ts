@@ -67,6 +67,9 @@ const STUDENT_OR_STAFF_ROLES: UserRole[] = ["STUDENT", ...STAFF_ROLES];
 export const requireAuth = [authenticate];
 // Student self-service + staff (e.g. assessment attempts, session booking, own forms).
 export const requireStudentOrStaff = [authenticate, requireRole(...STUDENT_OR_STAFF_ROLES)];
+// Student only — no staff bypass. For the few actions that must be the real student's own
+// signal (e.g. accepting the finalized report), not something staff can do on their behalf.
+export const requireStudent = [authenticate, requireRole("STUDENT")];
 // Counsellor/admin operational endpoints.
 export const requireStaff = [authenticate, requireRole(...STAFF_ROLES)];
 // Admin/super-admin management endpoints.

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
-import { requireStaff, requireStudentOrStaff, requireSuperAdmin } from "../../common/middlewares/auth.js";
+import { requireStaff, requireStudentOrStaff, requireStudent, requireSuperAdmin } from "../../common/middlewares/auth.js";
 import { ownStudentParam } from "../../common/middlewares/ownership.js";
 import * as controller from "./counsellor-chart.controller.js";
 import {
@@ -68,11 +68,14 @@ counsellorChartRouter.post(
 
 // Student accept: the logged-in student acknowledges their own finalized chart. Stamps
 // `acceptedAt`, which gates this chart's career-library job-role proposals into the Super
-// Admin's pending queue. Staff may also call it (ownership check bypasses for staff roles,
-// same as every other student self-service endpoint). 400 if the chart isn't finalized yet.
+// Admin's pending queue and — same field as POST /reports/students/:id/accept — locks the
+// chart from further counsellor edits (see updateCounsellorChart). Deliberately student-only,
+// no staff bypass, unlike most student self-service endpoints: accepting must be the real
+// student's own signal, not something a counsellor can trigger on their own preview.
+// 400 if the chart isn't finalized yet.
 counsellorChartRouter.post(
   "/students/:studentId/accept",
-  ...requireStudentOrStaff,
+  ...requireStudent,
   ownStudentParam,
   validate({ params: studentIdParamsSchema }),
   asyncHandler(controller.acceptCounsellorChart)

@@ -1,5 +1,5 @@
 import { prisma } from "../../config/prisma.js";
-import { BadRequestError, NotFoundError } from "../../common/errors/AppError.js";
+import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { advanceWorkflowStatus } from "../../common/workflow/workflowStatus.js";
 import { assembleChart } from "./counsellor-chart.assembler.js";
 import { loadAlignmentGuidance, loadReliabilityMeasureDefinitions, loadScriGuidance } from "./guidance.js";
@@ -106,6 +106,17 @@ function stampManualEntryAddedAt<T extends { isManualEntry?: boolean; addedAt?: 
 
 export async function updateCounsellorChart(studentId: string, body: PutCounsellorChartBody) {
   const existing = await loadOrCreateChart(studentId);
+
+  // Once the student has accepted the report, the chart — and therefore the report, which
+  // is assembled live from it rather than a stored snapshot — is locked. This is the whole
+  // point of acceptance: it's the student's sign-off on exactly what they saw, so nothing
+  // may change under them afterward. No staff override; see docs/api-list.md.
+  if (existing.acceptedAt) {
+    throw new ConflictError(
+      "This chart has been accepted by the student and can no longer be edited."
+    );
+  }
+
   const now = new Date().toISOString();
 
   // Recompute the SCRI band from the merged (existing + incoming) indicator set.

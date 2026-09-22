@@ -75,7 +75,9 @@ function diffCalendarDays(dateA: string, dateB: string): number {
 
 // `time` ("HH:mm") is IST wall-clock, matching how slots are created/displayed (see
 // dateFormat.ts) — IST is UTC+5:30, so the offset (not "Z") gives the correct instant.
-function combineDateTime(date: Date, time: string): Date {
+// Exported for the scheduler's auto-complete job (runAutoCompleteSessions), which needs
+// the same "has this session's end time actually passed" instant this module uses.
+export function combineDateTime(date: Date, time: string): Date {
   const iso = date.toISOString().slice(0, 10);
   return new Date(`${iso}T${time}:00.000+05:30`);
 }
@@ -736,16 +738,24 @@ export async function listSessions(query: ListSessionsQuery) {
 
 // --- Join / complete / notes ---
 
-// Session 2 builds on Session 1, so it can't be joined or completed until Session 1 is
-// COMPLETED — otherwise a student could attend, and staff could close out, Session 2 and
-// jump the workflow past Session 1 entirely.
+// Session 2 builds on Session 1, so it can't be joined or completed until the student has
+// actually attended Session 1 — otherwise a student could attend, and staff could close
+// out, Session 2 and jump the workflow past Session 1 entirely.
+//
+// "Attended" here means `studentJoinedAt` is set, not `status === "COMPLETED"`: nothing in
+// the product ever calls POST /sessions/{id}/complete (there's no "mark complete" action
+// anywhere in the UI — see completeSession below, which exists but is unused), so a real
+// Session 1 stays `SCHEDULED` forever once it's over. The student portal's own "Completed"
+// badge for Session 1 uses the same `studentJoinedAt` check (see StudentPortalPage's
+// isSession1Completed) — this mirrors that, so the guard never contradicts what the
+// student is shown.
 async function assertSession1Completed(session: { studentId: string; sessionNumber: SessionNumber }) {
   if (session.sessionNumber !== "SESSION_2") return;
   const session1 = await prisma.session.findUnique({
     where: { studentId_sessionNumber: { studentId: session.studentId, sessionNumber: "SESSION_1" } },
-    select: { status: true },
+    select: { studentJoinedAt: true },
   });
-  if (session1?.status !== "COMPLETED") {
+  if (!session1?.studentJoinedAt) {
     throw new ConflictError("Session 1 must be completed before Session 2");
   }
 }

@@ -16,6 +16,7 @@
 // (accurate unless an admin edits the row while it sits idle).
 
 import type { WorkflowStatus } from "@prisma/client";
+import { combineDateTime } from "../sessions/sessions.service.js";
 import { calendarDaysBetween, istDayNumber } from "../../common/utils/istDate.js";
 
 // "Beyond 2 days idle" → flag once strictly more than 2 calendar days have elapsed (i.e.
@@ -107,7 +108,19 @@ export interface StageInfo {
 // `stageRelationsInclude` below. ---
 type SubmittedForm = { submittedAt: Date | null; formTemplate: { formType: string } };
 type AttemptRow = { status: string; submittedAt: Date | null };
-type SessionRow = { status: string; scheduledDate: Date; studentNoShow: boolean };
+// sessionNumber/endTime/*JoinedAt are optional so a test fixture built before the
+// live-completion check existed still type-checks unchanged — findActiveSession/
+// isSessionLiveCompleted below treat a missing field as "can't tell, so not completed",
+// which is exactly the old behaviour those fixtures already expect.
+type SessionRow = {
+  sessionNumber?: string;
+  status: string;
+  scheduledDate: Date;
+  endTime?: string;
+  studentJoinedAt?: Date | null;
+  counsellorJoinedAt?: Date | null;
+  studentNoShow: boolean;
+};
 
 export interface StudentForStage {
   workflowStatus: WorkflowStatus;
@@ -129,7 +142,17 @@ export const stageRelationsInclude = {
     select: { submittedAt: true, formTemplate: { select: { formType: true } } },
   },
   assessmentAttempts: { select: { status: true, submittedAt: true } },
-  sessions: { select: { status: true, scheduledDate: true, studentNoShow: true } },
+  sessions: {
+    select: {
+      sessionNumber: true,
+      status: true,
+      scheduledDate: true,
+      endTime: true,
+      studentJoinedAt: true,
+      counsellorJoinedAt: true,
+      studentNoShow: true,
+    },
+  },
 } as const;
 
 function calendarDaysSince(from: Date, now: Date): number {
@@ -150,13 +173,35 @@ function latest(dates: (Date | null)[]): Date | null {
   return present.reduce((a, b) => (a > b ? a : b));
 }
 
+// Nothing in the product ever calls POST /sessions/{id}/complete, so a real session's
+// `status`/`workflowStatus` stays SCHEDULED forever once it's over — the admin dashboard
+// can't wait on that write. Instead, treat a session as done, purely for *display* here
+// (no DB write, same "computed live, never persisted" approach as the ageing flag above),
+// once BOTH sides have actually joined it AND its scheduled end time has passed. A session
+// only one side joined, or that hasn't ended yet, stays whatever workflowStatus says.
+function isSessionLiveCompleted(session: SessionRow, now: Date): boolean {
+  if (session.status !== "SCHEDULED") return session.status === "COMPLETED";
+  if (!session.endTime || !session.studentJoinedAt || !session.counsellorJoinedAt) return false;
+  return combineDateTime(session.scheduledDate, session.endTime) <= now;
+}
+
+function findActiveSession(sessions: SessionRow[], sessionNumber: "SESSION_1" | "SESSION_2"): SessionRow | undefined {
+  return sessions.find((s) => s.sessionNumber === sessionNumber && s.status !== "CANCELLED");
+}
+
+// Only called on a session isSessionLiveCompleted already confirmed complete, so endTime
+// is guaranteed present — narrows the optional field without an unsafe `!` at each call site.
+function sessionCompletionClock(session: SessionRow): Date {
+  return combineDateTime(session.scheduledDate, session.endTime!);
+}
+
 type Resolved = { stage: DerivedStage; actionable: boolean; clock: Date };
 
 // Maps workflowStatus + sub-state → the displayed stage, whether it awaits a student/
 // parent action (ageing-flaggable), and the timestamp the age is measured from. At
 // PROFILE_COMPLETED the workflow only advances once BOTH pre-counselling forms are in, so
 // at most one is present here; likewise the feedback split.
-function resolveStage(s: StudentForStage): Resolved {
+function resolveStage(s: StudentForStage, now: Date): Resolved {
   const preStudent = firstSubmittedAt(s.formSubmissions, "PRE_COUNSELLING_STUDENT");
   const preParent = firstSubmittedAt(s.formSubmissions, "PRE_COUNSELLING_PARENT");
   const fbStudent = firstSubmittedAt(s.formSubmissions, "FEEDBACK_STUDENT");
@@ -198,11 +243,28 @@ function resolveStage(s: StudentForStage): Resolved {
     }
 
     // Session phase: never ageing-flagged (waiting on a scheduled date / on staff). The
-    // missed-session check below supplies the flag instead.
-    case "SESSION_SCHEDULED":
+    // missed-session check below supplies the flag instead. workflowStatus lags behind
+    // real attendance here (see isSessionLiveCompleted) — check whether a session that
+    // workflowStatus doesn't yet know about has actually wrapped up, so the admin view
+    // doesn't sit on a stale "Session Booked"/"Session 1 Completed" indefinitely.
+    case "SESSION_SCHEDULED": {
+      const session1 = findActiveSession(s.sessions, "SESSION_1");
+      const session2 = findActiveSession(s.sessions, "SESSION_2");
+      if (session1 && isSessionLiveCompleted(session1, now) && session2 && isSessionLiveCompleted(session2, now)) {
+        return { stage: "SESSION_2_COMPLETED", actionable: false, clock: sessionCompletionClock(session2) };
+      }
+      if (session1 && isSessionLiveCompleted(session1, now)) {
+        return { stage: "SESSION_1_COMPLETED", actionable: false, clock: sessionCompletionClock(session1) };
+      }
       return { stage: "SESSION_BOOKED", actionable: false, clock: s.updatedAt };
-    case "SESSION_1_COMPLETED":
+    }
+    case "SESSION_1_COMPLETED": {
+      const session2 = findActiveSession(s.sessions, "SESSION_2");
+      if (session2 && isSessionLiveCompleted(session2, now)) {
+        return { stage: "SESSION_2_COMPLETED", actionable: false, clock: sessionCompletionClock(session2) };
+      }
       return { stage: "SESSION_1_COMPLETED", actionable: false, clock: s.updatedAt };
+    }
     case "COUNSELLOR_FEEDBACK_REPORT":
       return { stage: "COUNSELLOR_FEEDBACK_REPORT", actionable: false, clock: s.updatedAt };
     case "SESSION_2_COMPLETED":
@@ -229,7 +291,11 @@ function hasMissedSession(s: StudentForStage, now: Date): boolean {
   return s.sessions.some(
     (sn) =>
       sn.studentNoShow ||
-      (sn.status === "SCHEDULED" && istDayNumber(sn.scheduledDate) < today)
+      // A day-old still-SCHEDULED row usually means missed — unless both sides actually
+      // joined it and it's simply waiting on the never-called /complete (see
+      // isSessionLiveCompleted): that's a completed session, not a missed one, and
+      // shouldn't red-flag a student whose stage now correctly shows it as done.
+      (sn.status === "SCHEDULED" && istDayNumber(sn.scheduledDate) < today && !isSessionLiveCompleted(sn, now))
   );
 }
 
@@ -248,7 +314,7 @@ export function computeStageInfo(s: StudentForStage, now: Date = new Date()): St
     };
   }
 
-  const { stage, actionable, clock } = resolveStage(s);
+  const { stage, actionable, clock } = resolveStage(s, now);
   const ageDays = calendarDaysSince(clock, now);
 
   const missedSession = stage !== "CLOSED" && hasMissedSession(s, now);
