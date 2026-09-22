@@ -579,8 +579,8 @@ call anything extra, just watch `workflowStatus` change on subsequent `GET`s:
 | `ASSESSMENT_PENDING` | Student's first assessment attempt started (§8.2) |
 | `ASSESSMENT_COMPLETED` | Assessment attempt submitted (§8.3) |
 | `SESSION_SCHEDULED` | Both sessions booked, `POST /sessions/students/{studentId}/book` (§10.4) |
-| `SESSION_1_COMPLETED` | Session 1 marked complete, `POST /sessions/{id}/complete` (§10.9) |
-| `SESSION_2_COMPLETED` | Session 2 marked complete, `POST /sessions/{id}/complete` (§10.9) |
+| `SESSION_1_COMPLETED` | Both parties have joined Session 1 — the second `POST /sessions/{id}/join` call auto-completes it (§10.7) |
+| `SESSION_2_COMPLETED` | Both parties have joined Session 2, same as above (§10.7) |
 
 **`POST /students/{id}/confirm-profile`** — no body. 200 with the updated student on
 success. **409** if `workflowStatus` isn't currently `DRAFT` (i.e. already confirmed —
@@ -1628,6 +1628,16 @@ recorded (`studentJoinedAt`/`counsellorJoinedAt`), not just a link fetch. Window
 10 minutes before `startTime` through `endTime` — **400 outside that window**, so gate
 the button client-side using the session's own `scheduledDate`/`startTime`/`endTime`
 rather than relying on the error alone.
+
+**The second join completes the session.** As soon as both `studentJoinedAt` and
+`counsellorJoinedAt` are set (i.e. whichever side joins second), this call also sets
+`status: "COMPLETED"` and advances `workflowStatus` (`SESSION_1_COMPLETED` /
+`SESSION_2_COMPLETED` — see §6.1) inline, in the same request — there's no longer a
+separate "mark complete" step to trigger it. Check `session.status` in the response to
+tell which join this was: `"SCHEDULED"` means only one side has joined so far,
+`"COMPLETED"` means this join was the second and the session (and workflow stage) is
+now done. Completing **Session 2** this way also best-effort emails `parentEmail`
+(`FEEDBACK_REQUEST_PARENT`) — see §10.9.
 ```json
 { "session": { "...": "..." }, "meetingLink": "https://meet.example.com/abc" }
 ```
@@ -1640,13 +1650,18 @@ after the session.
 
 ### 10.9 Complete a session
 
-`POST /sessions/{id}/complete` — the "Session Completed?" confirmation button
-mentioned in the flow. No body. Sets `status: COMPLETED` and advances the student's
-`workflowStatus` (`SESSION_1_COMPLETED` / `SESSION_2_COMPLETED` — see §6.1). Completing
-**Session 2** also best-effort emails `parentEmail` (`FEEDBACK_REQUEST_PARENT`) with a
-link straight into their `FEEDBACK_PARENT` form (§7's `buildFormLink` pattern) — parents
-have no login, so this is their only route in. There's no equivalent auto-email to the
-student; they see the pending feedback form once logged in.
+The frontend doesn't need to call this — see §10.7: `POST /sessions/{id}/join`
+auto-completes a session as soon as both parties have joined, which is what actually
+happens for a real session. `POST /sessions/{id}/complete` (staff/admin-only, no body)
+still exists as a manual correction tool for staff tooling, and is safe to call at any
+time: it's a no-op (200, returns the session unchanged) if the session is already
+`COMPLETED`, and otherwise sets `status: COMPLETED` and advances the student's
+`workflowStatus` (`SESSION_1_COMPLETED` / `SESSION_2_COMPLETED` — see §6.1) exactly like
+the auto-complete path does. Completing **Session 2** either way also best-effort emails
+`parentEmail` (`FEEDBACK_REQUEST_PARENT`) with a link straight into their
+`FEEDBACK_PARENT` form (§7's `buildFormLink` pattern) — parents have no login, so this
+is their only route in. There's no equivalent auto-email to the student; they see the
+pending feedback form once logged in.
 
 ### 10.10 Reschedule / cancel
 

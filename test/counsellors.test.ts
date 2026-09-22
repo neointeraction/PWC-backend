@@ -165,7 +165,8 @@ describe("Counsellors API", () => {
     expect(assign.body.projects.some((p: { projectId: string }) => p.projectId === projectId)).toBe(true);
 
     const dup = await authRequest(app).post(`/api/v1/counsellors/${id}/projects`).send({ projectId });
-    expect(dup.status).toBe(409); // already assigned
+    expect(dup.status).toBe(200); // re-assigning an existing link is a no-op, not an error
+    expect(dup.body.projects.some((p: { projectId: string }) => p.projectId === projectId)).toBe(true);
 
     const unassign = await authRequest(app).delete(`/api/v1/counsellors/${id}/projects/${projectId}`);
     expect(unassign.status).toBe(200);

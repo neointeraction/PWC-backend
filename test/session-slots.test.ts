@@ -125,7 +125,7 @@ describe("Counsellor slot inventory maintenance", () => {
     expect(res.status).toBe(400);
   });
 
-  it("reports which slots clash instead of silently skipping them", async () => {
+  it("skips slots that clash and still inserts the rest of the batch", async () => {
     const res = await authRequest(app)
       .post("/api/v1/sessions/slots")
       .send({
@@ -136,14 +136,15 @@ describe("Counsellor slot inventory maintenance", () => {
           { date: "2026-03-07", startTime: "11:00", endTime: "11:45" }, // new
         ],
       });
-    expect(res.status).toBe(409);
-    expect(res.body.error.details.existingSlots).toEqual([{ date: "2026-03-03", startTime: "11:00" }]);
+    expect(res.status).toBe(201);
+    expect(res.body.added).toBe(1);
+    expect(res.body.skipped).toEqual([{ date: "2026-03-03", startTime: "11:00" }]);
 
-    // Nothing was written — the clash aborts the whole batch.
+    // The non-clashing row still landed.
     const kept = await prisma.counsellorSlot.findFirst({
       where: { counsellorId: counsellorBId, slotDate: new Date("2026-03-07T00:00:00.000Z") },
     });
-    expect(kept).toBeNull();
+    expect(kept).not.toBeNull();
   });
 
   it("deletes an unbooked slot", async () => {

@@ -174,14 +174,21 @@ export async function assignProject(id: string, input: AssignProjectBody) {
     throw new BadRequestError("projectId does not exist");
   }
 
-  try {
-    // Counsellors are tenant-wide: the same counsellor can be assigned to any number of
-    // projects concurrently.
-    await prisma.projectCounsellor.create({
-      data: { counsellorId: id, projectId: input.projectId },
-    });
-  } catch (err) {
-    handlePrismaError(err); // P2002 → 409 (already assigned)
+  // Counsellors are tenant-wide: the same counsellor can be assigned to any number of
+  // projects concurrently. Assigning a project the counsellor is already on is a no-op,
+  // not an error — this lets callers (e.g. re-running a slot import) freely re-assign
+  // without first checking whether the link exists.
+  const existingLink = await prisma.projectCounsellor.findUnique({
+    where: { projectId_counsellorId: { projectId: input.projectId, counsellorId: id } },
+  });
+  if (!existingLink) {
+    try {
+      await prisma.projectCounsellor.create({
+        data: { counsellorId: id, projectId: input.projectId },
+      });
+    } catch (err) {
+      handlePrismaError(err);
+    }
   }
 
   return getCounsellorById(id);
