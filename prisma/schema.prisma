@@ -249,6 +249,10 @@ model Student {
   divisionName     String
   mobile           String            @unique
   whatsappNumber   String?
+  // A second way to reach the student directly — distinct from parentMobile below (the
+  // father/mother's own number). Optional backup, e.g. a second personal number.
+  alternateMobile  String?
+  alternateEmail   String?
   // Primary contact for parent communication (session links, pre-counselling/feedback
   // links) — captured on the Student Profile Form, Section A.
   parentMobile     String?
@@ -257,6 +261,9 @@ model Student {
   fatherName       String
   fatherOccupation String?
   fatherEmployer   String?
+  // Father's WhatsApp number — separate from parentMobile (their plain contact number);
+  // a parent may prefer a different number for WhatsApp-only communication.
+  fatherWhatsapp   String?
   motherName       String?
   motherOccupation String?
   motherEmployer   String?

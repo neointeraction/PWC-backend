@@ -197,11 +197,14 @@ Extends `User` (role=STUDENT).
 | divisionName | String | free text (e.g. "A") — same, no lookup |
 | mobile | String | unique, E.164 |
 | whatsappNumber | String? | optional, only if different from mobile |
+| alternateMobile | String? | optional; a second way to reach the student directly, distinct from `parentMobile` (the father/mother's own number) |
+| alternateEmail | String? | optional; a second email for the student, same idea as `alternateMobile` — distinct from `parentEmail` |
 | parentMobile | String? | optional, not unique (siblings may share a parent's number), E.164; primary contact for session links/notifications (Student Profile Form, Section A) — left empty rather than falling back to the student's own `mobile` |
 | parentEmail | String? | optional, not unique (siblings can share a parent's email); primary contact — `PRE_COUNSELLING_PARENT` and the various session-lifecycle parent emails are skipped (not sent) when this is unset |
 | fatherName | String | Student Profile Form, Section B |
 | fatherOccupation | String? | optional (bulk imports may omit) |
 | fatherEmployer | String? | optional ("if applicable") |
+| fatherWhatsapp | String? | optional; the father's own WhatsApp number, separate from `parentMobile` (their plain contact number) — a parent may prefer a different number for WhatsApp-only communication |
 | motherName, motherOccupation | String? | Student Profile Form, Section C; optional (bulk imports may omit) |
 | motherEmployer | String? | optional ("if applicable") |
 | workflowStatus | `WorkflowStatus` enum | see lifecycle below |

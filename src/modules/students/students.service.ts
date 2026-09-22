@@ -115,8 +115,11 @@ export async function createStudent(input: CreateStudentInput) {
           divisionName: input.divisionName,
           mobile: input.mobile,
           whatsappNumber: input.whatsappNumber,
+          alternateMobile: input.alternateMobile,
+          alternateEmail: input.alternateEmail,
           parentMobile: input.parentMobile,
           parentEmail: input.parentEmail,
+          fatherWhatsapp: input.fatherWhatsapp,
           // fatherName column is NOT NULL so default to ""; the others are nullable.
           fatherName: input.fatherName ?? "",
           fatherOccupation: input.fatherOccupation,

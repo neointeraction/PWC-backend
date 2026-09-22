@@ -134,18 +134,21 @@ function sendSessionScheduledEmails(session: {
   });
 }
 
-// The instant the 48-hour Session 1 gap counts from. Falls back to `updatedAt` in the
-// (defensive-only) case a student reached ASSESSMENT_COMPLETED without a submitted
-// attempt row — mirrors the same fallback in studentStage.ts's stage-clock resolver.
-async function getAssessmentCompletedAt(studentId: string): Promise<Date> {
+// The instant the 48-hour Session 1 gap counts from, or null if there's nothing to count
+// from. A student who reached ASSESSMENT_COMPLETED without a submitted attempt row
+// (legacy data predating this gap, or set manually) has no real completion instant —
+// `Student.updatedAt` is NOT a safe stand-in here (unlike studentStage.ts's stage-clock
+// resolver, which only uses it for display): Prisma's @updatedAt bumps it on every write
+// to the row, so any unrelated later edit would silently push a real, long-past
+// completion forward and re-lock an already-eligible existing student for another 48h.
+// Callers treat null as "gap already satisfied" instead.
+async function getAssessmentCompletedAt(studentId: string): Promise<Date | null> {
   const latestAttempt = await prisma.assessmentAttempt.findFirst({
     where: { studentId, status: "SUBMITTED" },
     orderBy: { submittedAt: "desc" },
     select: { submittedAt: true },
   });
-  if (latestAttempt?.submittedAt) return latestAttempt.submittedAt;
-  const student = await prisma.student.findUnique({ where: { id: studentId }, select: { updatedAt: true } });
-  return student?.updatedAt ?? new Date();
+  return latestAttempt?.submittedAt ?? null;
 }
 
 async function getStudentOrThrow(studentId: string) {
@@ -311,7 +314,9 @@ export async function getSession1BookingOptions(studentId: string, rescheduleSes
   // A fresh Session 1 booking must sit at least MIN_SESSION1_GAP_HOURS after the
   // student's own assessment submission — a real instant-to-instant gap, not just
   // "tomorrow or later" (a slot the morning after a late-night submit is still <48h away).
+  // No real submission instant on record (see getAssessmentCompletedAt) → don't gate at all.
   const assessmentCompletedAt = await getAssessmentCompletedAt(studentId);
+  if (assessmentCompletedAt === null) return slots;
   const cutoff = assessmentCompletedAt.getTime() + MIN_SESSION1_GAP_HOURS * 3_600_000;
   return slots.filter((s) => combineDateTime(s.slotDate, s.startTime).getTime() >= cutoff);
 }
@@ -413,10 +418,13 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
   const existingSession1 = existing.find((s) => s.sessionNumber === "SESSION_1");
   const existingSession2 = existing.find((s) => s.sessionNumber === "SESSION_2");
 
+  // No real submission instant on record (see getAssessmentCompletedAt) → don't gate at all.
   const assessmentCompletedAt = await getAssessmentCompletedAt(studentId);
-  const session1CutoffMs = assessmentCompletedAt.getTime() + MIN_SESSION1_GAP_HOURS * 3_600_000;
-  if (combineDateTime(toDate(input.session1.date), input.session1.startTime).getTime() < session1CutoffMs) {
-    throw new BadRequestError(`Session 1 must be booked at least ${MIN_SESSION1_GAP_HOURS} hours after your assessment was submitted`);
+  if (assessmentCompletedAt !== null) {
+    const session1CutoffMs = assessmentCompletedAt.getTime() + MIN_SESSION1_GAP_HOURS * 3_600_000;
+    if (combineDateTime(toDate(input.session1.date), input.session1.startTime).getTime() < session1CutoffMs) {
+      throw new BadRequestError(`Session 1 must be booked at least ${MIN_SESSION1_GAP_HOURS} hours after your assessment was submitted`);
+    }
   }
   if (diffCalendarDays(input.session1.date, input.session2.date) < MIN_SESSION_GAP_DAYS) {
     throw new BadRequestError(`Session 2 must be at least ${MIN_SESSION_GAP_DAYS} calendar days after Session 1`);
@@ -881,7 +889,17 @@ async function claimSlotAndUpdateSession(
 // recomputed from date, so downstream logic (completeSession's workflow-status
 // mapping, the "Session 2 locked until Session 1 complete" rule) depends on this order
 // holding.
-async function assertSessionGap(studentId: string, sessionNumber: SessionNumber, targetDate: string) {
+// `enforceMinGap: false` (admin overrides) still blocks inverting Session 1 and Session 2's
+// chronological order — downstream logic (completeSession's workflow-status mapping, "Session
+// 2 locked until Session 1 complete") depends on that order holding regardless of who moved
+// the date — but allows a same-day-or-later gap narrower than MIN_SESSION_GAP_DAYS, which is
+// just spacing and is fine for a deliberate admin override.
+async function assertSessionGap(
+  studentId: string,
+  sessionNumber: SessionNumber,
+  targetDate: string,
+  enforceMinGap: boolean
+) {
   const other = await prisma.session.findFirst({
     where: { studentId, sessionNumber: sessionNumber === "SESSION_1" ? "SESSION_2" : "SESSION_1", status: { not: "CANCELLED" } },
   });
@@ -891,11 +909,16 @@ async function assertSessionGap(studentId: string, sessionNumber: SessionNumber,
       sessionNumber === "SESSION_1"
         ? diffCalendarDays(targetDate, otherDateStr)
         : diffCalendarDays(otherDateStr, targetDate);
-    if (gapDays < MIN_SESSION_GAP_DAYS) {
+    const minGap = enforceMinGap ? MIN_SESSION_GAP_DAYS : 0;
+    if (gapDays < minGap) {
       throw new BadRequestError(
         sessionNumber === "SESSION_1"
-          ? `Session 1 must stay at least ${MIN_SESSION_GAP_DAYS} calendar days before Session 2`
-          : `Session 2 must stay at least ${MIN_SESSION_GAP_DAYS} calendar days after Session 1`
+          ? enforceMinGap
+            ? `Session 1 must stay at least ${MIN_SESSION_GAP_DAYS} calendar days before Session 2`
+            : "Session 1 must stay on or before Session 2"
+          : enforceMinGap
+            ? `Session 2 must stay at least ${MIN_SESSION_GAP_DAYS} calendar days after Session 1`
+            : "Session 2 must stay on or after Session 1"
       );
     }
   }
@@ -932,11 +955,10 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
     }
   }
 
-  // Admin reschedules are deliberate overrides, same as createSessionManually — only
-  // student-initiated moves are held to the S1/S2 gap.
-  if (input.initiatedBy !== "ADMIN") {
-    await assertSessionGap(session.studentId, session.sessionNumber, input.date);
-  }
+  // Admin reschedules are deliberate overrides and can collapse the ≥2-day spacing, same
+  // as createSessionManually — but never invert Session 1/2's chronological order, which
+  // assertSessionGap still enforces regardless of initiator (see its comment above).
+  await assertSessionGap(session.studentId, session.sessionNumber, input.date, input.initiatedBy !== "ADMIN");
 
   // Reactivating a cancelled session is a fresh start regardless of initiator — checked
   // first so a STUDENT-initiated rebook doesn't burn their one-time SCHEDULED-session
