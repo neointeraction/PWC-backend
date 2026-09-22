@@ -775,10 +775,9 @@ describe("Sessions API", () => {
       expect((await prisma.session.findUnique({ where: { id: session2Id } }))?.status).toBe("SCHEDULED");
     });
 
-    it("unblocks Session 2 once the student has joined Session 1, even though Session 1's status never becomes COMPLETED", async () => {
-      // Nothing in the product ever calls POST /sessions/{id}/complete — a Session 1 the
-      // student actually attended still sits at status SCHEDULED forever. Attendance
-      // (studentJoinedAt) is what unblocks Session 2, not the status field.
+    it("unblocks Session 2 once the student has joined Session 1, even though Session 1's status hasn't turned COMPLETED yet", async () => {
+      // The Session 2 gate keys off attendance (studentJoinedAt), not status — a Session 1
+      // only the student has joined (counsellor hasn't yet) still sits at status SCHEDULED.
       const { session1Id, session2Id } = await bookFreshPairForNewStudent();
       await prisma.session.update({ where: { id: session1Id }, data: { studentJoinedAt: new Date() } });
       expect((await prisma.session.findUnique({ where: { id: session1Id } }))?.status).toBe("SCHEDULED");
@@ -787,6 +786,66 @@ describe("Sessions API", () => {
       // Session 2's real date is far in the future, so this still 400s on the join
       // window — the point is it's no longer the "Session 1 must be completed" 409.
       expect(join.status).not.toBe(409);
+    });
+
+    it("auto-completes Session 1 and Session 2 the same way, as soon as both parties have joined each — no /complete call needed", async () => {
+      const { studentId: fresh, session1Id, session2Id } = await bookFreshPairForNewStudent();
+      // Distinct start times from the other fixture sharing counsellorA at `now`/
+      // joinWindowStart (the top-level join test) — Session has a unique (counsellorId,
+      // scheduledDate, startTime) constraint. Already inside the join window: starts a
+      // couple of minutes ago, ends well in the future. Session 2 offset further out so
+      // the two don't collide with each other either.
+      const start1 = addMinutes(now, -2);
+      const end1 = addMinutes(now, 60);
+      await prisma.session.update({
+        where: { id: session1Id },
+        data: { scheduledDate: now, startTime: hm(start1), endTime: hm(end1) },
+      });
+
+      const studentJoin1 = await authRequest(app).post(`/api/v1/sessions/${session1Id}/join`).send({ role: "STUDENT" });
+      expect(studentJoin1.status).toBe(200);
+      expect(studentJoin1.body.session.status).toBe("SCHEDULED"); // only one side joined so far
+      expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("SESSION_SCHEDULED");
+
+      const counsellorJoin1 = await authRequest(app).post(`/api/v1/sessions/${session1Id}/join`).send({ role: "COUNSELLOR" });
+      expect(counsellorJoin1.status).toBe(200);
+      expect(counsellorJoin1.body.session.status).toBe("COMPLETED"); // second join completes it inline
+      expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("SESSION_1_COMPLETED");
+
+      // A later explicit /complete call on the now-COMPLETED session is a no-op, not a 409.
+      const complete1 = await authRequest(app).post(`/api/v1/sessions/${session1Id}/complete`);
+      expect(complete1.status).toBe(200);
+      expect(complete1.body.status).toBe("COMPLETED");
+      expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("SESSION_1_COMPLETED");
+
+      // Same mechanism for Session 2 — and completing it fires the parent feedback email,
+      // same as the explicit /complete path did before this change.
+      sendTemplateEmailMock.mockClear();
+      // Distinct from the other counsellorA fixtures at `now`-2min (session1, above),
+      // `now`+5min (joinWindowStart) and `now`+120min (the "rejects joining outside the
+      // window" test) — and still inside the join window relative to the real clock.
+      const start2 = addMinutes(now, 3);
+      const end2 = addMinutes(now, 70);
+      await prisma.session.update({
+        where: { id: session2Id },
+        data: { scheduledDate: now, startTime: hm(start2), endTime: hm(end2) },
+      });
+
+      const studentJoin2 = await authRequest(app).post(`/api/v1/sessions/${session2Id}/join`).send({ role: "STUDENT" });
+      expect(studentJoin2.status).toBe(200);
+      expect(studentJoin2.body.session.status).toBe("SCHEDULED");
+      expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("SESSION_1_COMPLETED");
+
+      const counsellorJoin2 = await authRequest(app).post(`/api/v1/sessions/${session2Id}/join`).send({ role: "COUNSELLOR" });
+      expect(counsellorJoin2.status).toBe(200);
+      expect(counsellorJoin2.body.session.status).toBe("COMPLETED");
+      expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("SESSION_2_COMPLETED");
+      expect(sendTemplateEmailMock).toHaveBeenCalledWith(expect.anything(), "FEEDBACK_REQUEST_PARENT", expect.anything());
+
+      const complete2 = await authRequest(app).post(`/api/v1/sessions/${session2Id}/complete`);
+      expect(complete2.status).toBe(200);
+      expect(complete2.body.status).toBe("COMPLETED");
+      expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("SESSION_2_COMPLETED");
     });
 
     it("409s detaching once the student has moved past the sessions (feedback stage)", async () => {

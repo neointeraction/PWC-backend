@@ -1,4 +1,4 @@
-import type { CancellationReason, Prisma, SessionNumber, SessionStatus } from "@prisma/client";
+import type { CancellationReason, Prisma, SessionNumber, SessionStatus, WorkflowStatus } from "@prisma/client";
 import { env } from "../../config/env.js";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
@@ -225,9 +225,10 @@ export async function addSlots(input: AddSlotsBody) {
     throw new BadRequestError("Counsellor is not assigned to this project — assign them first via POST /counsellors/:id/projects");
   }
 
-  // Pre-check so the admin gets back *which* rows clash, rather than a bare unique-constraint
-  // 409 from createMany. The constraint is [counsellorId, slotDate, startTime] — global to the
-  // counsellor, not per-project, so a clash on another project counts too.
+  // Skip rows that collide with an existing slot instead of failing the whole batch. The
+  // constraint is [counsellorId, slotDate, startTime] — global to the counsellor, not
+  // per-project, so a clash on another project counts too. Also de-dupe collisions within
+  // the payload itself (same date/time listed twice) so createMany doesn't 409 on that.
   const existing = await prisma.counsellorSlot.findMany({
     where: {
       counsellorId: input.counsellorId,
@@ -235,15 +236,27 @@ export async function addSlots(input: AddSlotsBody) {
     },
     select: { slotDate: true, startTime: true },
   });
-  if (existing.length > 0) {
-    throw new ConflictError("Some of these slots already exist for this counsellor", {
-      existingSlots: existing.map((slot) => ({ date: formatSlotDate(slot.slotDate), startTime: slot.startTime })),
-    });
+  const existingKeys = new Set(existing.map((slot) => `${formatSlotDate(slot.slotDate)}|${slot.startTime}`));
+
+  const skipped: { date: string; startTime: string }[] = [];
+  const seenKeys = new Set<string>();
+  const toInsert = input.slots.filter((slot) => {
+    const key = `${slot.date}|${slot.startTime}`;
+    if (existingKeys.has(key) || seenKeys.has(key)) {
+      skipped.push({ date: slot.date, startTime: slot.startTime });
+      return false;
+    }
+    seenKeys.add(key);
+    return true;
+  });
+
+  if (toInsert.length === 0) {
+    return { added: 0, skipped };
   }
 
   try {
     const result = await prisma.counsellorSlot.createMany({
-      data: input.slots.map((slot) => ({
+      data: toInsert.map((slot) => ({
         counsellorId: input.counsellorId,
         projectId: input.projectId,
         slotDate: toDate(slot.date),
@@ -251,9 +264,9 @@ export async function addSlots(input: AddSlotsBody) {
         endTime: slot.endTime,
       })),
     });
-    return { added: result.count };
+    return { added: result.count, skipped };
   } catch (err) {
-    handlePrismaError(err); // P2002 → 409 (duplicate rows inside the payload itself)
+    handlePrismaError(err);
   }
 }
 
@@ -615,10 +628,41 @@ function reconcileNoShow<T extends {
   return { ...session, studentNoShow, counsellorNoShow };
 }
 
-export async function getSessionById(id: string) {
+// Raw fetch, no reconciliation — completeSession uses this (not getSessionById) so
+// reconcileSessionOnRead below can call completeSession without recursing into itself.
+async function getSessionRow(id: string) {
   const session = await prisma.session.findUnique({ where: { id }, include: sessionInclude });
   if (!session) throw new NotFoundError("Session not found");
-  return withWhatsappFallback(reconcileNoShow(session));
+  return session;
+}
+
+// The normal path completes a session inline as soon as the second party joins (see
+// joinSession's use of finalizeCompletion) — this is a backstop, not the primary
+// mechanism. It exists for the rare SCHEDULED-but-both-joined row that never got
+// completed that way (a row from before this behaviour existed, or a completion attempt
+// that raced/errored) — once the session's scheduled end time has also passed, complete
+// it for real right here, inline, on read (see the getSessionById/getStudentSessions/
+// getCounsellorSessions/listSessions call sites below). Falls back to the ordinary
+// no-show reconciliation otherwise.
+async function reconcileSessionOnRead(
+  session: Awaited<ReturnType<typeof getSessionRow>>
+): Promise<Awaited<ReturnType<typeof getSessionRow>>> {
+  if (session.status !== "SCHEDULED") return session;
+  const endsAt = combineDateTime(session.scheduledDate, session.endTime);
+  if (new Date() <= endsAt) return reconcileNoShow(session);
+  if (!session.studentJoinedAt || !session.counsellorJoinedAt) return reconcileNoShow(session);
+
+  try {
+    return await completeSession(session.id);
+  } catch (err) {
+    console.error(`[sessions] failed to auto-complete session ${session.id} on read:`, err);
+    return reconcileNoShow(session);
+  }
+}
+
+export async function getSessionById(id: string) {
+  const session = await getSessionRow(id);
+  return withWhatsappFallback(await reconcileSessionOnRead(session));
 }
 
 export async function getStudentSessions(studentId: string) {
@@ -628,7 +672,7 @@ export async function getStudentSessions(studentId: string) {
     include: sessionInclude,
     orderBy: { sessionNumber: "asc" },
   });
-  return withWhatsappFallbackMany(sessions.map(reconcileNoShow));
+  return withWhatsappFallbackMany(await Promise.all(sessions.map(reconcileSessionOnRead)));
 }
 
 export async function getCounsellorSessions(counsellorId: string, status?: SessionStatus) {
@@ -639,7 +683,7 @@ export async function getCounsellorSessions(counsellorId: string, status?: Sessi
     include: sessionInclude,
     orderBy: [{ scheduledDate: "asc" }, { startTime: "asc" }],
   });
-  return withWhatsappFallbackMany(sessions.map(reconcileNoShow));
+  return withWhatsappFallbackMany(await Promise.all(sessions.map(reconcileSessionOnRead)));
 }
 
 // STUDENT_PROFILE isn't submitted through the generic form engine (it's Student
@@ -733,7 +777,7 @@ export async function listSessions(query: ListSessionsQuery) {
     include: sessionInclude,
     orderBy: [{ scheduledDate: "asc" }, { startTime: "asc" }],
   });
-  return withWhatsappFallbackMany(sessions.map(reconcileNoShow));
+  return withWhatsappFallbackMany(await Promise.all(sessions.map(reconcileSessionOnRead)));
 }
 
 // --- Join / complete / notes ---
@@ -742,13 +786,11 @@ export async function listSessions(query: ListSessionsQuery) {
 // actually attended Session 1 — otherwise a student could attend, and staff could close
 // out, Session 2 and jump the workflow past Session 1 entirely.
 //
-// "Attended" here means `studentJoinedAt` is set, not `status === "COMPLETED"`: nothing in
-// the product ever calls POST /sessions/{id}/complete (there's no "mark complete" action
-// anywhere in the UI — see completeSession below, which exists but is unused), so a real
-// Session 1 stays `SCHEDULED` forever once it's over. The student portal's own "Completed"
-// badge for Session 1 uses the same `studentJoinedAt` check (see StudentPortalPage's
-// isSession1Completed) — this mirrors that, so the guard never contradicts what the
-// student is shown.
+// "Attended" here means `studentJoinedAt` is set, not `status === "COMPLETED"`, because a
+// session can be genuinely underway (one side joined, the other not yet) while still
+// `SCHEDULED` — the student portal's own "Completed" badge for Session 1 uses the same
+// `studentJoinedAt` check (see StudentPortalPage's isSession1Completed) — this mirrors
+// that, so the guard never contradicts what the student is shown.
 async function assertSession1Completed(session: { studentId: string; sessionNumber: SessionNumber }) {
   if (session.sessionNumber !== "SESSION_2") return;
   const session1 = await prisma.session.findUnique({
@@ -757,6 +799,38 @@ async function assertSession1Completed(session: { studentId: string; sessionNumb
   });
   if (!session1?.studentJoinedAt) {
     throw new ConflictError("Session 1 must be completed before Session 2");
+  }
+}
+
+// Marks a SCHEDULED session COMPLETED and advances the student's workflowStatus, in one
+// transaction — `tx.session.update` takes a row lock, so a concurrent call for the same
+// session (e.g. the other party's /join landing at the same instant) blocks here until
+// this transaction commits, then sees the already-COMPLETED row and does not double-fire.
+async function finalizeCompletion(
+  tx: Prisma.TransactionClient,
+  session: { id: string; studentId: string; sessionNumber: SessionNumber },
+  extraData: Prisma.SessionUpdateInput = {}
+) {
+  const target: WorkflowStatus = session.sessionNumber === "SESSION_1" ? "SESSION_1_COMPLETED" : "SESSION_2_COMPLETED";
+  const updated = await tx.session.update({
+    where: { id: session.id },
+    data: { ...extraData, status: "COMPLETED" },
+    include: sessionInclude,
+  });
+  await advanceWorkflowStatus(tx, session.studentId, target);
+  return { updated, target };
+}
+
+// Sessions are now done — kick off the parent's feedback form. The student's own feedback
+// prompt is a frontend-side nudge once logged in; the parent has no login, so this email is
+// their only way to the form (mirrors buildFormLink's use elsewhere).
+function sendFeedbackRequestIfSession2(target: WorkflowStatus, updated: { student: { id: string; parentEmail: string | null; user: { firstName: string; lastName: string } } }) {
+  if (target === "SESSION_2_COMPLETED" && updated.student.parentEmail) {
+    sendEmailBestEffort(updated.student.parentEmail, "FEEDBACK_REQUEST_PARENT", {
+      parentName: "Parent",
+      studentName: `${updated.student.user.firstName} ${updated.student.user.lastName}`,
+      feedbackFormLink: buildFormLink("FEEDBACK_PARENT", updated.student.id),
+    });
   }
 }
 
@@ -780,8 +854,24 @@ export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
   }
 
   const isFirstStudentJoin = role === "STUDENT" && session.studentJoinedAt === null;
-  const data = role === "STUDENT" ? { studentJoinedAt: session.studentJoinedAt ?? now } : { counsellorJoinedAt: session.counsellorJoinedAt ?? now };
-  const updated = withWhatsappFallback(await prisma.session.update({ where: { id }, data, include: sessionInclude }));
+  const studentJoinedAt = role === "STUDENT" ? (session.studentJoinedAt ?? now) : session.studentJoinedAt;
+  const counsellorJoinedAt = role === "COUNSELLOR" ? (session.counsellorJoinedAt ?? now) : session.counsellorJoinedAt;
+  const data = { studentJoinedAt, counsellorJoinedAt };
+
+  // Once both sides have joined, this join is the one that completes the session — no
+  // separate staff action needed. Done in the same transaction as the join write itself
+  // (see finalizeCompletion) so the two parties' near-simultaneous /join calls can't both
+  // observe "not yet both joined" and skip completion.
+  const { updated, completionTarget } =
+    studentJoinedAt && counsellorJoinedAt
+      ? await prisma.$transaction(async (tx) => {
+          const result = await finalizeCompletion(tx, session, data);
+          return { updated: withWhatsappFallback(result.updated), completionTarget: result.target as WorkflowStatus | null };
+        })
+      : {
+          updated: withWhatsappFallback(await prisma.session.update({ where: { id }, data, include: sessionInclude })),
+          completionTarget: null as WorkflowStatus | null,
+        };
 
   // Only notify the parent on the student's first join — the write above is already
   // idempotent on studentJoinedAt, but without this guard a repeat /join call (refresh,
@@ -793,34 +883,31 @@ export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
       sessionNumber: updated.sessionNumber === "SESSION_1" ? "1" : "2",
     });
   }
+  if (completionTarget) {
+    sendFeedbackRequestIfSession2(completionTarget, updated);
+  }
 
   return { session: updated, meetingLink: updated.counsellor.meetingLink };
 }
 
+// Kept for staff/admin tooling (and as a manual correction path) even though the ordinary
+// flow now completes a session automatically once both parties join (see joinSession) —
+// calling it on an already-COMPLETED session is a no-op rather than a 409, so it's safe to
+// call defensively without first checking whether auto-completion already ran.
 export async function completeSession(id: string) {
-  const session = await getSessionById(id);
+  // Raw fetch, not getSessionById — reconcileSessionOnRead calls this function, so going
+  // through getSessionById here would recurse straight back into it.
+  const session = await getSessionRow(id);
+  if (session.status === "COMPLETED") {
+    return withWhatsappFallback(session);
+  }
   if (session.status !== "SCHEDULED") {
     throw new ConflictError("This session isn't currently scheduled");
   }
   await assertSession1Completed(session);
 
-  const target = session.sessionNumber === "SESSION_1" ? "SESSION_1_COMPLETED" : "SESSION_2_COMPLETED";
-  const updated = await prisma.$transaction(async (tx) => {
-    const result = await tx.session.update({ where: { id }, data: { status: "COMPLETED" }, include: sessionInclude });
-    await advanceWorkflowStatus(tx, session.studentId, target);
-    return result;
-  });
-
-  // Sessions are now done — kick off the parent's feedback form. The student's own
-  // feedback prompt is a frontend-side nudge once logged in; the parent has no login, so
-  // this email is their only way to the form (mirrors buildFormLink's use elsewhere).
-  if (target === "SESSION_2_COMPLETED" && updated.student.parentEmail) {
-    sendEmailBestEffort(updated.student.parentEmail, "FEEDBACK_REQUEST_PARENT", {
-      parentName: "Parent",
-      studentName: `${updated.student.user.firstName} ${updated.student.user.lastName}`,
-      feedbackFormLink: buildFormLink("FEEDBACK_PARENT", updated.student.id),
-    });
-  }
+  const { updated, target } = await prisma.$transaction((tx) => finalizeCompletion(tx, session));
+  sendFeedbackRequestIfSession2(target, updated);
 
   return withWhatsappFallback(updated);
 }
