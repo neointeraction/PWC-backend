@@ -22,6 +22,7 @@ import type {
   UpdateMyStudentInput,
   UpdateStudentInput,
 } from "./students.schema.js";
+import { fullName } from "../../common/utils/fullName.js";
 
 const studentInclude = {
   user: {
@@ -136,12 +137,12 @@ export async function createStudent(input: CreateStudentInput) {
     // before the credentials mail — WELCOME_STUDENT's copy promises "details in the next
     // mail", so send order matters here, unlike other best-effort sends in this file.
     sendTemplateEmail(student.user.email, "WELCOME_STUDENT", {
-      studentName: `${student.user.firstName} ${student.user.lastName}`,
+      studentName: fullName(student.user),
     })
       .catch((err) => console.error(`[students] failed to send WELCOME_STUDENT to ${student.user.email}:`, err))
       .finally(() => {
         sendEmailBestEffort(student.user.email, "LOGIN_CREDENTIALS_STUDENT", {
-          studentName: `${student.user.firstName} ${student.user.lastName}`,
+          studentName: fullName(student.user),
           loginId: student.user.email,
           defaultPassword: tempPassword,
           loginLink: env.APP_WEB_URL,
@@ -151,7 +152,7 @@ export async function createStudent(input: CreateStudentInput) {
     if (student.parentEmail) {
       sendEmailBestEffort(student.parentEmail, "WELCOME_PARENT", {
         parentName: student.fatherName || student.motherName || "Parent",
-        studentName: `${student.user.firstName} ${student.user.lastName}`,
+        studentName: fullName(student.user),
       });
     }
 
@@ -309,7 +310,7 @@ export async function updateStudent(id: string, input: UpdateStudentInput) {
 
   try {
     return await prisma.$transaction(async (tx) => {
-      if (firstName || lastName) {
+      if (firstName !== undefined || lastName !== undefined) {
         await tx.user.update({
           where: { id: existing.user.id },
           data: { firstName, lastName },

@@ -71,21 +71,26 @@ export const STAGE_LABELS: Record<DerivedStage, string> = {
   FEEDBACK_STUDENT: "Feedback — Student",
   FEEDBACK_PARENT: "Feedback — Parent",
   FEEDBACK_PENDING: "Feedback Pending",
-  CLOSED: "Closed",
+  // "Report Downloaded" rather than "Closed" — CLOSED only ever fires from the student's
+  // own fetch of their assessment report (see markReportDeliveredToStudent in
+  // reports.service.ts), so that's the concrete, student-facing event this label should
+  // name, not an abstract case-management state.
+  CLOSED: "Report Downloaded",
   DISCONTINUED: "Discontinued",
 };
 
 // Display-only fold for the frontend's PROJECT_STAGES_OPTIONS report/dropdown, which has
-// no dedicated row for these 5 stages. Maps each to the label of its nearest neighbor in
+// no dedicated row for these stages. Maps each to the label of its nearest neighbor in
 // the workflow sequence; `stageInfo.stage` (the filter/scheduler key) is untouched — only
 // the label shown to the report changes. Apply via `reportStageLabel()` at the API
 // response boundary (see `attachStageInfo` in students.service.ts), never inside
-// `computeStageInfo` itself.
+// `computeStageInfo` itself. CLOSED is deliberately NOT folded here (unlike before) — it
+// gets its own "Report Downloaded" row (see STAGE_LABELS.CLOSED above) rather than
+// reading as "Feedback — Parent" (still pending) for a case that's actually finished.
 const REPORT_LABEL_FOLD: Partial<Record<DerivedStage, DerivedStage>> = {
   ASSESSMENT_PENDING: "PRE_COUNSELLING_PARENT",
   COUNSELLOR_FEEDBACK: "COUNSELLOR_FEEDBACK_REPORT",
   FEEDBACK_PENDING: "SESSION_2_COMPLETED",
-  CLOSED: "FEEDBACK_PARENT",
 };
 
 export function reportStageLabel(stage: DerivedStage): string {

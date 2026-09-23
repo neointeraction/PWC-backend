@@ -21,6 +21,7 @@ import {
   type DerivedStage,
   type FlagReason,
 } from "../modules/students/studentStage.js";
+import { fullName } from "../common/utils/fullName.js";
 
 export interface JobScope {
   projectId?: string; // limit to one project (used by tests / future per-project runs)
@@ -59,8 +60,8 @@ export async function runSessionDayReminders(
 
   let remindersSent = 0;
   for (const s of sessions) {
-    const studentName = `${s.student.user.firstName} ${s.student.user.lastName}`;
-    const counsellorName = `${s.counsellor.user.firstName} ${s.counsellor.user.lastName}`;
+    const studentName = fullName(s.student.user);
+    const counsellorName = fullName(s.counsellor.user);
     const n = s.sessionNumber === "SESSION_1" ? "1" : "2";
     // One payload for all three recipients — each template's Zod schema keeps only the
     // fields it declares (z.object strips the rest).
@@ -188,7 +189,7 @@ export async function runFollowUpNudges(
       (sn) => sn.studentNoShow || (sn.status === "SCHEDULED" && istDayNumber(sn.scheduledDate) < istDayNumber(now))
     );
     const base = {
-      studentName: `${s.user.firstName} ${s.user.lastName}`,
+      studentName: fullName(s.user),
       parentName: "Parent",
       sessionDateTime: missed ? formatDisplayDate(missed.scheduledDate) : "your recent session",
       portalLink: env.APP_WEB_URL,

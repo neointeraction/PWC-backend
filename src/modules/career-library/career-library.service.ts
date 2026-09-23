@@ -28,6 +28,7 @@ import type {
   UpdateEntranceExamInput,
   UpdateInstitutionInput,
 } from "./career-library.schema.js";
+import { fullName } from "../../common/utils/fullName.js";
 
 // The authenticated actor performing a write (from the access token).
 export interface Actor {
@@ -1021,7 +1022,7 @@ async function hydrateProposal<
     linkedInstitutions,
     linkedEducationEntries,
     projectName: project?.name ?? null,
-    submittedByName: submitter ? `${submitter.firstName} ${submitter.lastName}` : null,
+    submittedByName: submitter ? fullName(submitter) : null,
     // Null when there's no associated student (proposal created outside the counsellor-chart
     // flow) — nothing to gate on, see the isAdmin filter in listCareerEntryProposals.
     session2Completed: proposal.studentId

@@ -1,39 +1,62 @@
-// One-time data fix for sessions that were genuinely attended (both studentJoinedAt and
-// counsellorJoinedAt set) before joinSession started auto-completing on the second join —
-// those rows are stuck at status SCHEDULED with the student's workflowStatus never having
-// advanced to SESSION_1_COMPLETED/SESSION_2_COMPLETED. Applies the exact same completion
-// (sessionsService.completeSession — status -> COMPLETED, advanceWorkflowStatus, and the
-// Session-2 FEEDBACK_REQUEST_PARENT email) that would have run automatically had the fix
-// been live when the session was attended.
+// One-time data fix for two ways a session's completion can get stuck without
+// workflowStatus reflecting it:
+//
+//  1. Both studentJoinedAt/counsellorJoinedAt set but status still SCHEDULED — sessions
+//     attended before joinSession started auto-completing on the second join.
+//  2. status already COMPLETED but the student's workflowStatus never advanced to match
+//     (SESSION_1_COMPLETED/SESSION_2_COMPLETED) — the old per-student
+//     Promise.all(sessions.map(reconcileSessionOnRead)) reconciliation could run Session
+//     1's and Session 2's completeSession calls concurrently in separate transactions;
+//     advanceWorkflowStatus's forward-only prerequisite check could then read the
+//     pre-Session-1-completed workflowStatus inside Session 2's transaction and silently
+//     skip its advance (see reconcileSessionsOnRead in sessions.service.ts, now sequential
+//     to prevent this going forward).
+//
+// Both cases are fixed by calling sessionsService.completeSession, which now self-heals
+// case 2 (advances workflowStatus even when the session is already COMPLETED) instead of
+// being a bare no-op.
 //
 // Run:  pnpm db:backfill:session-completion            (apply)
 //       pnpm db:backfill:session-completion --dry-run  (report only, writes nothing)
 //
-// Idempotent: completeSession is a no-op on an already-COMPLETED session, and this script
-// only selects status: SCHEDULED rows in the first place, so re-running finds nothing left
-// to do once it has succeeded.
+// Idempotent: completeSession no-ops (via advanceWorkflowStatus's own idempotency) once a
+// session's workflowStatus already matches, so re-running finds nothing left to fix.
 
+import { WORKFLOW_STATUS_ORDER } from "../src/common/workflow/workflowStatus.js";
 import { prisma } from "../src/config/prisma.js";
 import * as sessionsService from "../src/modules/sessions/sessions.service.js";
 
 export async function backfillSessionCompletion({ dryRun = false }: { dryRun?: boolean } = {}) {
-  const stuck = await prisma.session.findMany({
-    where: { status: "SCHEDULED", studentJoinedAt: { not: null }, counsellorJoinedAt: { not: null } },
-    select: { id: true, sessionNumber: true, studentId: true, scheduledDate: true },
-    // SESSION_1 before SESSION_2 per student — completeSession's Session-1-attended gate
-    // for SESSION_2 only checks studentJoinedAt (already true for every row here), so this
-    // ordering isn't load-bearing, just the more intuitive order to log.
+  const candidates = await prisma.session.findMany({
+    where: {
+      OR: [
+        { status: "SCHEDULED", studentJoinedAt: { not: null }, counsellorJoinedAt: { not: null } },
+        { status: "COMPLETED" },
+      ],
+    },
+    select: { id: true, sessionNumber: true, status: true, studentId: true, scheduledDate: true, student: { select: { workflowStatus: true } } },
+    // SESSION_1 before SESSION_2 per student, same as the sequential fix in
+    // reconcileSessionsOnRead — completing Session 1 first is what lets Session 2's
+    // advanceWorkflowStatus prerequisite check pass.
     orderBy: [{ studentId: "asc" }, { sessionNumber: "asc" }],
   });
 
+  const stuck = candidates.filter((s) => {
+    if (s.status === "SCHEDULED") return true; // case 1 — every row here already qualifies
+    const target = s.sessionNumber === "SESSION_1" ? "SESSION_1_COMPLETED" : "SESSION_2_COMPLETED";
+    return WORKFLOW_STATUS_ORDER.indexOf(s.student.workflowStatus) < WORKFLOW_STATUS_ORDER.indexOf(target); // case 2
+  });
+
   if (stuck.length === 0) {
-    console.log("No stuck sessions found (status SCHEDULED with both parties joined) — nothing to do.");
+    console.log("No stuck sessions found — nothing to do.");
     return { found: 0, completed: 0, failed: 0 };
   }
 
-  console.log(`Found ${stuck.length} session(s) both-joined but never completed:`);
+  console.log(`Found ${stuck.length} stuck session(s):`);
   for (const s of stuck) {
-    console.log(`  ${s.id}  ${s.sessionNumber}  student=${s.studentId}  scheduledDate=${s.scheduledDate.toISOString().slice(0, 10)}`);
+    console.log(
+      `  ${s.id}  ${s.sessionNumber}  status=${s.status}  student=${s.studentId} (workflowStatus=${s.student.workflowStatus})  scheduledDate=${s.scheduledDate.toISOString().slice(0, 10)}`
+    );
   }
 
   if (dryRun) {

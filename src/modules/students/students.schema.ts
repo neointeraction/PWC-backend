@@ -10,7 +10,9 @@ export const workflowStatusSchema = z.enum(
 
 export const createStudentSchema = z.object({
   firstName: z.string().trim().min(1),
-  lastName: z.string().trim().min(1),
+  // Optional — many students have a single name. Stored as "" when omitted (column is
+  // NOT NULL); never backfilled from firstName.
+  lastName: z.string().trim().default(""),
   email: emailSchema,
   mobile: phoneSchema,
   whatsappNumber: phoneSchema.optional(),
@@ -39,7 +41,7 @@ export type CreateStudentInput = z.infer<typeof createStudentSchema>;
 
 export const updateStudentSchema = z.object({
   firstName: z.string().trim().min(1).optional(),
-  lastName: z.string().trim().min(1).optional(),
+  lastName: z.string().trim().optional(), // "" clears it
   mobile: phoneSchema.optional(),
   whatsappNumber: phoneSchema.optional(),
   alternateMobile: phoneSchema.optional(),
@@ -69,7 +71,7 @@ export type UpdateStudentInput = z.infer<typeof updateStudentSchema>;
 // silently ignored rather than rejected, since the frontend sends them on every submit.
 export const updateMyStudentSchema = z.object({
   firstName: z.string().trim().min(1).optional(),
-  lastName: z.string().trim().min(1).optional(),
+  lastName: z.string().trim().optional(), // "" clears it
   whatsappNumber: phoneSchema.optional(),
   alternateMobile: phoneSchema.optional(),
   alternateEmail: emailSchema.optional(),

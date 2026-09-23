@@ -14,6 +14,7 @@ import type {
 import { loadAlignmentGuidance, loadScriGuidance } from "../counsellor-chart/guidance.js";
 import { getStudentFeedbackScore } from "../feedback/feedback.service.js";
 import { sendTemplateEmail } from "../email/email.service.js";
+import { fullName } from "../../common/utils/fullName.js";
 
 // Same natural-key normalization as the frontend's `fitKey` (counsellorChart.service.ts)
 // — lets a persisted row still match its assessment-scored domain across incidental
@@ -353,7 +354,7 @@ export async function assembleStudentAssessmentReport(studentId: string) {
   return {
     student: {
       id: student.id,
-      name: `${student.user.firstName} ${student.user.lastName}`.trim(),
+      name: fullName(student.user),
       email: student.user.email,
       studentCode: student.studentCode,
       academicYear: student.academicYear,
@@ -469,7 +470,7 @@ export async function markReportDeliveredToStudent(studentId: string): Promise<v
     if (student.parentEmail) {
       sendEmailBestEffort(student.parentEmail, "REPORT_READY_PARENT", {
         parentName: student.fatherName || student.motherName || "Parent",
-        studentName: `${student.user.firstName} ${student.user.lastName}`,
+        studentName: fullName(student.user),
       });
     }
   } catch (err) {
