@@ -4,6 +4,7 @@
   "private": true,
   "description": "Counselling platform backend API",
   "type": "module",
+  "packageManager": "pnpm@10.9.0",
   "engines": {
     "node": ">=22"
   },
