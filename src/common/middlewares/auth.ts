@@ -59,7 +59,7 @@ export function requireRole(...roles: UserRole[]) {
 //   VIEW_ONLY_ADMIN sits in the read guards (staff/student-or-staff) so it can SEE
 //   everything, but is deliberately absent from ADMIN_ROLES, and every write it attempts
 //   is rejected globally by `blockViewOnlyWrites` (mounted in app.ts).
-const STAFF_ROLES: UserRole[] = ["COUNSELLOR", "ADMIN", "SUPER_ADMIN", "VIEW_ONLY_ADMIN"];
+export const STAFF_ROLES: UserRole[] = ["COUNSELLOR", "ADMIN", "SUPER_ADMIN", "VIEW_ONLY_ADMIN"];
 const ADMIN_ROLES: UserRole[] = ["ADMIN", "SUPER_ADMIN"];
 const STUDENT_OR_STAFF_ROLES: UserRole[] = ["STUDENT", ...STAFF_ROLES];
 

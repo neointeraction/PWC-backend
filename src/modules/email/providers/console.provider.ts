@@ -8,8 +8,11 @@ export function createConsoleProvider(): EmailProvider {
     name: "console",
     async send(email: OutgoingEmail): Promise<SendEmailResult> {
       const providerMessageId = randomUUID();
+      const attachmentNote = email.attachments?.length
+        ? ` attachments=[${email.attachments.map((a) => a.filename).join(", ")}]`
+        : "";
       console.log(
-        `[email:console] to=${email.to} subject="${email.subject}" messageId=${providerMessageId}\n${email.text}`
+        `[email:console] to=${email.to} subject="${email.subject}" messageId=${providerMessageId}${attachmentNote}\n${email.text}`
       );
       return { providerMessageId };
     },

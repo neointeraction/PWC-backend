@@ -202,6 +202,17 @@ function sessionCompletionClock(session: SessionRow): Date {
 
 type Resolved = { stage: DerivedStage; actionable: boolean; clock: Date };
 
+// The two feedback-form stages the admin report has rows for are FEEDBACK_STUDENT and
+// FEEDBACK_PARENT — there's no separate row for "both submitted", so once both are in,
+// the parent's submission is what determines the row (it's listed after Feedback —
+// Student, so it reads as "further along"). Returns null when neither has submitted yet,
+// so callers can fall back to their own workflowStatus-appropriate default.
+function feedbackSubStage(fbStudent: Date | null, fbParent: Date | null): Resolved | null {
+  if (fbParent) return { stage: "FEEDBACK_PARENT", actionable: true, clock: fbParent };
+  if (fbStudent) return { stage: "FEEDBACK_STUDENT", actionable: true, clock: fbStudent };
+  return null;
+}
+
 // Maps workflowStatus + sub-state → the displayed stage, whether it awaits a student/
 // parent action (ageing-flaggable), and the timestamp the age is measured from. At
 // PROFILE_COMPLETED the workflow only advances once BOTH pre-counselling forms are in, so
@@ -272,17 +283,26 @@ function resolveStage(s: StudentForStage, now: Date): Resolved {
     }
     case "COUNSELLOR_FEEDBACK_REPORT":
       return { stage: "COUNSELLOR_FEEDBACK_REPORT", actionable: false, clock: s.updatedAt };
+    // Submitting one feedback form alone advances nothing in forms.service.ts (FORM_PAIRS
+    // — workflowStatus only reaches STUDENT_PARENT_FEEDBACK once BOTH are in), so this is
+    // the ONLY workflowStatus a student can be at while exactly one side has submitted —
+    // without checking fbStudent/fbParent here (mirroring the PROFILE_COMPLETED/
+    // pre-counselling split above), a student's already-submitted feedback form was
+    // invisible to admin, still showing "Session 2 Completed" until the other side caught
+    // up too. Parent wins if both happen to already be in (see the shared helper below).
     case "SESSION_2_COMPLETED":
-      return { stage: "SESSION_2_COMPLETED", actionable: false, clock: s.updatedAt };
+      return feedbackSubStage(fbStudent, fbParent) ?? { stage: "SESSION_2_COMPLETED", actionable: false, clock: s.updatedAt };
     case "COUNSELLOR_FEEDBACK":
       return { stage: "COUNSELLOR_FEEDBACK", actionable: false, clock: s.updatedAt };
 
+    // Both feedback forms are already in by the time workflowStatus reaches this stage
+    // under the normal flow (see FORM_PAIRS above), so feedbackSubStage's "parent wins"
+    // rule below is what actually fires here in practice — not the "only one submitted"
+    // case, which is really only reachable via an admin's manual workflow-status override
+    // that bypasses the pairing gate. FEEDBACK_PENDING (neither submitted) is that same
+    // override's other edge case.
     case "STUDENT_PARENT_FEEDBACK":
-      if (fbStudent && !fbParent)
-        return { stage: "FEEDBACK_STUDENT", actionable: true, clock: fbStudent };
-      if (fbParent && !fbStudent)
-        return { stage: "FEEDBACK_PARENT", actionable: true, clock: fbParent };
-      return { stage: "FEEDBACK_PENDING", actionable: true, clock: s.updatedAt };
+      return feedbackSubStage(fbStudent, fbParent) ?? { stage: "FEEDBACK_PENDING", actionable: true, clock: s.updatedAt };
 
     case "CLOSED":
       return { stage: "CLOSED", actionable: false, clock: s.updatedAt };

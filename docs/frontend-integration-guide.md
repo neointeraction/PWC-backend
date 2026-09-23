@@ -428,7 +428,7 @@ before `POST /{id}/confirm-profile` moves the student to `PROFILE_COMPLETED`. Th
 student's one chance to fix their name; afterwards only an admin can change it.
 
 - `firstName` is a trimmed, non-empty string — empty/whitespace-only is a **400**, and
-  nothing in the request is saved. `lastName` is **optional**: `""` clears it (same rules
+  nothing in the request is saved. `lastName` is **optional**: `""` or `null` clears it (same rules
   as the admin `PATCH /students/{id}`).
 - **After `DRAFT` the name fields are silently ignored — the request is _not_ rejected.**
   You still get **200**, the other fields in the body are applied, and `user.firstName` /

@@ -35,6 +35,14 @@ export function createMailgunProvider(): EmailProvider {
               })),
             }
           : {}),
+        ...(email.attachments?.length
+          ? {
+              attachment: email.attachments.map((file) => ({
+                data: Buffer.from(file.base64Content, "base64"),
+                filename: file.filename,
+              })),
+            }
+          : {}),
       });
 
       return { providerMessageId: result.id ?? "unknown" };

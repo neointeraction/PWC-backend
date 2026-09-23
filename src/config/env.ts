@@ -9,6 +9,13 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(1, "JWT_REFRESH_SECRET is required"),
   JWT_ACCESS_EXPIRES_IN: z.string().default("15m"),
   JWT_REFRESH_EXPIRES_IN: z.string().default("7d"),
+  // Separate secret (not JWT_ACCESS_SECRET) for the short-lived, single-purpose token the
+  // backend mints itself to let its headless-Chromium report render read one student's
+  // report/chart with no login (see common/utils/reportPdfToken.ts) — a distinct secret
+  // means a leaked report-pdf token can't be replayed as a real access token, and vice
+  // versa.
+  REPORT_PDF_TOKEN_SECRET: z.string().min(1, "REPORT_PDF_TOKEN_SECRET is required"),
+  REPORT_PDF_TOKEN_EXPIRES_IN: z.string().default("5m"),
   CORS_ORIGIN: z.string().default("http://localhost:3000"),
 
   // Frontend base URL used to build user-facing links in emails (e.g. the password

@@ -12,22 +12,29 @@ export function createResendProvider(): EmailProvider {
   return {
     name: "resend",
     async send(email: OutgoingEmail): Promise<SendEmailResult> {
+      // Resend has a single `attachments` field for both inline (cid-referenced) images
+      // and real attachments — the only difference is whether contentId is set.
+      const attachments = [
+        ...(email.inlineImages ?? []).map((image) => ({
+          filename: image.filename,
+          content: image.base64Content,
+          contentType: image.contentType,
+          contentId: image.cid,
+        })),
+        ...(email.attachments ?? []).map((file) => ({
+          filename: file.filename,
+          content: file.base64Content,
+          contentType: file.contentType,
+        })),
+      ];
+
       const result = await client.emails.send({
         from: `${env.EMAIL_FROM_NAME} <${env.EMAIL_FROM_ADDRESS}>`,
         to: email.to,
         subject: email.subject,
         html: email.html,
         text: email.text,
-        ...(email.inlineImages?.length
-          ? {
-              attachments: email.inlineImages.map((image) => ({
-                filename: image.filename,
-                content: image.base64Content,
-                contentType: image.contentType,
-                contentId: image.cid,
-              })),
-            }
-          : {}),
+        ...(attachments.length ? { attachments } : {}),
       });
 
       if (result.error) {

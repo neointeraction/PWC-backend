@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
-import { requireStaff, requireStudentOrStaff, requireStudent, requireSuperAdmin } from "../../common/middlewares/auth.js";
+import { requireStaff, requireStudent, requireSuperAdmin } from "../../common/middlewares/auth.js";
 import { ownStudentParam } from "../../common/middlewares/ownership.js";
+import { authenticateReportRead } from "../../common/middlewares/reportPdfAuth.js";
 import * as controller from "./counsellor-chart.controller.js";
 import {
   amendmentBodySchema,
@@ -39,12 +40,12 @@ counsellorChartRouter.delete(
 // a student can only read their own (ownStudentParam) — it's all their own data (their
 // profile, their assessment, their own flagged answer pairs, their counsellor's notes),
 // already returned to them in full by POST /accept, so this just makes the same read
-// available before acceptance too.
+// available before acceptance too. The backend's own headless report-PDF render can also
+// read it, via a report-pdf token instead of a login (see reportPdfAuth.ts).
 counsellorChartRouter.get(
   "/students/:studentId",
-  ...requireStudentOrStaff,
-  ownStudentParam,
   validate({ params: studentIdParamsSchema }),
+  authenticateReportRead,
   asyncHandler(controller.getCounsellorChart)
 );
 

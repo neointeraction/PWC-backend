@@ -332,6 +332,26 @@ describe("computeStageInfo — ageing & flags", () => {
     });
   });
 
+  // No dedicated report row exists for "both feedback forms submitted" — once both are
+  // in, the parent's submission is what determines the row (Feedback — Parent), not a
+  // separate stage. Previously this fell straight to FEEDBACK_PENDING (folds to "Session
+  // 2 Completed" in the admin report) once both forms were in, since no "both submitted"
+  // branch existed at all — a student who'd actually finished both feedback forms still
+  // showed as stuck at Session 2 (the reported bug).
+  it("STUDENT_PARENT_FEEDBACK + both feedback forms in → Feedback — Parent (parent wins), not Feedback Pending", () => {
+    const info = computeStageInfo(
+      student({
+        workflowStatus: "STUDENT_PARENT_FEEDBACK",
+        formSubmissions: [form("FEEDBACK_STUDENT", daysAgo(3)), form("FEEDBACK_PARENT", daysAgo(1))],
+      }),
+      NOW
+    );
+    expect(info.stage).toBe("FEEDBACK_PARENT");
+    expect(info.stageLabel).toBe("Feedback — Parent");
+    expect(info.ageDays).toBe(1); // aged from the parent's submission, not the student's
+    expect(reportStageLabel(info.stage)).toBe("Feedback — Parent");
+  });
+
   it("STUDENT_PARENT_FEEDBACK + only student feedback → Feedback — Student", () => {
     const info = computeStageInfo(
       student({
@@ -354,6 +374,55 @@ describe("computeStageInfo — ageing & flags", () => {
     );
     expect(info.stage).toBe("CLOSED");
     expect(info.flagged).toBe(false);
+  });
+
+  // Submitting one feedback form alone advances nothing (FORM_PAIRS in
+  // forms.service.ts) — workflowStatus stays SESSION_2_COMPLETED until BOTH sides are
+  // in, so that's the workflowStatus a student sits at while only one has submitted.
+  // Without differentiating here, an already-submitted student feedback form was
+  // invisible to admin (see the "Session 2 Completed" bug report).
+  it("SESSION_2_COMPLETED with only the student's feedback in → Feedback — Student, actionable", () => {
+    const info = computeStageInfo(
+      student({
+        workflowStatus: "SESSION_2_COMPLETED",
+        formSubmissions: [form("FEEDBACK_STUDENT", daysAgo(3))],
+      }),
+      NOW
+    );
+    expect(info.stage).toBe("FEEDBACK_STUDENT");
+    expect(info.ageDays).toBe(3);
+    expect(info.flagged).toBe(true);
+    expect(info.flagReason).toBe("IDLE");
+  });
+
+  it("SESSION_2_COMPLETED with only the parent's feedback in → Feedback — Parent, actionable", () => {
+    const info = computeStageInfo(
+      student({
+        workflowStatus: "SESSION_2_COMPLETED",
+        formSubmissions: [form("FEEDBACK_PARENT", daysAgo(1))],
+      }),
+      NOW
+    );
+    expect(info.stage).toBe("FEEDBACK_PARENT");
+    expect(info.flagged).toBe(false); // only 1 day idle, under the threshold
+  });
+
+  it("SESSION_2_COMPLETED with neither feedback form in → stays Session 2 Completed, not ageing-flagged", () => {
+    const info = computeStageInfo(student({ workflowStatus: "SESSION_2_COMPLETED", updatedAt: daysAgo(10) }), NOW);
+    expect(info.stage).toBe("SESSION_2_COMPLETED");
+    expect(info.flagged).toBe(false);
+  });
+
+  it("SESSION_2_COMPLETED with both feedback forms in → Feedback — Parent (parent wins)", () => {
+    const info = computeStageInfo(
+      student({
+        workflowStatus: "SESSION_2_COMPLETED",
+        formSubmissions: [form("FEEDBACK_STUDENT", daysAgo(5)), form("FEEDBACK_PARENT", daysAgo(2))],
+      }),
+      NOW
+    );
+    expect(info.stage).toBe("FEEDBACK_PARENT");
+    expect(info.ageDays).toBe(2);
   });
 });
 
