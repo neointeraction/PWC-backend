@@ -363,10 +363,13 @@ describe("reportStageLabel — display fold for the frontend stage report", () =
     expect(reportStageLabel("PRE_COUNSELLING_STUDENT")).toBe("Pre-Counselling — Student");
   });
 
-  it("folds the 5 stages with no dedicated report row onto a neighbor's label", () => {
+  it("folds the 3 stages with no dedicated report row onto a neighbor's label", () => {
     expect(reportStageLabel("ASSESSMENT_PENDING")).toBe("Pre-Counselling — Parent");
     expect(reportStageLabel("COUNSELLOR_FEEDBACK")).toBe("Counsellor Feedback Report");
     expect(reportStageLabel("FEEDBACK_PENDING")).toBe("Session 2 Completed");
-    expect(reportStageLabel("CLOSED")).toBe("Feedback — Parent");
+  });
+
+  it("gives CLOSED its own row instead of folding onto Feedback — Parent", () => {
+    expect(reportStageLabel("CLOSED")).toBe("Report Downloaded");
   });
 });

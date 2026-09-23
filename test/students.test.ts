@@ -241,16 +241,42 @@ describe("Students API", () => {
     expect(persisted?.whatsappNumber).toBe("9876500198"); // phoneSchema normalises to national digits
   });
 
-  it("rejects empty or whitespace-only names on PATCH /students/me with 400 and writes nothing", async () => {
+  it("rejects an empty or whitespace-only firstName on PATCH /students/me with 400 and writes nothing", async () => {
     const { userId, asStudent } = await createSelfEditStudent("nameblank", "+919876500204");
 
-    for (const body of [{ firstName: "" }, { lastName: "   " }, { firstName: "\t\n", fatherName: "Should Not Save" }]) {
+    for (const body of [{ firstName: "" }, { firstName: "\t\n", fatherName: "Should Not Save" }]) {
       const res = await asStudent.patch("/api/v1/students/me").send(body);
       expect(res.status).toBe(400);
     }
     const user = await prisma.user.findUnique({ where: { id: userId }, include: { student: true } });
     expect(user?.firstName).toBe("Old");
     expect(user?.student?.fatherName).toBe("Old Father");
+  });
+
+  it("lets a DRAFT student clear their optional lastName on PATCH /students/me", async () => {
+    const { userId, asStudent } = await createSelfEditStudent("nameclear", "+919876500205");
+
+    const res = await asStudent.patch("/api/v1/students/me").send({ lastName: "   " });
+    expect(res.status).toBe(200);
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    expect(user?.firstName).toBe("Old");
+    expect(user?.lastName).toBe("");
+  });
+
+  it("creates a student without a lastName, storing it as empty rather than copying firstName", async () => {
+    const res = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Mononym",
+      email: "mononym@test-student.example",
+      mobile: "+919876500206",
+      studentCode: "CB-MONONYM",
+      projectId,
+      className: "Grade 9",
+      divisionName: "A",
+    });
+    expect(res.status).toBe(201);
+    const user = await prisma.user.findUnique({ where: { email: "mononym@test-student.example" } });
+    expect(user?.firstName).toBe("Mononym");
+    expect(user?.lastName).toBe("");
   });
 
   it("404s PATCH /students/me with a name for a non-student account", async () => {

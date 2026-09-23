@@ -19,6 +19,7 @@ import type {
   RescheduleSessionBody,
   SendDayReminderBody,
 } from "./sessions.schema.js";
+import { fullName } from "../../common/utils/fullName.js";
 
 const MIN_SESSION_GAP_DAYS = 2;
 const JOIN_WINDOW_MINUTES_BEFORE = 10;
@@ -110,8 +111,8 @@ function sendSessionScheduledEmails(session: {
   counsellor: { user: { email: string; firstName: string; lastName: string } };
 }): void {
   const { student, counsellor } = session;
-  const studentName = `${student.user.firstName} ${student.user.lastName}`;
-  const counsellorName = `${counsellor.user.firstName} ${counsellor.user.lastName}`;
+  const studentName = fullName(student.user);
+  const counsellorName = fullName(counsellor.user);
   const sessionNumber = session.sessionNumber === "SESSION_1" ? "1" : "2";
   const sessionDateTime = formatDateTime(session.scheduledDate.toISOString().slice(0, 10), session.startTime);
 
@@ -665,6 +666,25 @@ export async function getSessionById(id: string) {
   return withWhatsappFallback(await reconcileSessionOnRead(session));
 }
 
+// Sequential, not Promise.all: when a student's Session 1 and Session 2 both qualify for
+// on-read auto-completion at once (e.g. nobody loaded this list between the two sessions
+// happening), running their completeSession calls concurrently races two separate
+// transactions against the same student row — advanceWorkflowStatus's forward-only
+// prerequisite check can read the pre-Session-1-completed workflowStatus inside Session
+// 2's transaction and silently no-op the advance, leaving Session 2's `status` COMPLETED
+// but workflowStatus stuck at SESSION_1_COMPLETED. Awaiting one at a time removes the
+// race — by the time Session 2 reconciles, Session 1's completion (if any) has already
+// committed.
+async function reconcileSessionsOnRead(
+  sessions: Awaited<ReturnType<typeof getSessionRow>>[]
+): Promise<Awaited<ReturnType<typeof getSessionRow>>[]> {
+  const results: Awaited<ReturnType<typeof getSessionRow>>[] = [];
+  for (const session of sessions) {
+    results.push(await reconcileSessionOnRead(session));
+  }
+  return results;
+}
+
 export async function getStudentSessions(studentId: string) {
   await getStudentOrThrow(studentId);
   const sessions = await prisma.session.findMany({
@@ -672,7 +692,7 @@ export async function getStudentSessions(studentId: string) {
     include: sessionInclude,
     orderBy: { sessionNumber: "asc" },
   });
-  return withWhatsappFallbackMany(await Promise.all(sessions.map(reconcileSessionOnRead)));
+  return withWhatsappFallbackMany(await reconcileSessionsOnRead(sessions));
 }
 
 export async function getCounsellorSessions(counsellorId: string, status?: SessionStatus) {
@@ -683,7 +703,7 @@ export async function getCounsellorSessions(counsellorId: string, status?: Sessi
     include: sessionInclude,
     orderBy: [{ scheduledDate: "asc" }, { startTime: "asc" }],
   });
-  return withWhatsappFallbackMany(await Promise.all(sessions.map(reconcileSessionOnRead)));
+  return withWhatsappFallbackMany(await reconcileSessionsOnRead(sessions));
 }
 
 // STUDENT_PROFILE isn't submitted through the generic form engine (it's Student
@@ -777,7 +797,7 @@ export async function listSessions(query: ListSessionsQuery) {
     include: sessionInclude,
     orderBy: [{ scheduledDate: "asc" }, { startTime: "asc" }],
   });
-  return withWhatsappFallbackMany(await Promise.all(sessions.map(reconcileSessionOnRead)));
+  return withWhatsappFallbackMany(await reconcileSessionsOnRead(sessions));
 }
 
 // --- Join / complete / notes ---
@@ -828,7 +848,7 @@ function sendFeedbackRequestIfSession2(target: WorkflowStatus, updated: { studen
   if (target === "SESSION_2_COMPLETED" && updated.student.parentEmail) {
     sendEmailBestEffort(updated.student.parentEmail, "FEEDBACK_REQUEST_PARENT", {
       parentName: "Parent",
-      studentName: `${updated.student.user.firstName} ${updated.student.user.lastName}`,
+      studentName: fullName(updated.student.user),
       feedbackFormLink: buildFormLink("FEEDBACK_PARENT", updated.student.id),
     });
   }
@@ -879,7 +899,7 @@ export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
   if (isFirstStudentJoin && updated.student.parentEmail) {
     sendEmailBestEffort(updated.student.parentEmail, "SESSION_JOINED_PARENT", {
       parentName: "Parent",
-      studentName: `${updated.student.user.firstName} ${updated.student.user.lastName}`,
+      studentName: fullName(updated.student.user),
       sessionNumber: updated.sessionNumber === "SESSION_1" ? "1" : "2",
     });
   }
@@ -899,6 +919,15 @@ export async function completeSession(id: string) {
   // through getSessionById here would recurse straight back into it.
   const session = await getSessionRow(id);
   if (session.status === "COMPLETED") {
+    // Self-heal rather than a bare no-op: a session can end up COMPLETED without its
+    // workflowStatus advance having landed — e.g. two sessions racing through this same
+    // function concurrently (see reconcileSessionsOnRead) under the old Promise.all
+    // reconciliation, where advanceWorkflowStatus's prerequisite check read a stale
+    // pre-Session-1-completed status and silently skipped Session 2's advance.
+    // advanceWorkflowStatus is itself idempotent, so this is still a true no-op for a
+    // session whose workflowStatus already matches.
+    const target: WorkflowStatus = session.sessionNumber === "SESSION_1" ? "SESSION_1_COMPLETED" : "SESSION_2_COMPLETED";
+    await advanceWorkflowStatus(prisma, session.studentId, target);
     return withWhatsappFallback(session);
   }
   if (session.status !== "SCHEDULED") {
@@ -1067,8 +1096,8 @@ export async function rescheduleSession(id: string, input: RescheduleSessionBody
 
   const updated = await claimSlotAndUpdateSession(session, input.date, input.startTime, { studentRescheduleUsed });
 
-  const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
-  const counsellorName = `${updated.counsellor.user.firstName} ${updated.counsellor.user.lastName}`;
+  const studentName = fullName(updated.student.user);
+  const counsellorName = fullName(updated.counsellor.user);
   const newDateTime = formatDateTime(input.date, input.startTime);
   const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
 
@@ -1160,10 +1189,10 @@ function sendSessionsCancelledEmails(
   }>
 ): void {
   for (const s of cancelled) {
-    const studentName = `${s.student.user.firstName} ${s.student.user.lastName}`;
+    const studentName = fullName(s.student.user);
     const originalDateTime = formatDateTime(s.scheduledDate.toISOString().slice(0, 10), s.startTime);
     const sessionNumberDigit = s.sessionNumber === "SESSION_1" ? "1" : "2";
-    const counsellorName = `${s.counsellor.user.firstName} ${s.counsellor.user.lastName}`;
+    const counsellorName = fullName(s.counsellor.user);
     sendEmailBestEffort(s.student.user.email, "SESSION_CANCELLED_STUDENT", { studentName, sessionNumber: sessionNumberDigit, originalDateTime });
     if (s.student.parentEmail) {
       sendEmailBestEffort(s.student.parentEmail, "SESSION_CANCELLED_PARENT", { parentName: "Parent", studentName, sessionNumber: sessionNumberDigit, originalDateTime });
@@ -1261,8 +1290,8 @@ export async function cancelSession(id: string, input: CancelSessionBody) {
     return withWhatsappFallback(result);
   });
 
-  const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
-  const counsellorName = `${updated.counsellor.user.firstName} ${updated.counsellor.user.lastName}`;
+  const studentName = fullName(updated.student.user);
+  const counsellorName = fullName(updated.counsellor.user);
   const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
 
   sendEmailBestEffort(updated.student.user.email, "SESSION_CANCELLED_STUDENT", {
@@ -1321,8 +1350,8 @@ export async function markSessionNoShow(id: string, party: "STUDENT" | "COUNSELL
     })
   );
 
-  const studentName = `${updated.student.user.firstName} ${updated.student.user.lastName}`;
-  const counsellorName = `${updated.counsellor.user.firstName} ${updated.counsellor.user.lastName}`;
+  const studentName = fullName(updated.student.user);
+  const counsellorName = fullName(updated.counsellor.user);
   const sessionNumberDigit = updated.sessionNumber === "SESSION_1" ? "1" : "2";
   const sessionDateTime = formatDateTime(updated.scheduledDate.toISOString().slice(0, 10), updated.startTime);
 
@@ -1364,7 +1393,7 @@ export async function sendNoShowReschedulePrompt(id: string) {
     throw new BadRequestError("This session hasn't been marked as a student no-show");
   }
 
-  const studentName = `${session.student.user.firstName} ${session.student.user.lastName}`;
+  const studentName = fullName(session.student.user);
   const sessionDateTime = formatDateTime(session.scheduledDate.toISOString().slice(0, 10), session.startTime);
 
   sendEmailBestEffort(session.student.user.email, "SESSION_MISSED_STUDENT", {
@@ -1381,8 +1410,8 @@ export async function sendNoShowReschedulePrompt(id: string) {
 
 export async function sendDayReminder(id: string, input: SendDayReminderBody) {
   const session = await getSessionById(id);
-  const studentName = `${session.student.user.firstName} ${session.student.user.lastName}`;
-  const counsellorName = `${session.counsellor.user.firstName} ${session.counsellor.user.lastName}`;
+  const studentName = fullName(session.student.user);
+  const counsellorName = fullName(session.counsellor.user);
   const sessionTemplateStudent = session.sessionNumber === "SESSION_1" ? "SESSION_1_DAY_REMINDER_STUDENT" : "SESSION_2_DAY_REMINDER_STUDENT";
   const sessionTemplateParent = session.sessionNumber === "SESSION_1" ? "SESSION_1_DAY_REMINDER_PARENT" : "SESSION_2_DAY_REMINDER_PARENT";
   const sessionTemplateCounsellor = session.sessionNumber === "SESSION_1" ? "SESSION_1_DAY_REMINDER_COUNSELLOR" : "SESSION_2_DAY_REMINDER_COUNSELLOR";

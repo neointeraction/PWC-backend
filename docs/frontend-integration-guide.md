@@ -427,8 +427,9 @@ accepted here** (unknown keys are stripped by validation); they remain admin-onl
 before `POST /{id}/confirm-profile` moves the student to `PROFILE_COMPLETED`. This is the
 student's one chance to fix their name; afterwards only an admin can change it.
 
-- Both are trimmed, non-empty strings (same rules as the admin `PATCH /students/{id}`).
-  An empty or whitespace-only value is a **400**, and nothing in the request is saved.
+- `firstName` is a trimmed, non-empty string — empty/whitespace-only is a **400**, and
+  nothing in the request is saved. `lastName` is **optional**: `""` clears it (same rules
+  as the admin `PATCH /students/{id}`).
 - **After `DRAFT` the name fields are silently ignored — the request is _not_ rejected.**
   You still get **200**, the other fields in the body are applied, and `user.firstName` /
   `user.lastName` in the response are simply the unchanged current values. There is no 409
@@ -493,7 +494,7 @@ duplicate can still be caught again as a 409 if two uploads race.
 ```json
 {
   "firstName": "Aditi",
-  "lastName": "Rao",
+  "lastName": "Rao",                  // optional — omit for single-name students; don't repeat firstName
   "email": "aditi.rao@example.com",
   "mobile": "+919876500001",
   "whatsappNumber": "+919876500002",

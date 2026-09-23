@@ -59,7 +59,7 @@ the base user yet).
 | email | String | unique |
 | passwordHash | String | argon2 |
 | role | `UserRole` enum | STUDENT / COUNSELLOR / ADMIN / SUPER_ADMIN |
-| firstName, lastName | String | |
+| firstName, lastName | String | `lastName` is optional for students — `""` when not given (never copied from `firstName`) |
 | isActive | Boolean | default true |
 | mustChangePassword | Boolean | default true; forces reset on first login (Student and Counsellor both get admin-generated temp passwords) |
 | lastLoginAt | DateTime? | null until the first successful password login; set on every `POST /auth/login` (token refreshes don't touch it). Backs the admin list's "Last Active" column |

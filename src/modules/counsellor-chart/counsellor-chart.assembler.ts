@@ -7,6 +7,7 @@ import { NotFoundError } from "../../common/errors/AppError.js";
 import { ACADEMIC_RECORD_FIELDKEY, CHART_SECTIONS } from "./fieldmap.js";
 import { resolveAnswerLabels } from "./answerLabel.js";
 import { computeEntranceExamsAndColleges } from "./entrance-exams-colleges.js";
+import { fullName } from "../../common/utils/fullName.js";
 
 const COHORT = "CLASS_9_10";
 
@@ -67,7 +68,7 @@ export async function assembleChart(studentId: string) {
   const report = (attempt?.result?.report ?? null) as Record<string, unknown> | null;
 
   const ourChampion = {
-    name: `${student.user.firstName} ${student.user.lastName}`.trim(),
+    name: fullName(student.user),
     currentAcademicYear: student.academicYear,
     institute: student.project?.name ?? null,
     instituteLocation: student.project?.address ?? null,

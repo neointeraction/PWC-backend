@@ -11,6 +11,7 @@ import type {
   ListCounsellorsQuery,
   UpdateCounsellorInput,
 } from "./counsellors.schema.js";
+import { fullName } from "../../common/utils/fullName.js";
 
 const counsellorInclude = {
   user: { select: { id: true, email: true, firstName: true, lastName: true, isActive: true } },
@@ -78,7 +79,7 @@ export async function createCounsellor(input: CreateCounsellorInput) {
     });
 
     sendEmailBestEffort(counsellor.user.email, "LOGIN_CREDENTIALS_COUNSELLOR", {
-      counsellorName: `${counsellor.user.firstName} ${counsellor.user.lastName}`,
+      counsellorName: fullName(counsellor.user),
       loginId: counsellor.user.email,
       defaultPassword: tempPassword,
       loginLink: env.APP_WEB_URL,

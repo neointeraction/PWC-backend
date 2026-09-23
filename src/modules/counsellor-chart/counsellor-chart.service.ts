@@ -5,6 +5,7 @@ import { assembleChart } from "./counsellor-chart.assembler.js";
 import { loadAlignmentGuidance, loadReliabilityMeasureDefinitions, loadScriGuidance } from "./guidance.js";
 import { computeScri } from "./scri.js";
 import type { PutCounsellorChartBody } from "./counsellor-chart.schema.js";
+import { fullName } from "../../common/utils/fullName.js";
 
 // Loads (lazily creating) the stored CounsellorChart row and its notes.
 async function loadOrCreateChart(studentId: string) {
@@ -323,7 +324,7 @@ export async function listManualEntries(): Promise<ManualEntryRow[]> {
 
   const rows: ManualEntryRow[] = [];
   for (const chart of charts) {
-    const studentName = `${chart.student.user.firstName} ${chart.student.user.lastName}`.trim();
+    const studentName = fullName(chart.student.user);
     for (const { column, label } of MANUAL_ENTRY_TABLES) {
       const items = chart[column] as Record<string, unknown>[] | null;
       if (!items) continue;

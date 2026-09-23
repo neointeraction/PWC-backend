@@ -13,6 +13,7 @@ import type {
   UpdateProjectInput,
   WizardCounsellorSlot,
 } from "./projects.schema.js";
+import { fullName } from "../../common/utils/fullName.js";
 
 const projectInclude = {
   language: { select: { id: true, code: true, name: true } },
@@ -530,12 +531,12 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
       // the next mail") actually goes out before LOGIN_CREDENTIALS_STUDENT — see
       // students.service.ts's createStudent for the same pattern.
       sendTemplateEmail(s.email, "WELCOME_STUDENT", {
-        studentName: `${s.firstName} ${s.lastName}`,
+        studentName: fullName(s),
       })
         .catch((err) => console.error(`[projects] failed to send WELCOME_STUDENT to ${s.email}:`, err))
         .finally(() => {
           sendEmailBestEffort(s.email, "LOGIN_CREDENTIALS_STUDENT", {
-            studentName: `${s.firstName} ${s.lastName}`,
+            studentName: fullName(s),
             loginId: s.email,
             defaultPassword: s.tempPassword,
             loginLink: env.APP_WEB_URL,
@@ -544,7 +545,7 @@ export async function createProjectWizard(input: CreateProjectWizardInput) {
       if (s.parentEmail) {
         sendEmailBestEffort(s.parentEmail, "WELCOME_PARENT", {
           parentName: s.fatherName || s.motherName || "Parent",
-          studentName: `${s.firstName} ${s.lastName}`,
+          studentName: fullName(s),
         });
       }
       // No PRE_COUNSELLING_PARENT send here — same as the standalone student-create
