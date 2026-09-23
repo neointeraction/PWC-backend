@@ -6,7 +6,11 @@
 
 FROM node:22-slim AS build
 WORKDIR /app
-RUN corepack enable
+# Pin the exact pnpm version instead of trusting corepack's own default — the lockfile is
+# format 9.0 (pnpm 9/10), and without this an older default pnpm can't read it under
+# --frozen-lockfile and fails the build. Keep this in sync with package.json's
+# "packageManager" field.
+RUN corepack enable && corepack prepare pnpm@10.9.0 --activate
 COPY package.json pnpm-lock.yaml ./
 COPY prisma ./prisma
 # Skip Puppeteer's own Chromium download here — the runtime stage below installs
