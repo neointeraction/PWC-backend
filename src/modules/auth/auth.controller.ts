@@ -10,7 +10,13 @@ const REFRESH_COOKIE_NAME = "refreshToken";
 const refreshCookieOptions: CookieOptions = {
   httpOnly: true,
   secure: env.NODE_ENV === "production",
-  sameSite: "lax",
+  // "lax" locally (frontend and backend share a domain in dev); "none" in production,
+  // where the frontend (Vercel) and this backend (Render) are on different domains —
+  // a cross-site fetch/XHR won't carry a Lax cookie at all, only "none" (paired with
+  // secure, already true above) does. Without this, login works (the access token comes
+  // back in the response body, not a cookie) but the silent refresh call 15 minutes later
+  // fails with "Missing refresh token" and force-logs the user out.
+  sameSite: env.NODE_ENV === "production" ? "none" : "lax",
   path: "/api/v1/auth",
   maxAge: parseDurationMs(env.JWT_REFRESH_EXPIRES_IN),
 };
