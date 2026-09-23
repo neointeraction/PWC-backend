@@ -3,6 +3,9 @@ import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { advanceWorkflowStatus, assertWorkflowStageAtLeast } from "../../common/workflow/workflowStatus.js";
 import { assertStudentProjectWindowOpen } from "../../common/utils/projectWindow.js";
+import { sendTemplateEmail } from "../email/email.service.js";
+import { fullName } from "../../common/utils/fullName.js";
+import { renderStudentReportPdf } from "../reports/report-pdf.service.js";
 import type { FormTypeParams, GetFormTemplateQuery, SaveFormAnswersBody } from "./forms.schema.js";
 
 type FormType = FormTypeParams["formType"];
@@ -196,7 +199,10 @@ export async function saveFormAnswers(
     }
   }
 
-  await prisma.$transaction(async (tx) => {
+  // Set inside the transaction when this submission is the second half of the
+  // FEEDBACK_STUDENT/FEEDBACK_PARENT pair (i.e. both sides are now in), so the parent
+  // email below only fires once the transaction has actually committed.
+  const reachedStudentParentFeedback = await prisma.$transaction(async (tx) => {
     const existing = await tx.formSubmission.findUnique({
       where: {
         studentId_formTemplateId_submittedByRole: {
@@ -253,9 +259,54 @@ export async function saveFormAnswers(
       const pair = FORM_PAIRS[formType];
       if (pair && (await isFormSubmitted(tx, studentId, pair.counterpart, input.cohort))) {
         await advanceWorkflowStatus(tx, studentId, pair.reaches);
+        return pair.reaches === "STUDENT_PARENT_FEEDBACK";
       }
     }
+
+    return false;
   });
+
+  // The parent is notified their report is ready as soon as both feedback forms are in —
+  // not on the student separately accepting the report (POST .../report/accept), since
+  // that's an independent action that may happen before, long after, or never relative to
+  // the parent's own form. Best-effort and fire-and-forget (not awaited): rendering the
+  // PDF takes a few seconds (headless Chromium), which must never delay this form submit's
+  // response, and a failure here must never fail it either. If the PDF render fails, the
+  // email is skipped rather than sent without its attachment — the copy already promises
+  // "please find it attached" (parents have no login to fall back on), so a body with
+  // nothing attached would be actively misleading. There's no retry: a render failure here
+  // is a dead end until this whole flow gets a persisted notification/retry log, same as
+  // every other best-effort email in this codebase today.
+  if (reachedStudentParentFeedback) {
+    void (async () => {
+      const student = await prisma.student.findUnique({
+        where: { id: studentId },
+        select: {
+          parentEmail: true,
+          fatherName: true,
+          motherName: true,
+          user: { select: { firstName: true, lastName: true } },
+        },
+      });
+      if (!student?.parentEmail) return;
+
+      const pdf = await renderStudentReportPdf(studentId);
+      await sendTemplateEmail(
+        student.parentEmail,
+        "REPORT_READY_PARENT",
+        { parentName: student.fatherName || student.motherName || "Parent", studentName: fullName(student.user) },
+        [
+          {
+            filename: `${fullName(student.user)} - kREATE Report.pdf`,
+            contentType: "application/pdf",
+            base64Content: pdf.toString("base64"),
+          },
+        ]
+      );
+    })().catch((err) => {
+      console.error(`[forms] failed to render/send report PDF for student ${studentId}:`, err);
+    });
+  }
 
   return getFormSubmission(formType, studentId, input.cohort, input.version);
 }

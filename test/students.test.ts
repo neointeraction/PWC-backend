@@ -279,6 +279,29 @@ describe("Students API", () => {
     expect(user?.lastName).toBe("");
   });
 
+  it("treats lastName: null like omitted on create, and as a clear on the admin PATCH", async () => {
+    const res = await authRequest(app).post("/api/v1/students").send({
+      firstName: "Nulled",
+      lastName: null,
+      email: "nulled@test-student.example",
+      mobile: "+919876500207",
+      studentCode: "CB-NULLED",
+      projectId,
+      className: "Grade 9",
+      divisionName: "A",
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.student.user.lastName).toBe("");
+
+    const set = await authRequest(app).patch(`/api/v1/students/${res.body.student.id}`).send({ lastName: "Later" });
+    expect(set.status).toBe(200);
+    const cleared = await authRequest(app).patch(`/api/v1/students/${res.body.student.id}`).send({ lastName: null });
+    expect(cleared.status).toBe(200);
+    const user = await prisma.user.findUnique({ where: { email: "nulled@test-student.example" } });
+    expect(user?.firstName).toBe("Nulled");
+    expect(user?.lastName).toBe("");
+  });
+
   it("404s PATCH /students/me with a name for a non-student account", async () => {
     const res = await authRequest(app, "COUNSELLOR", { userId: "staff-no-student-name" })
       .patch("/api/v1/students/me")

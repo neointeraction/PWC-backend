@@ -4,6 +4,7 @@ import { createApp } from "../src/app.js";
 import { prisma } from "../src/config/prisma.js";
 import { setStage } from "./helpers/stage.js";
 import { authRequest, bearer } from "./helpers/http.js";
+import { signReportPdfToken } from "../src/common/utils/reportPdfToken.js";
 
 const app = createApp();
 const COHORT = "CLASS_9_10";
@@ -352,5 +353,32 @@ describe("Reports — student assessment report", () => {
   it("401s without a token", async () => {
     const res = await request(app).get(`/api/v1/reports/students/${studentAId}/assessment`);
     expect(res.status).toBe(401);
+  });
+
+  // The headless report-PDF render (parents have no login) authenticates with this
+  // token instead of a normal access token — see reportPdfAuth.ts.
+  describe("report-pdf token", () => {
+    it("reads the report it was minted for", async () => {
+      const res = await request(app)
+        .get(`/api/v1/reports/students/${studentAId}/assessment`)
+        .set("Authorization", `Bearer ${signReportPdfToken(studentAId)}`);
+      expect(res.status).toBe(200);
+      expect(res.body.meta).toBeDefined();
+    });
+
+    it("403s against a different student's report", async () => {
+      const res = await request(app)
+        .get(`/api/v1/reports/students/${studentBId}/assessment`)
+        .set("Authorization", `Bearer ${signReportPdfToken(studentAId)}`);
+      expect(res.status).toBe(403);
+    });
+
+    it("is rejected once expired", async () => {
+      const expired = signReportPdfToken(studentAId, "-1s");
+      const res = await request(app)
+        .get(`/api/v1/reports/students/${studentAId}/assessment`)
+        .set("Authorization", `Bearer ${expired}`);
+      expect(res.status).toBe(401);
+    });
   });
 });

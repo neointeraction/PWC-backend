@@ -4,7 +4,7 @@ import { createConsoleProvider } from "./providers/console.provider.js";
 import { createMailgunProvider } from "./providers/mailgun.provider.js";
 import { createResendProvider } from "./providers/resend.provider.js";
 import { createPostmarkProvider } from "./providers/postmark.provider.js";
-import type { EmailProvider, SendEmailResult } from "./providers/email-provider.js";
+import type { EmailAttachment, EmailProvider, SendEmailResult } from "./providers/email-provider.js";
 import { emailTemplateRegistry, renderEmailTemplate, type EmailTemplateKey } from "./templates/index.js";
 
 // EMAIL_PROVIDER selects which provider backs sendTemplateEmail — swap providers by
@@ -32,7 +32,11 @@ export function listEmailTemplateKeys(): EmailTemplateKey[] {
 export async function sendTemplateEmail(
   to: string,
   templateKey: EmailTemplateKey,
-  data: unknown
+  data: unknown,
+  // Caller-supplied attachments (e.g. a rendered report PDF) — separate from the
+  // template's own render output since attachment bytes are produced by the caller,
+  // not baked into the HTML/text template.
+  attachments?: EmailAttachment[]
 ): Promise<SendEmailResult & { subject: string; provider: string }> {
   const entry = emailTemplateRegistry[templateKey];
   const parsed = entry.schema.safeParse(data);
@@ -48,6 +52,7 @@ export async function sendTemplateEmail(
     html: rendered.html,
     text: rendered.text,
     inlineImages: rendered.inlineImages,
+    attachments,
   });
 
   return { ...result, subject: rendered.subject, provider: provider.name };

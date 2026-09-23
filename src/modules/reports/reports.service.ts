@@ -13,7 +13,6 @@ import type {
 } from "../counsellor-chart/counsellor-chart.schema.js";
 import { loadAlignmentGuidance, loadScriGuidance } from "../counsellor-chart/guidance.js";
 import { getStudentFeedbackScore } from "../feedback/feedback.service.js";
-import { sendTemplateEmail } from "../email/email.service.js";
 import { fullName } from "../../common/utils/fullName.js";
 
 // Same natural-key normalization as the frontend's `fitKey` (counsellorChart.service.ts)
@@ -21,14 +20,6 @@ import { fullName } from "../../common/utils/fullName.js";
 // casing/whitespace differences.
 function domainKey(...parts: (string | null | undefined)[]): string {
   return parts.map((p) => (p ?? "").trim().toLowerCase()).join("|");
-}
-
-// Fire-and-forget: same pattern as students.service.ts's sendEmailBestEffort — an email
-// failure here must never surface as a failure of the report fetch itself.
-function sendEmailBestEffort(to: string, templateKey: Parameters<typeof sendTemplateEmail>[1], data: unknown): void {
-  sendTemplateEmail(to, templateKey, data).catch((err) => {
-    console.error(`[reports] failed to send ${templateKey} to ${to}:`, err);
-  });
 }
 
 // A counsellor-added job role reads exactly like a computed one on the report, plus a
@@ -408,6 +399,12 @@ export async function assembleStudentAssessmentReport(studentId: string) {
 // acceptedAt are already forward-only, so a later chart edit doesn't invalidate an earlier
 // acceptance (same idempotent pattern as the rest of the workflow). Idempotent — accepting
 // twice returns the original timestamp.
+//
+// Doesn't email the parent — accepting and submitting the feedback forms are independent
+// actions (a student can accept before, after, or without ever the parent's form being
+// done), so it's not a reliable "both sides are done" signal. That email fires once the
+// FEEDBACK_STUDENT/FEEDBACK_PARENT form pair completes instead — see saveFormAnswers in
+// forms.service.ts.
 export async function acceptStudentReport(studentId: string): Promise<{ acceptedAt: string }> {
   const student = await prisma.student.findUnique({ where: { id: studentId }, select: { id: true } });
   if (!student) {
@@ -452,27 +449,16 @@ export async function acceptStudentReport(studentId: string): Promise<{ accepted
 //     target, so without this an early fetch (the report is readable as soon as the
 //     assessment is scored) would skip the whole tail of the lifecycle.
 // Best-effort: the report is the deliverable, so a failure here is logged, not raised.
+// Only closes the case — the parent notification lives on acceptStudentReport above now
+// (an explicit action, not an implicit side effect of a GET), so it isn't duplicated here.
 export async function markReportDeliveredToStudent(studentId: string): Promise<void> {
   try {
     const student = await prisma.student.findUnique({
       where: { id: studentId },
-      select: {
-        workflowStatus: true,
-        parentEmail: true,
-        fatherName: true,
-        motherName: true,
-        user: { select: { firstName: true, lastName: true } },
-      },
+      select: { workflowStatus: true },
     });
     if (student?.workflowStatus !== "STUDENT_PARENT_FEEDBACK") return;
     await advanceWorkflowStatus(prisma, studentId, "CLOSED");
-
-    if (student.parentEmail) {
-      sendEmailBestEffort(student.parentEmail, "REPORT_READY_PARENT", {
-        parentName: student.fatherName || student.motherName || "Parent",
-        studentName: fullName(student.user),
-      });
-    }
   } catch (err) {
     console.error(`Closing case on report delivery failed for student ${studentId}:`, err);
   }
