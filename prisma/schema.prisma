@@ -1,9 +1,12 @@
 generator client {
-  provider      = "prisma-client-js"
+  provider = "prisma-client-js"
   // "native" for local dev; "rhel-openssl-3.0.x" for Vercel's Node 18/20 serverless
-  // runtime (Amazon Linux 2023) so the query-engine binary is present when deployed.
+  // runtime (Amazon Linux 2023); "debian-openssl-3.0.x" for Render's Docker deploy
+  // (node:22-slim, Debian 12/bookworm) — explicit rather than relying on "native" to
+  // resolve to it during `prisma generate`, since that's evaluated wherever the Docker
+  // build stage actually runs, not necessarily the same as the final runtime image.
   // If you see "Query engine binary not found" on Vercel, try "rhel-openssl-1.0.x".
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  binaryTargets = ["native", "rhel-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
