@@ -86,7 +86,7 @@ const riasecItems: LikertItem[] = [
     fieldKey: "riasec_investigative_i3",
     trait: "INVESTIGATIVE",
     traitCode: "I3",
-    text: "I like reading about scientific discoveries, experiments, or research findings.",
+    text: "I like learning about scientific discoveries, experiments, or research findings.",
   },
   {
     code: "Q8",
@@ -685,7 +685,7 @@ const aptitudeItems: SeedDraft[] = [
     weight: 1.5,
     format: "MCQ_SINGLE",
     questionText:
-      "A pattern alternates between a filled shape and an empty shape of the same type, rotating 90° clockwise each step. The sequence so far is: Filled Circle → Empty Square → Filled Triangle → Empty Circle. What comes next?",
+      "A pattern alternates between a filled shape and an empty shape of the same type. The sequence so far is: Filled Circle → Empty Square → Filled Triangle → Empty Circle. What comes next?",
     options: [
       { value: "A", label: "A. Filled Square" },
       { value: "B", label: "B. Empty Triangle" },

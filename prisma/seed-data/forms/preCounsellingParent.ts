@@ -229,6 +229,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
       { value: "f", label: "Difficulty understanding concepts — relies on memorisation" },
       { value: "g", label: "Any Other", isOtherOption: true },
       { value: "h", label: "Not Sure" },
+      { value: "i", label: "No major difficulty currently" },
     ],
   },
   {
@@ -273,7 +274,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     helpText: "Examples: UX design, environmental science, data analytics, sports psychology, content creation, etc.",
     questionType: "MCQ_SINGLE",
     options: [
-      { value: "a", label: "Yes — I am open to whatever the counsellor recommends" },
+      { value: "a", label: "Yes — I am open to exploring suitable options with my child" },
       { value: "b", label: "Open but with reservations — I would want to understand it fully first" },
       { value: "c", label: "No — I have a clear plan and prefer to stick to it" },
     ],
@@ -365,6 +366,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
       { value: "d", label: "Peer pressure is a negative influence" },
       { value: "e", label: "I am worried they will make a wrong career choice" },
       { value: "f", label: "Any Other", isOtherOption: true },
+      { value: "g", label: "No major concern" },
     ],
   },
   {

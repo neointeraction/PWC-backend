@@ -114,7 +114,7 @@ describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () =>
     expect(await statusOf(studentId)).toBe("ASSESSMENT_COMPLETED");
   });
 
-  it("saving real chart content advances to COUNSELLOR_FEEDBACK_REPORT", async () => {
+  it("saving real chart content after Session 1 does NOT advance — only finalize moves the stage", async () => {
     await setStage(studentId, "SESSION_1_COMPLETED");
     const res = await authRequest(app)
       .put(`/api/v1/counsellor-chart/students/${studentId}`)
@@ -125,7 +125,7 @@ describe("Workflow lifecycle — chart, finalize, feedback pair, closure", () =>
         lastEditedBy: "counsellor-1",
       });
     expect(res.status).toBe(200);
-    expect(await statusOf(studentId)).toBe("COUNSELLOR_FEEDBACK_REPORT");
+    expect(await statusOf(studentId)).toBe("SESSION_1_COMPLETED");
   });
 
   it("finalize stamps finalizedAt, advances to COUNSELLOR_FEEDBACK, and is idempotent", async () => {
