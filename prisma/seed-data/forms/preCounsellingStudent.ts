@@ -157,6 +157,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
       { value: "competitions", label: "Competitions — debates, elocutions, quizzes, house events" },
       { value: "field_trips", label: "Field trips — company visits, factory visits, nature outings" },
       { value: "other", label: "Any Other", isOtherOption: true },
+      { value: "not_tried", label: "Haven't had the opportunity to try these" },
     ],
   },
   {
@@ -218,6 +219,7 @@ export const preCounsellingStudentQuestions: FormQuestionSeed[] = [
       { value: "e", label: "I keep postponing studying — procrastination" },
       { value: "f", label: "Concepts are hard to understand — feels like memorising" },
       { value: "g", label: "Any Other", isOtherOption: true },
+      { value: "h", label: "No major difficulty currently" },
     ],
   },
   {

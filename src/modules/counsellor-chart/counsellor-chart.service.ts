@@ -186,12 +186,9 @@ export async function updateCounsellorChart(studentId: string, body: PutCounsell
     );
   }
 
-  // The counsellor writing real chart content after Session 1 IS the "Counsellor
-  // Feedback Report" stage — no separate button. Forward-only and idempotent, so
-  // repeated saves (and saves made after Session 2) never move the status backwards.
-  if (hasChartContent(body)) {
-    await advanceWorkflowStatus(prisma, studentId, "COUNSELLOR_FEEDBACK_REPORT");
-  }
+  // Saving deliberately doesn't advance the workflow — counsellors fill the chart in
+  // between Session 1 and Session 2, and the admin panel should keep showing
+  // "Session 1 Completed" until then. The stage only moves on finalize (after Session 2).
 
   return getCounsellorChart(studentId);
 }
