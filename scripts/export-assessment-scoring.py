@@ -283,6 +283,9 @@ def main():
                 if "Optional / Elective Subjects" in col
                 else None,
                 "explanation": s(r[col["Student & Parent-Friendly Explanation"]]),
+                "careerFeasibility": s(r[col["Career Feasibility"]])
+                if "Career Feasibility" in col
+                else None,
                 "weights": w,
             }
         )

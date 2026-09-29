@@ -5,6 +5,7 @@ import type { AssessmentReport } from "../assessment/scoring/index.js";
 import type { CareerFitResult, DomainFit } from "../assessment/scoring/careerFit.js";
 import { aiResilienceRank } from "../assessment/scoring/careerFit.js";
 import type { StreamFit, StreamFitResult } from "../assessment/scoring/streamFit.js";
+import { scoringData } from "../assessment/scoring/data/store.js";
 import type { GraduationFit, GraduationFitResult } from "../assessment/scoring/graduationFit.js";
 import type {
   CareerCompassItem as PersistedCareerCompassItem,
@@ -212,6 +213,7 @@ function buildStreamFitFromPersistedTable(
       coreSubjects: row.coreSubjects || scored?.coreSubjects || null,
       electiveSubjects: row.electives || scored?.electiveSubjects || null,
       explanation: row.explanation || scored?.explanation || null,
+      careerFeasibility: null, // filled in by withCareerFeasibility
       // null (not 0) when there's no scored match — a manually-added row has no fit
       // score at all, and 0 would incorrectly grade as "Explore Carefully" downstream.
       fitScore: scored?.fitScore ?? (null as unknown as number),
@@ -222,6 +224,22 @@ function buildStreamFitFromPersistedTable(
   });
 
   return { ranked: streamFit.ranked, top3 };
+}
+
+// Career Feasibility is reference text, not a score, and was added after many reports
+// were already snapshotted — so it's always read from the live stream_weights data by
+// sub-stream rather than trusted from the stored report JSON.
+function withCareerFeasibility(streamFit: StreamFitResult): StreamFitResult {
+  const byKey = new Map(
+    scoringData.streamWeights.map((s) => [domainKey(s.mainStream, s.subStream), s.careerFeasibility])
+  );
+  return {
+    ...streamFit,
+    top3: streamFit.top3.map((s) => ({
+      ...s,
+      careerFeasibility: byKey.get(domainKey(s.mainStream, s.subStream)) ?? null,
+    })),
+  };
 }
 
 // Same fix for the Graduation Fit table (Step3SectionC's "Graduation Table").
@@ -308,9 +326,11 @@ export async function assembleStudentAssessmentReport(studentId: string) {
   // once the counsellor has saved an edit to either table on the chart, the report shows
   // exactly those rows instead of an independently recomputed top-3.
   const persistedStreamFitTable = (chart?.streamFitTable as PersistedStreamFitItem[] | null) ?? null;
-  const streamFit = persistedStreamFitTable
-    ? buildStreamFitFromPersistedTable(report.streamFit, persistedStreamFitTable)
-    : report.streamFit;
+  const streamFit = withCareerFeasibility(
+    persistedStreamFitTable
+      ? buildStreamFitFromPersistedTable(report.streamFit, persistedStreamFitTable)
+      : report.streamFit
+  );
 
   const persistedGraduationTable = (chart?.graduationTable as PersistedGraduationItem[] | null) ?? null;
   const graduationPathways = persistedGraduationTable
@@ -449,8 +469,8 @@ export async function acceptStudentReport(studentId: string): Promise<{ accepted
 //     target, so without this an early fetch (the report is readable as soon as the
 //     assessment is scored) would skip the whole tail of the lifecycle.
 // Best-effort: the report is the deliverable, so a failure here is logged, not raised.
-// Only closes the case — the parent notification lives on acceptStudentReport above now
-// (an explicit action, not an implicit side effect of a GET), so it isn't duplicated here.
+// Only closes the case — the parent's report email (with the PDF attached) fires when both
+// feedback forms are in (saveFormAnswers in forms.service.ts), so it isn't duplicated here.
 export async function markReportDeliveredToStudent(studentId: string): Promise<void> {
   try {
     const student = await prisma.student.findUnique({

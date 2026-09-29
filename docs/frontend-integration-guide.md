@@ -1706,6 +1706,34 @@ as the rest of the Email module, §12), so nothing fires this on the morning of 
 session automatically — something (an admin action, a manual ops script) has to call
 it.
 
+### 10.12 Counsellor workload per project (Deployment & Workload Breakdown)
+
+`GET /counsellors`, `GET /counsellors/{id}` and `GET /counsellors/me` return three
+counts on every `projects[]` entry:
+
+```json
+"projects": [
+  {
+    "projectId": "…",
+    "project": { "id": "…", "name": "Chanakya University" },
+    "totalAllotted": 40,
+    "session1Balance": 12,
+    "session2Balance": 25
+  }
+]
+```
+
+- `totalAllotted` — `CounsellorSlot` rows this counsellor has in this project, any status
+  (open or booked).
+- `session1Balance` / `session2Balance` — `SESSION_1` / `SESSION_2` sessions assigned to
+  this counsellor, for students in this project, that are still booked and not done
+  (`status` `SCHEDULED`/`RESCHEDULED`; `COMPLETED` and `CANCELLED` are excluded). A
+  past-dated session that nobody marked complete (e.g. a no-show awaiting rebooking)
+  still counts.
+
+Totals across projects are a client-side sum. Counts only appear for projects the
+counsellor is currently assigned to.
+
 ---
 
 ## 11. Feedback (Counsellor Satisfaction Score)

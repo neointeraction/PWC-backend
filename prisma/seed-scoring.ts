@@ -66,6 +66,7 @@ interface StreamWeightRow {
   coreSubjects: string | null;
   electiveSubjects: string | null;
   explanation: string | null;
+  careerFeasibility: string | null;
   weights: Record<string, number>;
 }
 
@@ -167,6 +168,7 @@ export async function seedScoringReferenceData(): Promise<void> {
         coreSubjects: s.coreSubjects,
         electiveSubjects: s.electiveSubjects,
         explanation: s.explanation,
+        careerFeasibility: s.careerFeasibility,
         weights: s.weights,
       },
       create: {
@@ -175,6 +177,7 @@ export async function seedScoringReferenceData(): Promise<void> {
         coreSubjects: s.coreSubjects,
         electiveSubjects: s.electiveSubjects,
         explanation: s.explanation,
+        careerFeasibility: s.careerFeasibility,
         weights: s.weights,
       },
     });

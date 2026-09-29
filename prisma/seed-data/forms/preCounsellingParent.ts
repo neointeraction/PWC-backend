@@ -68,7 +68,7 @@ export const preCounsellingParentQuestions: FormQuestionSeed[] = [
     sectionLabel: "Section 2 — Strengths & Interests I Observe In My Child",
     questionText: "Tick what you clearly observe, sometimes notice, or rarely see in your child.",
     helpText:
-      "As a parent, you observe your child in situations that others don't see. Your observations here are very valuable. Please tick based on what you have genuinely seen not what you hope for.",
+      "As a parent, you observe your child in situations that others don't see. Your observations here are very valuable. Please tick based on what you have genuinely seen not what you hope for. Not observing (Not Sure) a skill does not mean the child lacks it.",
     questionType: "MATRIX",
     options: {
       rows: STRENGTH_ITEMS,

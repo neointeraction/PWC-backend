@@ -972,7 +972,7 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/counsellors",
   tags: ["Counsellors"],
-  summary: "List counsellors (with user, assigned projects). Staff.",
+  summary: "List counsellors (with user, assigned projects). Each projects[] entry carries totalAllotted (slots in that project, any status), session1Balance and session2Balance (SESSION_1/SESSION_2 sessions for that project's students still SCHEDULED/RESCHEDULED). Staff.",
   request: { query: listCounsellorsQuerySchema },
   responses: {
     200: { description: "List of counsellors", content: { "application/json": { schema: z.array(genericObjectSchema) } } },
@@ -994,7 +994,7 @@ registry.registerPath({
   method: "get",
   path: "/api/v1/counsellors/{id}",
   tags: ["Counsellors"],
-  summary: "Get a counsellor by id. Staff.",
+  summary: "Get a counsellor by id (projects[] carries the same totalAllotted/session1Balance/session2Balance counts as the list). Staff.",
   request: { params: counsellorCrudIdParamsSchema },
   responses: {
     200: { description: "Counsellor", content: { "application/json": { schema: genericObjectSchema } } },

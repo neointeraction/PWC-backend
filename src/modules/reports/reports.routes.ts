@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import { validate } from "../../common/middlewares/validate.js";
-import { requireStudent } from "../../common/middlewares/auth.js";
+import { requireStaff, requireStudent } from "../../common/middlewares/auth.js";
 import { ownStudentParam } from "../../common/middlewares/ownership.js";
 import { authenticateReportRead } from "../../common/middlewares/reportPdfAuth.js";
 import * as reportsController from "./reports.controller.js";
@@ -18,6 +18,16 @@ reportsRouter.get(
   validate({ params: reportStudentParamsSchema }),
   authenticateReportRead,
   asyncHandler(reportsController.getStudentAssessmentReport)
+);
+
+// Staff download of the kREATE Compass report as a PDF file (Project Students →
+// "Download Compass"). Rendered on demand by headless Chrome, so it takes a few seconds.
+// 404 until the student has a computed assessment result.
+reportsRouter.get(
+  "/students/:studentId/pdf",
+  ...requireStaff,
+  validate({ params: reportStudentParamsSchema }),
+  asyncHandler(reportsController.downloadStudentReportPdf)
 );
 
 // The student accepts the finalized report — the counsellor's signal that the student has

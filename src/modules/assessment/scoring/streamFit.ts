@@ -14,6 +14,7 @@ export interface StreamFit {
   coreSubjects: string | null;
   electiveSubjects: string | null;
   explanation: string | null;
+  careerFeasibility: string | null;
   fitScore: number; // 0-100
   level: string;
   meaning: string;
@@ -47,6 +48,7 @@ export function scoreStreamFit(profile: TraitScoreMap): StreamFitResult {
         coreSubjects: s.coreSubjects,
         electiveSubjects: s.electiveSubjects,
         explanation: s.explanation,
+        careerFeasibility: s.careerFeasibility,
         fitScore: score,
         level,
         meaning,
