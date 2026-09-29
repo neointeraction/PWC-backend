@@ -30,23 +30,31 @@ const OPEN_SESSION_STATUSES = ["SCHEDULED", "RESCHEDULED"] as const;
 
 // Annotates each counsellor's projects[] entry with workload counts for the admin
 // "Deployment & Workload Breakdown" view:
-//   totalAllotted   — CounsellorSlot rows for this counsellor in this project (any status)
+//   totalAllotted   — students in this project allotted to this counsellor: distinct
+//                     students with a non-cancelled Session 1 or 2 on them. Counted from
+//                     sessions, not CounsellorSlot rows — an admin can create a session
+//                     directly with no slot (createSessionManually), open slots aren't
+//                     students, and each student takes two slots, so a slot count never
+//                     lined up with the students listed for the counsellor.
 //   session1Balance — SESSION_1 sessions on this counsellor, for students in this project,
 //                     still SCHEDULED/RESCHEDULED (i.e. not completed or cancelled)
 //   session2Balance — same, for SESSION_2
 // Two grouped queries for the whole page, never one per counsellor. Session has no
-// projectId of its own — the project comes from the student — so that count is raw SQL
+// projectId of its own — the project comes from the student — so both are raw SQL
 // (Prisma's groupBy can't group by a relation field).
 async function withWorkload(counsellors: CounsellorWithProjects[]) {
   const ids = counsellors.map((c) => c.id);
   if (ids.length === 0) return [];
 
-  const [slotCounts, sessionCounts] = await Promise.all([
-    prisma.counsellorSlot.groupBy({
-      by: ["counsellorId", "projectId"],
-      where: { counsellorId: { in: ids } },
-      _count: { _all: true },
-    }),
+  const [studentCounts, sessionCounts] = await Promise.all([
+    prisma.$queryRaw<{ counsellorId: string; projectId: string; count: number }[]>`
+      SELECT s."counsellorId", st."projectId", COUNT(DISTINCT s."studentId")::int AS count
+      FROM sessions s
+      JOIN students st ON st.id = s."studentId"
+      WHERE s."counsellorId" IN (${Prisma.join(ids)})
+        AND s.status::text <> 'CANCELLED'
+      GROUP BY s."counsellorId", st."projectId"
+    `,
     prisma.$queryRaw<{ counsellorId: string; projectId: string; sessionNumber: string; count: number }[]>`
       SELECT s."counsellorId", st."projectId", s."sessionNumber"::text AS "sessionNumber", COUNT(*)::int AS count
       FROM sessions s
@@ -58,7 +66,7 @@ async function withWorkload(counsellors: CounsellorWithProjects[]) {
   ]);
 
   const key = (counsellorId: string, projectId: string) => `${counsellorId}:${projectId}`;
-  const slots = new Map(slotCounts.map((r) => [key(r.counsellorId, r.projectId), r._count._all]));
+  const students = new Map(studentCounts.map((r) => [key(r.counsellorId, r.projectId), r.count]));
   const s1 = new Map<string, number>();
   const s2 = new Map<string, number>();
   for (const r of sessionCounts) {
@@ -71,7 +79,7 @@ async function withWorkload(counsellors: CounsellorWithProjects[]) {
       const k = key(c.id, p.projectId);
       return {
         ...p,
-        totalAllotted: slots.get(k) ?? 0,
+        totalAllotted: students.get(k) ?? 0,
         session1Balance: s1.get(k) ?? 0,
         session2Balance: s2.get(k) ?? 0,
       };
