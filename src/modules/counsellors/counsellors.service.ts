@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import argon2 from "argon2";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/prisma.js";
 import { env } from "../../config/env.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
@@ -19,6 +20,64 @@ const counsellorInclude = {
     select: { projectId: true, project: { select: { id: true, name: true } } },
   },
 } as const;
+
+type CounsellorWithProjects = Prisma.CounsellorGetPayload<{ include: typeof counsellorInclude }>;
+
+// Sessions that still count against a counsellor's per-session "balance": booked and not
+// yet done. RESCHEDULED is included defensively (the booking flow keeps a moved session
+// SCHEDULED today, but the enum value exists).
+const OPEN_SESSION_STATUSES = ["SCHEDULED", "RESCHEDULED"] as const;
+
+// Annotates each counsellor's projects[] entry with workload counts for the admin
+// "Deployment & Workload Breakdown" view:
+//   totalAllotted   — CounsellorSlot rows for this counsellor in this project (any status)
+//   session1Balance — SESSION_1 sessions on this counsellor, for students in this project,
+//                     still SCHEDULED/RESCHEDULED (i.e. not completed or cancelled)
+//   session2Balance — same, for SESSION_2
+// Two grouped queries for the whole page, never one per counsellor. Session has no
+// projectId of its own — the project comes from the student — so that count is raw SQL
+// (Prisma's groupBy can't group by a relation field).
+async function withWorkload(counsellors: CounsellorWithProjects[]) {
+  const ids = counsellors.map((c) => c.id);
+  if (ids.length === 0) return [];
+
+  const [slotCounts, sessionCounts] = await Promise.all([
+    prisma.counsellorSlot.groupBy({
+      by: ["counsellorId", "projectId"],
+      where: { counsellorId: { in: ids } },
+      _count: { _all: true },
+    }),
+    prisma.$queryRaw<{ counsellorId: string; projectId: string; sessionNumber: string; count: number }[]>`
+      SELECT s."counsellorId", st."projectId", s."sessionNumber"::text AS "sessionNumber", COUNT(*)::int AS count
+      FROM sessions s
+      JOIN students st ON st.id = s."studentId"
+      WHERE s."counsellorId" IN (${Prisma.join(ids)})
+        AND s.status::text IN (${Prisma.join([...OPEN_SESSION_STATUSES])})
+      GROUP BY s."counsellorId", st."projectId", s."sessionNumber"
+    `,
+  ]);
+
+  const key = (counsellorId: string, projectId: string) => `${counsellorId}:${projectId}`;
+  const slots = new Map(slotCounts.map((r) => [key(r.counsellorId, r.projectId), r._count._all]));
+  const s1 = new Map<string, number>();
+  const s2 = new Map<string, number>();
+  for (const r of sessionCounts) {
+    (r.sessionNumber === "SESSION_1" ? s1 : s2).set(key(r.counsellorId, r.projectId), r.count);
+  }
+
+  return counsellors.map((c) => ({
+    ...c,
+    projects: c.projects.map((p) => {
+      const k = key(c.id, p.projectId);
+      return {
+        ...p,
+        totalAllotted: slots.get(k) ?? 0,
+        session1Balance: s1.get(k) ?? 0,
+        session2Balance: s2.get(k) ?? 0,
+      };
+    }),
+  }));
+}
 
 function generateTempPassword(): string {
   return crypto.randomBytes(12).toString("base64url");
@@ -92,13 +151,14 @@ export async function createCounsellor(input: CreateCounsellorInput) {
 }
 
 export async function listCounsellors(query: ListCounsellorsQuery) {
-  return prisma.counsellor.findMany({
+  const counsellors = await prisma.counsellor.findMany({
     where: {
       projects: query.projectId ? { some: { projectId: query.projectId } } : undefined,
     },
     include: counsellorInclude,
     orderBy: { createdAt: "desc" },
   });
+  return withWorkload(counsellors);
 }
 
 export async function getCounsellorById(id: string) {
@@ -109,7 +169,8 @@ export async function getCounsellorById(id: string) {
   if (!counsellor) {
     throw new NotFoundError("Counsellor not found");
   }
-  return counsellor;
+  const [withCounts] = await withWorkload([counsellor]);
+  return withCounts!;
 }
 
 // Self-service: resolves the logged-in COUNSELLOR user to their Counsellor row, the same
@@ -123,7 +184,8 @@ export async function getCounsellorByUserId(userId: string) {
   if (!counsellor) {
     throw new NotFoundError("No counsellor profile is linked to this account");
   }
-  return counsellor;
+  const [withCounts] = await withWorkload([counsellor]);
+  return withCounts!;
 }
 
 export async function updateCounsellor(id: string, input: UpdateCounsellorInput) {

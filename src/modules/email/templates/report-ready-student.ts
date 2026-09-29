@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { button, paragraph, renderLayout } from "./layout.js";
+import { TEXT_SIGN_OFF, button, paragraph, renderLayout, signOff } from "./layout.js";
 
 export const reportReadyStudentDataSchema = z.object({
   studentName: z.string().trim().min(1),
@@ -20,10 +20,10 @@ export function renderReportReadyStudentEmail(data: ReportReadyStudentData) {
       "We'd recommend going through it with your parents and keeping it handy as you make decisions about your stream, courses, and next steps ahead."
     ),
     paragraph("All the best for the journey ahead!"),
-    paragraph("All the Best!"),
+    signOff(),
   ].join("");
 
-  const text = `Hi ${studentName},\n\nCongratulations on completing the kREATE Career Counselling Programme! Your Career kREATE Report is ready.\n\nLink: ${reportLink}\n\nAll the Best!\nTeam kREATE | Design Destiny`;
+  const text = `Hi ${studentName},\n\nCongratulations on completing the kREATE Career Counselling Programme! Your Career kREATE Report is ready.\n\nLink: ${reportLink}\n\n${TEXT_SIGN_OFF}`;
 
   return {
     subject: "Your Career kREATE Report is Ready",

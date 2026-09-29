@@ -49,6 +49,15 @@ counsellorChartRouter.get(
   asyncHandler(controller.getCounsellorChart)
 );
 
+// Staff download of the full chart as a PDF file (Project Students → "Download Chart").
+// Rendered on demand by headless Chrome, so it takes a few seconds.
+counsellorChartRouter.get(
+  "/students/:studentId/pdf",
+  ...requireStaff,
+  validate({ params: studentIdParamsSchema }),
+  asyncHandler(controller.downloadCounsellorChartPdf)
+);
+
 // Partial save of counsellor-authored content: synthesis notes, SCRI ratings, academic
 // trend, alignment rating, strengths/hobbies/career shortlist. Recomputes the SCRI band.
 counsellorChartRouter.put(

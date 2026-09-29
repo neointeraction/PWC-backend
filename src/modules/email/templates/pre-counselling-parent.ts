@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { button, paragraph, renderLayout } from "./layout.js";
+import { TEXT_NEED_HELP, TEXT_SIGN_OFF, button, needHelp, paragraph, renderLayout, signOff } from "./layout.js";
 
 export const preCounsellingParentDataSchema = z.object({
   parentName: z.string().trim().min(1),
@@ -23,6 +23,7 @@ export function renderPreCounsellingParentEmail(data: PreCounsellingParentData) 
     paragraph(
       "Your responses are completely confidential. Your child will not see this form. It will only be used to help the counsellor guide your child more meaningfully."
     ),
+    paragraph("<strong>A couple of things to keep in mind:</strong>"),
     `<ul style="margin:0 0 16px;padding-left:20px;">
       <li>Fill this independently, or together with your spouse. When both views are read together, the counsellor can offer guidance that is grounded in reality, not just self-perception.</li>
       <li>Answer based on what you genuinely observe, not what you hope for. Accurate observations including doubts, concerns, or gaps give the counsellor the clearest picture to work from.</li>
@@ -30,10 +31,11 @@ export function renderPreCounsellingParentEmail(data: PreCounsellingParentData) 
     paragraph(
       "Please complete the form using the button above. Kindly finish it in one sitting, the link expires once submitted and cannot be edited afterward."
     ),
-    paragraph("All the Best!"),
+    needHelp(),
+    signOff(),
   ].join("");
 
-  const text = `Hi ${parentName},\n\nThis is not a report card, and it is not about evaluating your child. Please complete your independent Pre-Counselling Form using the link below. Finish it in one sitting, it cannot be edited once submitted.\n\nLink: ${formLink}\n\nAll the Best!\nTeam kREATE | Design Destiny`;
+  const text = `Hi ${parentName},\n\nThis is not a report card, and it is not about evaluating your child. Please complete your independent Pre-Counselling Form using the link below. Finish it in one sitting, it cannot be edited once submitted.\n\nLink: ${formLink}\n\n${TEXT_NEED_HELP}\n\n${TEXT_SIGN_OFF}`;
 
   return {
     subject: "Pre-counselling Form for kREATE Career Counselling Programme",

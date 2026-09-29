@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { button, paragraph, renderLayout } from "./layout.js";
+import { TEXT_SIGN_OFF, button, paragraph, renderLayout, signOff } from "./layout.js";
 
 export const feedbackRequestParentDataSchema = z.object({
   parentName: z.string().trim().min(1),
@@ -20,10 +20,10 @@ export function renderFeedbackRequestParentEmail(data: FeedbackRequestParentData
     paragraph(
       "The report becomes available for download as soon as both feedback forms are submitted, so we'd appreciate you completing yours at the earliest."
     ),
-    paragraph("All the Best!"),
+    signOff(),
   ].join("");
 
-  const text = `Hi ${parentName},\n\n${studentName}'s counselling sessions are now complete. Please share your feedback using the link below so the final report can be released.\n\nLink: ${feedbackFormLink}\n\nAll the Best!\nTeam kREATE | Design Destiny`;
+  const text = `Hi ${parentName},\n\n${studentName}'s counselling sessions are now complete. Please share your feedback using the link below so the final report can be released.\n\nLink: ${feedbackFormLink}\n\n${TEXT_SIGN_OFF}`;
 
   return {
     subject: "Feedback Report for kREATE Career Counselling Programme",

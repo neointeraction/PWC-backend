@@ -1093,6 +1093,7 @@ model StreamWeight {
   coreSubjects     String?
   electiveSubjects String?
   explanation      String?
+  careerFeasibility String?
   weights          Json // Partial<Record<TraitKey, number>>, sums to 100
 
   @@unique([mainStream, subStream])

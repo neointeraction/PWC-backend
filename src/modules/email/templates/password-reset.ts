@@ -20,7 +20,7 @@ export function renderPasswordResetEmail(data: PasswordResetData) {
     paragraph("If you didn't request this, you can safely ignore this email — your password won't change."),
   ].join("");
 
-  const text = `Hi ${name},\n\nWe received a request to reset your kREATE account password. Use the link below to choose a new one:\n${resetLink}\n\nThis link expires in ${expiresInText} and can be used once. If you didn't request this, you can safely ignore this email — your password won't change.\n\nTeam kREATE | Design Destiny`;
+  const text = `Hi ${name},\n\nWe received a request to reset your kREATE account password. Use the link below to choose a new one:\n${resetLink}\n\nThis link expires in ${expiresInText} and can be used once. If you didn't request this, you can safely ignore this email — your password won't change.\n\nTeam Design Destiny`;
 
   return {
     subject: "Reset your kREATE password",

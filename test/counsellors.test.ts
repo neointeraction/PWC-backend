@@ -236,6 +236,81 @@ describe("Counsellors API", () => {
     expect(del.body.error.details.sessionCount).toBe(1);
   });
 
+  it("returns per-project workload counts (totalAllotted, session1/2Balance) on list and get", async () => {
+    const created = await authRequest(app).post("/api/v1/counsellors").send({
+      firstName: "Work",
+      lastName: "Load",
+      email: "workload@test-counsellor.example",
+      mobile: "+919876572070",
+      counsellorCode: "CN-WL",
+      projectIds: [projectId, otherProjectId],
+    });
+    const id = created.body.counsellor.id;
+
+    // 3 slots in projectId (any status counts), 1 in otherProjectId.
+    await prisma.counsellorSlot.createMany({
+      data: [
+        { counsellorId: id, projectId, slotDate: new Date("2026-07-01"), startTime: "09:00", endTime: "09:45" },
+        { counsellorId: id, projectId, slotDate: new Date("2026-07-01"), startTime: "10:00", endTime: "10:45", status: "BOOKED" },
+        { counsellorId: id, projectId, slotDate: new Date("2026-07-01"), startTime: "11:00", endTime: "11:45" },
+        { counsellorId: id, projectId: otherProjectId, slotDate: new Date("2026-07-02"), startTime: "09:00", endTime: "09:45" },
+      ],
+    });
+
+    // Sessions are unique per (student, sessionNumber), so each status case needs its own student.
+    const studentIds: string[] = [];
+    for (let i = 0; i < 4; i++) {
+      const student = await authRequest(app).post("/api/v1/students").send({
+        firstName: "Wl",
+        lastName: `Student${i}`,
+        email: `wl-student${i}@test-counsellor.example`,
+        mobile: `+91987657208${i}`,
+        studentCode: `CNWL${i}`,
+        projectId,
+        className: "Grade 9",
+        divisionName: "A",
+        parentMobile: `+91987657209${i}`,
+        parentEmail: `parent-wl${i}@test-counsellor.example`,
+        fatherName: "F",
+        fatherOccupation: "Engineer",
+        motherName: "M",
+        motherOccupation: "Doctor",
+      });
+      studentIds.push(student.body.student.id);
+    }
+    const base = { counsellorId: id, scheduledDate: new Date("2026-07-01"), endTime: "23:59" };
+    await prisma.session.createMany({
+      data: [
+        { ...base, studentId: studentIds[0]!, sessionNumber: "SESSION_1", startTime: "10:00" }, // SCHEDULED — counts
+        { ...base, studentId: studentIds[1]!, sessionNumber: "SESSION_1", status: "COMPLETED", startTime: "11:00" }, // doesn't
+        { ...base, studentId: studentIds[2]!, sessionNumber: "SESSION_1", status: "CANCELLED", startTime: "12:00" }, // doesn't
+        { ...base, studentId: studentIds[0]!, sessionNumber: "SESSION_2", startTime: "13:00" }, // SCHEDULED — counts
+        { ...base, studentId: studentIds[3]!, sessionNumber: "SESSION_2", startTime: "14:00" }, // SCHEDULED — counts
+      ],
+    });
+
+    const expectCounts = (projects: Array<Record<string, unknown>>) => {
+      expect(projects.find((p) => p.projectId === projectId)).toMatchObject({
+        totalAllotted: 3,
+        session1Balance: 1,
+        session2Balance: 2,
+      });
+      expect(projects.find((p) => p.projectId === otherProjectId)).toMatchObject({
+        totalAllotted: 1,
+        session1Balance: 0,
+        session2Balance: 0,
+      });
+    };
+
+    const list = await authRequest(app).get("/api/v1/counsellors").query({ projectId });
+    expect(list.status).toBe(200);
+    expectCounts(list.body.find((c: { id: string }) => c.id === id).projects);
+
+    const got = await authRequest(app).get(`/api/v1/counsellors/${id}`);
+    expect(got.status).toBe(200);
+    expectCounts(got.body.projects);
+  });
+
   it("sets, updates, and clears the default meetingLink", async () => {
     const created = await authRequest(app).post("/api/v1/counsellors").send({
       firstName: "Link",

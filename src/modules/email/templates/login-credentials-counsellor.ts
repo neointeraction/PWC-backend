@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { button, heading, paragraph, renderLayout } from "./layout.js";
+import { TEXT_NEED_HELP, TEXT_SIGN_OFF, button, heading, needHelp, paragraph, renderLayout, signOff } from "./layout.js";
 
 export const loginCredentialsCounsellorDataSchema = z.object({
   counsellorName: z.string().trim().min(1),
@@ -20,10 +20,11 @@ export function renderLoginCredentialsCounsellorEmail(data: LoginCredentialsCoun
     button("Log In", loginLink),
     paragraph("This is a default password. On first login you'll be asked to change it."),
     paragraph("For your security, please don't share this password with anyone."),
-    paragraph("All the Best!"),
+    needHelp(),
+    signOff(),
   ].join("");
 
-  const text = `Hi ${counsellorName},\n\nYour Login Credentials\nLogin ID: ${loginId}\nPassword: ${defaultPassword}\n\nLog in: ${loginLink}\n\nThis is a default password. On first login you'll be asked to change it.\n\nFor your security, please don't share this password with anyone.\n\nAll the Best!\nTeam kREATE | Design Destiny`;
+  const text = `Hi ${counsellorName},\n\nYour Login Credentials\nLogin ID: ${loginId}\nPassword: ${defaultPassword}\n\nLog in: ${loginLink}\n\nThis is a default password. On first login you'll be asked to change it.\n\nFor your security, please don't share this password with anyone.\n\n${TEXT_NEED_HELP}\n\n${TEXT_SIGN_OFF}`;
 
   return {
     subject: "Login Credentials for kREATE Career Counselling Programme",

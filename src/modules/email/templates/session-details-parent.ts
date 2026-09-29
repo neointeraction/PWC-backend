@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { paragraph, renderLayout } from "./layout.js";
+import { TEXT_SIGN_OFF, paragraph, renderLayout, signOff } from "./layout.js";
 
 export const sessionDetailsParentDataSchema = z.object({
   parentName: z.string().trim().min(1),
@@ -40,10 +40,10 @@ export function renderSessionDetailsParentEmail(data: SessionDetailsParentData) 
       `We encourage you to join these sessions alongside ${studentName}. It gives you the same perspective on the careers being discussed and helps you guide ${studentName} with clarity after the sessions end.`
     ),
     paragraph("Please join a few minutes before the scheduled time."),
-    paragraph("All the Best!"),
+    signOff(),
   ].join("");
 
-  const text = `Hi ${parentName},\n\n${studentName}'s counselling sessions have been scheduled.\n\nSession 1: ${session1Date}, ${session1Time}\nLink: ${session1Link}\n\nSession 2: ${session2Date}, ${session2Time}\nLink: ${session2Link}\n\nAll the Best!\nTeam kREATE | Design Destiny`;
+  const text = `Hi ${parentName},\n\n${studentName}'s counselling sessions have been scheduled.\n\nSession 1: ${session1Date}, ${session1Time}\nLink: ${session1Link}\n\nSession 2: ${session2Date}, ${session2Time}\nLink: ${session2Link}\n\n${TEXT_SIGN_OFF}`;
 
   return {
     subject: "Session Details for kREATE Career Counselling Programme",

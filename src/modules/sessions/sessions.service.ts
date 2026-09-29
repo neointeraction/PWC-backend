@@ -856,6 +856,19 @@ function sendFeedbackRequestIfSession2(target: WorkflowStatus, updated: { studen
 
 export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
   const session = await getSessionById(id);
+
+  // Rejoin: a session auto-completes the moment both parties have joined (see below), but
+  // either of them can still drop off mid-call on a bad connection. Until the scheduled
+  // end time, hand a party who already joined the meeting link again — no state changes,
+  // and no repeat parent notification.
+  if (session.status === "COMPLETED") {
+    const alreadyJoined = role === "STUDENT" ? session.studentJoinedAt : session.counsellorJoinedAt;
+    const endsAt = combineDateTime(session.scheduledDate, session.endTime);
+    if (alreadyJoined && new Date() <= endsAt) {
+      return { session, meetingLink: session.counsellor.meetingLink };
+    }
+  }
+
   if (session.status !== "SCHEDULED") {
     throw new ConflictError("This session isn't currently scheduled");
   }

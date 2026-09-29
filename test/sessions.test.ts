@@ -848,6 +848,35 @@ describe("Sessions API", () => {
       expect((await prisma.student.findUnique({ where: { id: fresh } }))?.workflowStatus).toBe("SESSION_2_COMPLETED");
     });
 
+    it("lets a party who already joined rejoin an auto-completed session until its end time, without re-notifying", async () => {
+      const { session1Id } = await bookFreshPairForNewStudent();
+      // Distinct start time from the other counsellorA fixtures at `now` (see the test
+      // above), and already inside the join window.
+      const start = addMinutes(now, -7);
+      await prisma.session.update({
+        where: { id: session1Id },
+        data: { scheduledDate: now, startTime: hm(start), endTime: hm(addMinutes(now, 60)) },
+      });
+      await authRequest(app).post(`/api/v1/sessions/${session1Id}/join`).send({ role: "STUDENT" });
+      const counsellorJoin = await authRequest(app).post(`/api/v1/sessions/${session1Id}/join`).send({ role: "COUNSELLOR" });
+      expect(counsellorJoin.body.session.status).toBe("COMPLETED");
+      const firstJoinedAt = (await prisma.session.findUnique({ where: { id: session1Id } }))?.studentJoinedAt;
+
+      // Student drops off and rejoins — gets the meeting link again, nothing else changes.
+      sendTemplateEmailMock.mockClear();
+      const rejoin = await authRequest(app).post(`/api/v1/sessions/${session1Id}/join`).send({ role: "STUDENT" });
+      expect(rejoin.status).toBe(200);
+      expect(rejoin.body).toHaveProperty("meetingLink");
+      expect(rejoin.body.session.status).toBe("COMPLETED");
+      expect((await prisma.session.findUnique({ where: { id: session1Id } }))?.studentJoinedAt).toEqual(firstJoinedAt);
+      expect(sendTemplateEmailMock).not.toHaveBeenCalledWith(expect.anything(), "SESSION_JOINED_PARENT", expect.anything());
+
+      // Once the scheduled end time has passed, rejoining is refused like any other join.
+      await prisma.session.update({ where: { id: session1Id }, data: { endTime: hm(addMinutes(now, -1)) } });
+      const lateRejoin = await authRequest(app).post(`/api/v1/sessions/${session1Id}/join`).send({ role: "STUDENT" });
+      expect(lateRejoin.status).toBe(409);
+    });
+
     it("409s detaching once the student has moved past the sessions (feedback stage)", async () => {
       const { studentId: fresh } = await bookFreshPairForNewStudent();
       await prisma.student.update({ where: { id: fresh }, data: { workflowStatus: "COUNSELLOR_FEEDBACK" } });

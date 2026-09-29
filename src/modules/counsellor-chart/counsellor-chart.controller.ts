@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import * as service from "./counsellor-chart.service.js";
 import * as assessmentService from "../assessment/assessment.service.js";
+import { renderCounsellorChartPdf } from "../reports/report-pdf.service.js";
+import { sendPdfDownload, studentPdfFilename } from "../../common/utils/sendPdfDownload.js";
 import type {
   AmendmentBody,
   AmendmentParams,
@@ -63,4 +65,16 @@ export async function deleteManualEntry(req: Request, res: Response): Promise<vo
   const { id } = req.params as unknown as ManualEntryIdParams;
   await service.deleteManualEntry(id);
   res.status(204).send();
+}
+
+// Staff "Download Chart" from Project Students: every step of the chart, read-only, as a
+// PDF file. The headless render reads the chart with the caller's own access token (see
+// renderCounsellorChartPdf) — requireStaff has already verified it, so it's a valid
+// Bearer token here.
+export async function downloadCounsellorChartPdf(req: Request, res: Response): Promise<void> {
+  const { studentId } = req.params as unknown as StudentIdParams;
+  const filename = await studentPdfFilename(studentId, "Counsellor Chart");
+  const accessToken = req.headers.authorization!.slice("Bearer ".length);
+  const pdf = await renderCounsellorChartPdf(studentId, accessToken);
+  sendPdfDownload(res, filename, pdf);
 }

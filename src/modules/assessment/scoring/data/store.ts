@@ -86,6 +86,7 @@ export async function loadScoringReferenceData(): Promise<void> {
       coreSubjects: r.coreSubjects,
       electiveSubjects: r.electiveSubjects,
       explanation: r.explanation,
+      careerFeasibility: r.careerFeasibility,
       weights: r.weights as Partial<Record<TraitKey, number>>,
     })),
     domainWeights: domainRows.map((r) => ({

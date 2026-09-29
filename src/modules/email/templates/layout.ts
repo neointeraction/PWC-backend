@@ -67,3 +67,21 @@ export function button(label: string, href: string): string {
     </tr>
   </table>`;
 }
+
+export const SUPPORT_EMAIL = "contact@designdestiny.org";
+
+// "Need Any Help ?" block from docs/11.Class 910_Communication EMail Templates.pdf.
+export function needHelp(): string {
+  return [
+    heading("Need Any Help ?"),
+    paragraph(`For any support, please drop a mail to <strong>${SUPPORT_EMAIL}</strong>.`),
+  ].join("");
+}
+
+// Standard closing used by every lifecycle template in the PDF.
+export function signOff(): string {
+  return `<p style="margin:0 0 4px;font-weight:bold;">All the Best!</p><p style="margin:0 0 16px;font-size:13px;font-weight:bold;">Team Design Destiny</p>`;
+}
+
+export const TEXT_SIGN_OFF = "All the Best!\nTeam Design Destiny";
+export const TEXT_NEED_HELP = `Need any help? For any support, please drop a mail to ${SUPPORT_EMAIL}.`;

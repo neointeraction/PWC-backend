@@ -1,79 +1,80 @@
 import { z } from "zod";
-import { heading, paragraph, renderLayout } from "./layout.js";
+import { TEXT_NEED_HELP, TEXT_SIGN_OFF, heading, needHelp, paragraph, renderLayout, signOff } from "./layout.js";
 
 export const welcomeStudentDataSchema = z.object({
   studentName: z.string().trim().min(1),
 });
 export type WelcomeStudentData = z.infer<typeof welcomeStudentDataSchema>;
 
-const ASSESSMENT_ROWS = [
-  ["Career Interest", "The types of activities, subjects, careers and work environments you are naturally drawn towards.", "Intelligence, academic performance, character, or future success."],
-  ["Personality Style", "Typical behavioural tendencies, interaction styles and ways of approaching work and learning situations.", "Good vs bad personality, values, morality, or personal worth."],
-  ["Ability Potential", "Areas where you are likely to learn faster, solve problems more effectively, and perform well with training and practice.", "Effort, discipline, motivation, interest, or academic marks."],
-  ["Thinking Capability", "How you prefer to process information, learn, evaluate options and make decisions.", "Intelligence level, right vs wrong thinking, or maturity."],
-];
+// Shared with welcome-parent.ts — the PDF uses identical copy for both.
+export const EXPLORE_TOGETHER_HTML = `<ul style="margin:0 0 16px;padding-left:20px;">
+      <li><strong>Career Interests:</strong> The subjects, activities, and environments you naturally enjoy.</li>
+      <li><strong>Personality Style:</strong> How you prefer to interact, collaborate and tackle projects.</li>
+      <li><strong>Thinking Style:</strong> How you process information, evaluate choices and solve problems.</li>
+      <li><strong>Skill Sets:</strong> Strengths you already have, along with areas you can develop over time.</li>
+    </ul>`;
 
-function assessmentTable(): string {
-  const rows = ASSESSMENT_ROWS.map(
-    ([area, measures, notMeasures]) =>
-      `<tr><td style="padding:8px;border:1px solid #e4e4e7;">${area}</td><td style="padding:8px;border:1px solid #e4e4e7;">${measures}</td><td style="padding:8px;border:1px solid #e4e4e7;">${notMeasures}</td></tr>`
-  ).join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin:0 0 16px;font-size:13px;">
-    <tr style="background-color:#4c1d95;color:#ffffff;">
-      <td style="padding:8px;border:1px solid #4c1d95;">Assessment Area</td>
-      <td style="padding:8px;border:1px solid #4c1d95;">What It Measures</td>
-      <td style="padding:8px;border:1px solid #4c1d95;">What It Does NOT Measure</td>
-    </tr>
-    ${rows}
-  </table>`;
-}
+const subHeading = (text: string) => `<p style="margin:0 0 8px;text-decoration:underline;">${text}</p>`;
 
 export function renderWelcomeStudentEmail(data: WelcomeStudentData) {
   const { studentName } = data;
 
   const body = [
     paragraph(`Hi ${studentName},`),
-    paragraph(
-      "Welcome to the kREATE Career Counselling programme! Your registration is confirmed. Before we begin, here's what you need to know."
-    ),
+    paragraph("We are excited to help you explore your interests and discover the possibilities ahead."),
     heading("What is the Career kREATE Report?"),
     paragraph(
-      "Career kREATE is a report that helps you make intentional decisions about your future - helping you find a career you love, that you're good at, and that the world is willing to pay for. It offers insights into the streams and career paths where you're likely to find greater engagement, satisfaction, and opportunities for success, based on how you tend to respond to different learning, work, and career-related situations."
+      "The Career kREATE report is designed to help you make confident decisions about your future, pointing you toward careers you will enjoy, excel at, and find meaningful opportunities in."
     ),
     paragraph(
-      "The report is NOT judging your character or personality, labelling you as good or bad, predicting success or failure or restricting future possibilities."
+      "It highlights streams and career paths aligned with your natural strengths, learning style and interests. Most importantly, this is <strong>not an exam</strong>:"
     ),
-    heading("How we look at Career"),
-    assessmentTable(),
+    `<ul style="margin:0 0 16px;padding-left:20px;">
+      <li>It does <strong>not</strong> label you as "good" or "bad."</li>
+      <li>It does <strong>not</strong> predict success or failure.</li>
+      <li>It does <strong>not</strong> limit what you can choose to pursue.</li>
+    </ul>`,
     paragraph(
-      "Think of this report as a COMPASS rather than a map. It points you in a direction that is likely to suit you, but the journey and the destination will ultimately be shaped by your choices, effort, learning, and experiences."
+      "Think of this report as a <strong>compass rather than a map</strong>. It points you in a promising direction, but the path you take is entirely yours to decide."
     ),
-    paragraph(
-      "When you understand what motivates you and where your natural strengths lie, it becomes easier to choose the right subjects, educational pathways, and career opportunities. Learning becomes more meaningful when you understand how it connects to your future goals."
-    ),
-    paragraph(
-      "The more your education, interests, abilities, and career choices are aligned, the greater the likelihood that you will enjoy your work, continue learning, and create a meaningful impact throughout your professional life."
-    ),
-    paragraph(
-      "Your career journey is not about becoming what others expect you to be; it is about discovering where your strengths, interests, values, and opportunities come together to create a fulfilling future. We wish you the very best as you take the next steps in your unique career journey."
-    ),
+    heading("What we Explore Together"),
+    EXPLORE_TOGETHER_HTML,
     heading("What Happens Next"),
+    subHeading("Phase 1: Getting Set Up (On Your Portal)"),
     `<ol style="margin:0 0 16px;padding-left:20px;">
-      <li>Log in and change your password to activate your account. Details in the next mail.</li>
-      <li>Complete your Profile Form.</li>
-      <li>Complete your own Pre-Counselling Form, just your honest views, likes and dislikes about careers. There is no right or wrong answer, so the more honest you are, the better the outcome. Your parent will separately receive a secure link by email to complete their own, independent Pre-Counselling Form.</li>
-      <li>Once both forms are submitted, you'll take the Career Assessment.</li>
-      <li>You'll then book Session 1 and Session 2 with a counsellor on the shared scheduling calendar.</li>
-      <li>In Session 1, we'll finalise 6 career options and work out your 10+2 and graduation stream. You'll then take a short break to discuss with your parent (or whomever you'd like) and shortlist 2 careers.</li>
-      <li>In Session 2, with the same counsellor, we'll build your complete career plan around these 2 careers.</li>
+      <li><strong>Log in</strong> and update your password.</li>
+      <li>Complete your <strong>Profile Form</strong> and your <strong>Pre-Counselling Form</strong>.</li>
+      <li><strong>Parent Form</strong>: A separate pre-counselling link will be emailed to your parent. If they haven't received it, you can copy the link directly from your dashboard and share it with them.</li>
+      <li><strong>Career Profile Assessment</strong>: Once both forms are submitted, complete your Career Profile Assessment.</li>
     </ol>`,
-    paragraph(
-      "Approach each questionnaire, assessment, and session discussion in that spirit. There is no right or wrong answer for anything."
-    ),
-    paragraph("All the Best!"),
+    subHeading("Phase 2: Your 1-on-1 Sessions"),
+    `<ol start="5" style="margin:0 0 16px;padding-left:20px;">
+      <li><strong>Book Your Sessions</strong>: Use the calendar on your dashboard to book Session 1 and Session 2.</li>
+      <li><strong>Session 1</strong>: Together with your counsellor, you'll explore top fields, identify your 10+2 stream and narrow down to 6 career options. Afterward, you'll have time to discuss these with your parents and select your top 2 careers.</li>
+      <li><strong>Session 2</strong>: With the same counsellor, you will build a clear, actionable roadmap around your chosen 2 careers.</li>
+    </ol>`,
+    needHelp(),
+    signOff(),
   ].join("");
 
-  const text = `Hi ${studentName},\n\nWelcome to the kREATE Career Counselling programme! Your registration is confirmed. Complete your Profile Form and Pre-Counselling Form, then take the Career Assessment and book your two counselling sessions.\n\nAll the Best!\nTeam kREATE | Design Destiny`;
+  const text = `Hi ${studentName},
+
+We are excited to help you explore your interests and discover the possibilities ahead.
+
+The Career kREATE report points you toward streams and careers aligned with your strengths, learning style and interests. It is not an exam: it doesn't label you, predict success or failure, or limit what you can choose.
+
+What happens next:
+1. Log in and update your password.
+2. Complete your Profile Form and your Pre-Counselling Form.
+3. Your parent will be emailed a separate pre-counselling link (you can also copy it from your dashboard).
+4. Once both forms are submitted, complete your Career Profile Assessment.
+5. Book Session 1 and Session 2 from your dashboard calendar.
+6. Session 1: explore top fields, identify your 10+2 stream and narrow down to 6 careers; then pick your top 2 with your parents.
+7. Session 2: build a clear roadmap around your chosen 2 careers with the same counsellor.
+
+${TEXT_NEED_HELP}
+
+${TEXT_SIGN_OFF}`;
 
   return {
     subject: "Welcome to the kREATE Career Counselling Programme",

@@ -456,12 +456,12 @@ export const SESSION_CANCELLED_STUDENT = reminder({
   schema: sessionCancelledStudentSchema,
   body: ({ studentName, sessionNumber, originalDateTime, portalLink }) =>
     withLink(
-      `Hi ${studentName}, your session ${sessionNumber} scheduled for ${originalDateTime} has been cancelled. Please log in to the portal to book a new slot at your convenience.`,
+      `Hi ${studentName}, your Session ${sessionNumber} scheduled for ${originalDateTime} has been cancelled. Please log in to the portal to book a new slot at your convenience.`,
       "Book a New Slot",
       portalLink
     ),
   text: ({ studentName, sessionNumber, originalDateTime }) =>
-    `Hi ${studentName}, your session ${sessionNumber} scheduled for ${originalDateTime} has been cancelled. Please rebook at your convenience.`,
+    `Hi ${studentName}, your Session ${sessionNumber} scheduled for ${originalDateTime} has been cancelled. Please rebook at your convenience.`,
 });
 
 const sessionCancelledParentSchema = z.object({

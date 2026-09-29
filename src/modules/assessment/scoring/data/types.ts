@@ -61,6 +61,7 @@ export interface StreamWeightEntry {
   coreSubjects: string | null;
   electiveSubjects: string | null;
   explanation: string | null;
+  careerFeasibility: string | null;
   weights: Partial<Record<TraitKey, number>>; // 5 traits, sum to 100
 }
 
