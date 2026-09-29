@@ -247,7 +247,7 @@ describe("Counsellors API", () => {
     });
     const id = created.body.counsellor.id;
 
-    // 3 slots in projectId (any status counts), 1 in otherProjectId.
+    // Slots don't count towards totalAllotted (students do) — these prove that.
     await prisma.counsellorSlot.createMany({
       data: [
         { counsellorId: id, projectId, slotDate: new Date("2026-07-01"), startTime: "09:00", endTime: "09:45" },
@@ -291,12 +291,14 @@ describe("Counsellors API", () => {
 
     const expectCounts = (projects: Array<Record<string, unknown>>) => {
       expect(projects.find((p) => p.projectId === projectId)).toMatchObject({
+        // Students 0 (S1 + S2 — counted once), 1 (completed still counts) and 3; student 2's
+        // only session is cancelled, so it's no longer allotted.
         totalAllotted: 3,
         session1Balance: 1,
         session2Balance: 2,
       });
       expect(projects.find((p) => p.projectId === otherProjectId)).toMatchObject({
-        totalAllotted: 1,
+        totalAllotted: 0, // a slot but no students
         session1Balance: 0,
         session2Balance: 0,
       });
