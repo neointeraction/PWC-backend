@@ -549,7 +549,17 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
 // fields cleared) instead of inserting a new one; a SCHEDULED/COMPLETED row still
 // blocks with a clear 409.
 export async function createSessionManually(input: CreateSessionBody) {
-  await getStudentOrThrow(input.studentId);
+  const student = await getStudentOrThrow(input.studentId);
+  // Same gate as the student's own bookSessions: without it the workflow advance to
+  // SESSION_SCHEDULED below is silently skipped (see advanceWorkflowStatus's prerequisite
+  // check), leaving a booked session the student's dashboard can't treat as booked.
+  if (
+    WORKFLOW_STATUS_ORDER.indexOf(student.workflowStatus) < WORKFLOW_STATUS_ORDER.indexOf("ASSESSMENT_COMPLETED")
+  ) {
+    throw new BadRequestError(
+      "Sessions can only be booked once the student has completed the pre-counselling forms and the assessment"
+    );
+  }
   const counsellor = await prisma.counsellor.findUnique({ where: { id: input.counsellorId } });
   if (!counsellor) throw new BadRequestError("counsellorId does not exist");
 
