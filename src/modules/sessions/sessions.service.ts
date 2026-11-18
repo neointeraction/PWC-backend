@@ -3,7 +3,7 @@ import { env } from "../../config/env.js";
 import { prisma } from "../../config/prisma.js";
 import { BadRequestError, ConflictError, NotFoundError } from "../../common/errors/AppError.js";
 import { handlePrismaError } from "../../common/utils/prismaErrors.js";
-import { advanceWorkflowStatus, WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
+import { advanceWorkflowStatus, assertWorkflowStageAtLeast, WORKFLOW_STATUS_ORDER } from "../../common/workflow/workflowStatus.js";
 import { formatDisplayDate } from "../../common/utils/dateFormat.js";
 import { sendTemplateEmail } from "../email/email.service.js";
 import { buildFormLink } from "../../common/utils/links.js";
@@ -550,16 +550,10 @@ export async function bookSessions(studentId: string, input: BookSessionsBody) {
 // blocks with a clear 409.
 export async function createSessionManually(input: CreateSessionBody) {
   const student = await getStudentOrThrow(input.studentId);
-  // Same gate as the student's own bookSessions: without it the workflow advance to
-  // SESSION_SCHEDULED below is silently skipped (see advanceWorkflowStatus's prerequisite
-  // check), leaving a booked session the student's dashboard can't treat as booked.
-  if (
-    WORKFLOW_STATUS_ORDER.indexOf(student.workflowStatus) < WORKFLOW_STATUS_ORDER.indexOf("ASSESSMENT_COMPLETED")
-  ) {
-    throw new BadRequestError(
-      "Sessions can only be booked once the student has completed the pre-counselling forms and the assessment"
-    );
-  }
+  // No workflow-stage gate: an admin may book a student in at any stage. The student's
+  // workflowStatus is deliberately left where it is (advanceWorkflowStatus below no-ops
+  // until ASSESSMENT_COMPLETED is reached); the assessment submit hook catches it up to
+  // SESSION_SCHEDULED when active sessions already exist.
   const counsellor = await prisma.counsellor.findUnique({ where: { id: input.counsellorId } });
   if (!counsellor) throw new BadRequestError("counsellorId does not exist");
 
@@ -883,6 +877,16 @@ export async function joinSession(id: string, role: "STUDENT" | "COUNSELLOR") {
     throw new ConflictError("This session isn't currently scheduled");
   }
   await assertSession1Completed(session);
+  // Admins may book sessions before the student has finished the forms/assessment, but the
+  // student can't join until the assessment is done.
+  if (role === "STUDENT") {
+    await assertWorkflowStageAtLeast(
+      prisma,
+      session.studentId,
+      "ASSESSMENT_COMPLETED",
+      "Complete the pre-counselling forms and the assessment before joining your session"
+    );
+  }
 
   const startsAt = combineDateTime(session.scheduledDate, session.startTime);
   const endsAt = combineDateTime(session.scheduledDate, session.endTime);

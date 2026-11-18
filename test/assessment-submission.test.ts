@@ -219,9 +219,32 @@ describe("Assessment submission API", () => {
       .send({ answers });
     expect(saveRes.status).toBe(200);
 
+    // An admin booked a session before the assessment was done.
+    const cUser = await prisma.user.create({
+      data: { email: "counsellor@test-assessment-submission.example", passwordHash: "x", role: "COUNSELLOR", firstName: "C", lastName: "O" },
+    });
+    const counsellor = await prisma.counsellor.create({ data: { userId: cUser.id, counsellorCode: "CASUB1", mobile: "+919876560099" } });
+    await prisma.session.create({
+      data: {
+        studentId,
+        counsellorId: counsellor.id,
+        sessionNumber: "SESSION_1",
+        scheduledDate: new Date("2027-03-01"),
+        startTime: "10:00",
+        endTime: "10:45",
+        status: "SCHEDULED",
+      },
+    });
+
     const submitRes = await authRequest(app).post(`/api/v1/assessment/attempts/${attempt.body.id}/submit`);
     expect(submitRes.status).toBe(200);
     expect(submitRes.body.status).toBe("SUBMITTED");
+    // Pre-booked session -> stage catches up to SESSION_SCHEDULED, not just ASSESSMENT_COMPLETED.
+    expect((await prisma.student.findUnique({ where: { id: studentId } }))?.workflowStatus).toBe("SESSION_SCHEDULED");
+    // Remove the fixture immediately so it can't leak into other files sharing this DB.
+    await prisma.session.deleteMany({ where: { studentId } });
+    await prisma.counsellor.delete({ where: { id: counsellor.id } });
+    await prisma.user.delete({ where: { id: cUser.id } });
     expect(submitRes.body.submittedAt).not.toBeNull();
 
     // The scoring engine ran on submit — the computed report is now retrievable.
