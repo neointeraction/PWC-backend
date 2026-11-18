@@ -243,6 +243,12 @@ export async function submitAttempt(attemptId: string) {
       data: { status: "SUBMITTED", submittedAt },
     });
     await advanceWorkflowStatus(tx, attempt.studentId, "ASSESSMENT_COMPLETED");
+    // Sessions may already have been booked by an admin before the assessment was done —
+    // catch the stage up so later session completions can advance it.
+    const bookedSessions = await tx.session.count({
+      where: { studentId: attempt.studentId, status: { not: "CANCELLED" } },
+    });
+    if (bookedSessions > 0) await advanceWorkflowStatus(tx, attempt.studentId, "SESSION_SCHEDULED");
     await persistResult(tx, attemptId, report);
   });
 

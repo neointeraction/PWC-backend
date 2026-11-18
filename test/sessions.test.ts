@@ -1121,6 +1121,29 @@ describe("Sessions API", () => {
 
     const sentTo = () => sendTemplateEmailMock.mock.calls.map(([to, key]) => [to, key]);
 
+    it("lets an admin book a student who hasn't completed the assessment, without moving their stage", async () => {
+      const student = await createStudent(null);
+      await prisma.student.update({ where: { id: student.id }, data: { workflowStatus: "PROFILE_COMPLETED" } });
+      const res = await authRequest(app).post("/api/v1/sessions").send(manualBody(student));
+      expect(res.status).toBe(201);
+      expect((await prisma.student.findUnique({ where: { id: student.id } }))?.workflowStatus).toBe("PROFILE_COMPLETED");
+    });
+
+    it("blocks a student from joining before the assessment is complete, but not once it is", async () => {
+      const student = await createStudent(null);
+      await prisma.student.update({ where: { id: student.id }, data: { workflowStatus: "PROFILE_COMPLETED" } });
+      const created = await authRequest(app).post("/api/v1/sessions").send(manualBody(student));
+      expect(created.status).toBe(201);
+      const blocked = await authRequest(app).post(`/api/v1/sessions/${created.body.id}/join`).send({ role: "STUDENT" });
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.error?.message ?? blocked.body.message).toMatch(/assessment/i);
+
+      await prisma.student.update({ where: { id: student.id }, data: { workflowStatus: "ASSESSMENT_COMPLETED" } });
+      const afterGate = await authRequest(app).post(`/api/v1/sessions/${created.body.id}/join`).send({ role: "STUDENT" });
+      // Gate passed — it now fails only on the time window (session is far in the future).
+      expect(afterGate.status).toBe(400);
+    });
+
     it("sends the student, parent and counsellor confirmation emails", async () => {
       const student = await createStudent("parent-manual-a@test.example");
       const res = await authRequest(app).post("/api/v1/sessions").send(manualBody(student));
